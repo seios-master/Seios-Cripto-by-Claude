@@ -1,0 +1,3224 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>SEIOS CRIPTO — Instrumento BTC</title>
+<style>
+  :root{
+    --bg:#14161b;
+    --bg-alt:#101216;
+    --panel:#1c1f26;
+    --panel-raised:#20232b;
+    --line:#33373f;
+    --line-soft:#282c34;
+    --text:#ece7dd;
+    --text-dim:#9195a0;
+    --text-faint:#5c606a;
+    --copper:#c97c3d;
+    --copper-soft:#c97c3d33;
+    --teal:#4fa394;
+    --teal-soft:#4fa39433;
+    --brick:#b14a3d;
+    --brick-soft:#b14a3d33;
+    --gold:#d6a94b;
+    --gold-soft:#d6a94b33;
+    --slate:#6c7280;
+    --font-display:"Iowan Old Style","Palatino Linotype","Book Antiqua",Georgia,serif;
+    --font-body:-apple-system,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+    --font-mono:ui-monospace,"SF Mono","Cascadia Code","JetBrains Mono",Consolas,monospace;
+  }
+  *{box-sizing:border-box;}
+  html,body{margin:0;padding:0;}
+  body{
+    background:
+      radial-gradient(ellipse at top left, #1a1d24 0%, var(--bg) 45%),
+      var(--bg);
+    color:var(--text);
+    font-family:var(--font-body);
+    line-height:1.45;
+    padding-bottom:60px;
+  }
+  ::selection{background:var(--copper-soft);}
+
+  /* ---------- layout shell ---------- */
+  .wrap{max-width:1180px;margin:0 auto;padding:0 20px;}
+
+  header.masthead{
+    border-bottom:1px solid var(--line);
+    background:linear-gradient(180deg,#181b21,#14161b);
+    padding:22px 0 16px;
+  }
+  .masthead-row{display:flex;align-items:flex-end;justify-content:space-between;flex-wrap:wrap;gap:14px;}
+  .brand-eyebrow{
+    font-family:var(--font-mono);
+    font-size:11px;
+    letter-spacing:.18em;
+    color:var(--copper);
+    text-transform:uppercase;
+    margin:0 0 6px;
+  }
+  .brand-title{
+    font-family:var(--font-display);
+    font-size:32px;
+    font-weight:600;
+    margin:0;
+    letter-spacing:.01em;
+  }
+  .brand-sub{
+    font-family:var(--font-mono);
+    font-size:12.5px;
+    color:var(--text-dim);
+    margin:6px 0 0;
+  }
+
+  .ticker{
+    font-family:var(--font-mono);
+    text-align:right;
+    min-width:220px;
+  }
+  .ticker-price{font-size:26px;color:var(--text);font-weight:600;}
+  .ticker-price .cur{font-size:14px;color:var(--text-dim);margin-right:4px;}
+  .ticker-delta{font-size:13px;margin-top:2px;}
+  .ticker-delta.up{color:var(--teal);}
+  .ticker-delta.down{color:var(--brick);}
+  .ticker-meta{font-size:11px;color:var(--text-faint);margin-top:6px;}
+
+  .controls-row{display:flex;gap:10px;align-items:center;margin-top:14px;flex-wrap:wrap;}
+
+  /* ---------- live refresh log (estilo terminal) ---------- */
+  #refreshLog, #calibrationLog{
+    margin-top:14px;
+    padding:12px 14px;
+    background:var(--bg-alt);
+    border:1px solid var(--line-soft);
+    font-family:var(--font-mono);
+    font-size:11.5px;
+    line-height:1.9;
+    max-height:220px;
+    overflow-y:auto;
+  }
+  .log-line{color:var(--text-dim);white-space:pre-wrap;}
+  .log-dot{color:var(--copper);margin-right:6px;}
+  .log-dots{color:var(--text-faint);}
+  .log-ok{color:var(--teal);}
+  .log-fail{color:var(--brick);}
+  .log-summary{color:var(--text);font-weight:600;margin-top:4px;display:block;}
+
+  button{
+    font-family:var(--font-mono);
+    font-size:11.5px;
+    letter-spacing:.05em;
+    text-transform:uppercase;
+    background:var(--panel-raised);
+    color:var(--text);
+    border:1px solid var(--line);
+    padding:9px 14px;
+    cursor:pointer;
+    border-radius:2px;
+    transition:border-color .15s, color .15s;
+  }
+  button:hover{border-color:var(--copper);color:var(--copper);}
+  button.primary{background:var(--copper);border-color:var(--copper);color:#1a1207;}
+  button.primary:hover{color:#1a1207;filter:brightness(1.08);}
+  button.ghost{background:transparent;}
+  button.danger:hover{border-color:var(--brick);color:var(--brick);}
+  button.small{padding:5px 9px;font-size:10.5px;}
+
+  /* ---------- section frame (the "§ canon" motif) ---------- */
+  section.panel{
+    margin-top:28px;
+    border:1px solid var(--line);
+    background:var(--panel);
+    position:relative;
+    padding:22px 24px 26px 28px;
+  }
+  section.panel::before{
+    content:"";
+    position:absolute;
+    left:0;top:0;bottom:0;
+    width:3px;
+    background:var(--copper);
+    opacity:.55;
+  }
+  .panel-head{
+    display:flex;
+    justify-content:space-between;
+    align-items:baseline;
+    flex-wrap:wrap;
+    gap:10px;
+    margin-bottom:16px;
+    padding-bottom:12px;
+    border-bottom:1px solid var(--line-soft);
+  }
+  .panel-mark{
+    font-family:var(--font-mono);
+    font-size:11px;
+    color:var(--copper);
+    letter-spacing:.14em;
+    text-transform:uppercase;
+  }
+  .panel-title{
+    font-family:var(--font-display);
+    font-size:20px;
+    margin:2px 0 0;
+  }
+  .panel-desc{
+    font-family:var(--font-mono);
+    font-size:11.5px;
+    color:var(--text-faint);
+    max-width:420px;
+    text-align:right;
+  }
+
+  /* ---------- summary dashboard (dials + price sparkline) ---------- */
+  .dash-top{display:flex;gap:24px;align-items:center;flex-wrap:wrap;justify-content:center;margin-bottom:22px;}
+  .dash-price-card{flex:1;min-width:240px;text-align:center;}
+  .dash-price-value{font-family:var(--font-mono);font-size:30px;color:var(--text);letter-spacing:.02em;}
+  .dash-price-delta{font-family:var(--font-mono);font-size:13px;margin-top:2px;}
+  .dash-sparkline{margin:10px auto 4px;max-width:300px;}
+  .dash-sparkline svg{width:100%;height:auto;display:block;}
+  .dash-price-meta{font-family:var(--font-mono);font-size:9.5px;color:var(--text-faint);}
+  .dial-widget{display:flex;flex-direction:column;align-items:center;gap:4px;}
+  .dial-ring{position:relative;}
+  .dial-center{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;font-family:var(--font-mono);color:var(--text);font-weight:600;}
+  .dial-label{font-family:var(--font-mono);font-size:10px;color:var(--text-dim);text-align:center;max-width:104px;}
+  .dial-sublabel{font-family:var(--font-mono);font-size:9px;color:var(--text-faint);}
+  .dials-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(96px,1fr));gap:20px 10px;justify-items:center;}
+
+  /* ---------- motors (accordion groups) ---------- */
+  .motor-group{
+    border:1px solid var(--line-soft);
+    background:var(--bg-alt);
+    margin-bottom:12px;
+  }
+  .motor-group > summary{
+    list-style:none;
+    cursor:pointer;
+    padding:13px 16px;
+    display:flex;
+    justify-content:space-between;
+    align-items:center;
+    flex-wrap:wrap;
+    gap:8px;
+    font-family:var(--font-mono);
+  }
+  .motor-group > summary::-webkit-details-marker{display:none;}
+  .motor-group > summary::before{content:"▸ ";color:var(--copper);}
+  .motor-group[open] > summary::before{content:"▾ ";}
+  .motor-name{font-size:13px;color:var(--text);text-transform:none;letter-spacing:0;font-family:var(--font-body);}
+  .motor-weight{font-size:10px;color:var(--text-faint);margin-left:8px;}
+  .motor-score-badge{font-size:12px;padding:2px 8px;border:1px solid var(--line-soft);border-radius:2px;}
+  .motor-body{padding:4px 16px 16px;border-top:1px solid var(--line-soft);}
+  .indicator-row{
+    display:grid;
+    grid-template-columns:1fr 1fr;
+    gap:10px;
+    padding:10px 0;
+    border-bottom:1px solid var(--line-soft);
+  }
+  .indicator-row:last-child{border-bottom:none;}
+  .ind-top{display:flex;justify-content:space-between;align-items:center;}
+  .ind-name{font-size:12.5px;}
+  .ind-src{font-family:var(--font-mono);font-size:9px;color:var(--text-faint);text-transform:uppercase;}
+  .ind-src.auto{color:var(--teal);}
+  .ind-src.manual{color:var(--gold);}
+  .ind-bar-track{height:5px;background:var(--line-soft);border-radius:3px;position:relative;margin:6px 0;overflow:hidden;}
+  .ind-bar-mid{position:absolute;left:50%;top:0;bottom:0;width:1px;background:var(--text-faint);}
+  .ind-bar-fill{height:100%;}
+  .ind-note{font-size:10px;color:var(--text-faint);}
+  .ind-value{font-family:var(--font-mono);font-size:12px;}
+  .ind-edit-col{display:flex;flex-direction:column;justify-content:center;gap:4px;}
+  .ind-edit-col input[type=range]{width:100%;accent-color:var(--copper);}
+  .ind-lock-btn{font-size:9.5px;padding:3px 7px;align-self:flex-start;}
+
+  /* ---------- events log ---------- */
+  .event-row{
+    display:grid;grid-template-columns:1fr auto auto;gap:10px;align-items:center;
+    padding:8px 0;border-bottom:1px solid var(--line-soft);font-size:12.5px;
+  }
+  .event-row .ev-title{color:var(--text);}
+  .event-row .ev-date{font-family:var(--font-mono);font-size:10px;color:var(--text-faint);}
+  .event-add-row{display:grid;grid-template-columns:2fr 1fr auto;gap:8px;margin-top:10px;}
+  .event-add-row input{background:var(--bg-alt);border:1px solid var(--line-soft);color:var(--text);padding:7px 9px;font-size:12.5px;border-radius:2px;}
+
+  /* ---------- explain trace top factors ---------- */
+  .top-factors{display:flex;gap:8px;flex-wrap:wrap;margin:10px 0 4px;}
+  .factor-chip{font-family:var(--font-mono);font-size:10.5px;padding:4px 9px;border:1px solid var(--line-soft);border-radius:2px;}
+
+  /* ---------- dimension bars ---------- */
+  .dims-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(250px,1fr));gap:14px;}
+  .dim-card{
+    border:1px solid var(--line-soft);
+    background:var(--bg-alt);
+    padding:12px 14px;
+  }
+  .dim-top{display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;}
+  .dim-name{font-size:13px;color:var(--text);}
+  .dim-src{font-family:var(--font-mono);font-size:9.5px;color:var(--text-faint);text-transform:uppercase;letter-spacing:.06em;}
+  .dim-src.auto{color:var(--teal);}
+  .dim-src.manual{color:var(--gold);}
+  .dim-bar-track{height:6px;background:var(--line-soft);border-radius:3px;overflow:hidden;position:relative;margin:8px 0 6px;}
+  .dim-bar-mid{position:absolute;left:50%;top:0;bottom:0;width:1px;background:var(--text-faint);}
+  .dim-bar-fill{height:100%;border-radius:3px;}
+  .dim-bottom{display:flex;justify-content:space-between;align-items:center;}
+  .dim-value{font-family:var(--font-mono);font-size:13px;}
+  .dim-edit input[type=range]{width:100%;margin-top:6px;accent-color:var(--copper);}
+  .dim-note{font-size:10.5px;color:var(--text-faint);margin-top:4px;}
+
+  /* ---------- market state gauge ---------- */
+  .state-block{
+    display:flex;gap:26px;align-items:center;flex-wrap:wrap;
+    margin-top:20px;padding-top:18px;border-top:1px solid var(--line-soft);
+  }
+  .gauge-wrap{flex:1;min-width:260px;}
+  .gauge-track{height:10px;background:var(--line-soft);border-radius:5px;position:relative;overflow:visible;}
+  .gauge-fill{height:100%;border-radius:5px;background:linear-gradient(90deg,var(--brick),var(--gold),var(--teal));position:relative;}
+  .gauge-needle{position:absolute;top:-5px;width:2px;height:20px;background:var(--text);}
+  .gauge-labels{display:flex;justify-content:space-between;font-family:var(--font-mono);font-size:9.5px;color:var(--text-faint);margin-top:6px;text-transform:uppercase;}
+  .state-readout{text-align:right;}
+  .state-label{font-family:var(--font-display);font-size:22px;}
+  .state-score{font-family:var(--font-mono);font-size:12px;color:var(--text-dim);}
+  .state-confidence{font-family:var(--font-mono);font-size:11px;color:var(--text-faint);margin-top:4px;}
+
+  /* ---------- stamp motif ---------- */
+  .stamp{
+    display:inline-block;
+    font-family:var(--font-mono);
+    font-size:10px;
+    letter-spacing:.1em;
+    text-transform:uppercase;
+    border:1px solid currentColor;
+    padding:3px 8px;
+    border-radius:2px;
+    transform:rotate(-2deg);
+    font-weight:600;
+  }
+  .stamp.st-ativa{color:var(--gold);}
+  .stamp.st-confirmada{color:var(--teal);}
+  .stamp.st-enfraquecida{color:#c9903d;}
+  .stamp.st-invalidada{color:var(--brick);}
+  .stamp.st-expirada{color:var(--text-faint);}
+  .stamp.ty-base{color:var(--text-dim);}
+  .stamp.ty-bull{color:var(--teal);}
+  .stamp.ty-bear{color:var(--brick);}
+  .stamp.ty-tail{color:var(--gold);}
+
+  /* ---------- cards (scenarios) ---------- */
+  .card-list{display:flex;flex-direction:column;gap:12px;}
+  .card{
+    border:1px solid var(--line-soft);
+    background:var(--bg-alt);
+    padding:14px 16px;
+  }
+  .card.leader{border-color:var(--copper);}
+  .card-top{display:flex;justify-content:space-between;align-items:flex-start;gap:10px;flex-wrap:wrap;}
+  .card-title{font-family:var(--font-display);font-size:16.5px;margin:0 0 4px;}
+  .card-badges{display:flex;gap:6px;flex-wrap:wrap;align-items:center;margin-bottom:6px;}
+  .card-meta{font-family:var(--font-mono);font-size:10.5px;color:var(--text-faint);}
+  .card-body{font-size:13px;color:var(--text-dim);margin-top:8px;}
+  .card-cols{display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-top:10px;}
+  .card-col h4{font-family:var(--font-mono);font-size:10px;text-transform:uppercase;letter-spacing:.08em;color:var(--text-faint);margin:0 0 6px;}
+  .card-col ul{margin:0;padding-left:16px;font-size:12.5px;color:var(--text-dim);}
+  .card-col ul li{margin-bottom:3px;}
+  .card-foot{display:flex;justify-content:space-between;align-items:center;margin-top:12px;gap:10px;flex-wrap:wrap;}
+  .prob-track{width:120px;height:5px;background:var(--line-soft);border-radius:3px;overflow:hidden;}
+  .prob-fill{height:100%;background:var(--copper);}
+
+  /* ---------- premises ---------- */
+  .premise-row{
+    display:grid;
+    grid-template-columns:auto 1fr auto auto;
+    gap:12px;
+    align-items:center;
+    border:1px solid var(--line-soft);
+    background:var(--bg-alt);
+    padding:11px 14px;
+    margin-bottom:8px;
+  }
+  .premise-id{font-family:var(--font-mono);font-size:10px;color:var(--text-faint);}
+  .premise-desc{font-size:13px;}
+  .premise-link{font-family:var(--font-mono);font-size:10px;color:var(--text-faint);margin-top:3px;}
+  .premise-actions{display:flex;gap:5px;}
+
+  /* ---------- decision panel ---------- */
+  .decision-block{display:flex;gap:24px;flex-wrap:wrap;align-items:flex-start;}
+  .decision-verdict{
+    min-width:230px;
+    border:1px solid var(--copper);
+    background:var(--copper-soft);
+    padding:18px 20px;
+    text-align:center;
+  }
+  .decision-verdict .lbl{font-family:var(--font-mono);font-size:10px;color:var(--text-faint);letter-spacing:.1em;text-transform:uppercase;}
+  .decision-verdict .action{font-family:var(--font-display);font-size:24px;margin:8px 0 4px;color:var(--text);}
+  .decision-reasoning{flex:1;min-width:280px;}
+  .decision-reasoning h4{font-family:var(--font-mono);font-size:10.5px;text-transform:uppercase;letter-spacing:.08em;color:var(--text-faint);margin:0 0 8px;}
+  .decision-reasoning ul{margin:0;padding-left:18px;font-size:13px;color:var(--text-dim);}
+  .decision-reasoning ul li{margin-bottom:6px;}
+
+  /* ---------- history ---------- */
+  table.hist{width:100%;border-collapse:collapse;font-size:12.5px;}
+  table.hist th,table.hist td{border-bottom:1px solid var(--line-soft);padding:8px 10px;text-align:left;}
+  table.hist th{font-family:var(--font-mono);font-size:10px;text-transform:uppercase;color:var(--text-faint);letter-spacing:.06em;}
+  table.hist td{color:var(--text-dim);}
+  table.hist input{background:var(--bg-alt);border:1px solid var(--line-soft);color:var(--text);padding:4px 6px;font-size:11.5px;width:100%;font-family:var(--font-body);}
+
+  /* ---------- forms ---------- */
+  .form-grid{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-top:14px;}
+  .form-grid label{display:block;font-family:var(--font-mono);font-size:10px;color:var(--text-faint);text-transform:uppercase;letter-spacing:.06em;margin-bottom:4px;}
+  .form-grid input,.form-grid select,.form-grid textarea{
+    width:100%;background:var(--bg-alt);border:1px solid var(--line-soft);color:var(--text);
+    padding:8px 10px;font-size:13px;font-family:var(--font-body);border-radius:2px;
+  }
+  .form-grid textarea{min-height:56px;resize:vertical;}
+  .form-full{grid-column:1/-1;}
+  .form-actions{display:flex;gap:8px;justify-content:flex-end;margin-top:14px;}
+  .inline-form{display:none;border-top:1px dashed var(--line-soft);margin-top:16px;padding-top:16px;}
+  .inline-form.open{display:block;}
+
+  .empty-state{font-family:var(--font-mono);font-size:12px;color:var(--text-faint);padding:20px 0;text-align:center;border:1px dashed var(--line-soft);}
+
+  footer{max-width:1180px;margin:40px auto 0;padding:16px 20px;font-family:var(--font-mono);font-size:10.5px;color:var(--text-faint);border-top:1px solid var(--line);}
+
+  @media(max-width:640px){
+    .brand-title{font-size:24px;}
+    .ticker{text-align:left;}
+    .form-grid{grid-template-columns:1fr;}
+    .card-cols{grid-template-columns:1fr;}
+    .premise-row{grid-template-columns:1fr;}
+  }
+</style>
+</head>
+<body>
+
+<header class="masthead">
+  <div class="wrap masthead-row">
+    <div>
+      <p class="brand-eyebrow">SEIOS Cripto · Produto Vertical — Fase 3</p>
+      <h1 class="brand-title">Instrumento BTC</h1>
+      <p class="brand-sub">dado → estado de mercado → cenário → premissa → decisão explicável</p>
+    </div>
+    <div class="ticker" id="tickerBox">
+      <div class="ticker-price"><span class="cur">BTC/USD</span><span id="priceVal">—</span></div>
+      <div class="ticker-delta" id="priceDelta">variação 24h: —</div>
+      <div class="ticker-meta" id="lastUpdate">nunca atualizado</div>
+    </div>
+  </div>
+  <div class="wrap controls-row">
+    <button class="primary" id="btnRefresh">↻ Atualizar dados de mercado</button>
+    <button class="ghost" id="btnExport">⇩ Exportar dados (.json)</button>
+    <button class="ghost" id="btnExportCsv">⇩ Exportar histórico (.csv — abre no Excel)</button>
+    <button class="ghost" id="btnImport">⇧ Importar dados (.json — restaura um backup)</button>
+    <input type="file" id="importFileInput" accept="application/json,.json" style="display:none;">
+    <div id="importPreview" style="flex-basis:100%;"></div>
+    <button class="ghost danger" id="btnReset">Zerar tudo</button>
+  </div>
+  <div class="wrap" id="exportFallback"></div>
+  <div id="backupWarning"></div>
+  <div class="wrap" id="refreshLogWrap" style="display:none;">
+    <div id="refreshLog"></div>
+  </div>
+</header>
+
+<div class="wrap" id="app">
+
+  <!-- § MARKET STATE -->
+  <section class="panel" id="panelState">
+    <div class="panel-head">
+      <div>
+        <div class="panel-mark">§ Market State Engine</div>
+        <h2 class="panel-title">Estado de mercado — BTC</h2>
+      </div>
+      <div class="panel-desc">Síntese ponderada das dimensões abaixo. Não é recomendação — é leitura de contexto.</div>
+    </div>
+    <div id="summaryDash"></div>
+
+    <details id="detailsToggle" style="margin-top:20px;">
+      <summary style="cursor:pointer;font-family:var(--font-mono);font-size:11px;color:var(--copper);text-transform:uppercase;letter-spacing:.08em;padding:10px 0;border-top:1px solid var(--line-soft);">▸ Ajustar manualmente / conectar APIs</summary>
+      <div style="padding-top:12px;">
+        <div id="integrationsPanel" style="margin-bottom:16px;padding:12px 14px;border:1px solid var(--line-soft);background:var(--bg-alt);">
+          <div style="font-family:var(--font-mono);font-size:10.5px;color:var(--teal);text-transform:uppercase;letter-spacing:.06em;margin-bottom:8px;">🔑 Integração FRED (GRATUITA — governo dos EUA) — ativa Macro inteiro sozinho: juros, inflação, M2, dólar, curva de juros</div>
+          <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:10px;">
+            <input type="password" id="fredApiKeyInput" placeholder="cole sua chave gratuita aqui" style="flex:1;min-width:220px;background:var(--panel);border:1px solid var(--line-soft);color:var(--text);padding:8px 10px;font-size:12.5px;border-radius:2px;">
+            <button class="small" id="btnSaveFredKey">Salvar</button>
+            <span id="fredKeyStatus" style="font-family:var(--font-mono);font-size:10.5px;color:var(--text-faint);"></span>
+          </div>
+          <div style="font-size:10.5px;color:var(--text-faint);margin-bottom:14px;">Pegue a sua grátis, em 30 segundos, em <strong>fredaccount.stlouisfed.org</strong> — só um e-mail, ativa na hora, sem cartão de crédito.</div>
+
+          <div style="font-family:var(--font-mono);font-size:10.5px;color:var(--text-faint);text-transform:uppercase;letter-spacing:.06em;margin-bottom:8px;border-top:1px solid var(--line-soft);padding-top:12px;">🔑 Integração CryptoQuant (opcional, plano Professional ~$99–109/mês) — ativa MVRV e Exchange Netflow automáticos</div>
+          <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;">
+            <input type="password" id="cqApiKeyInput" placeholder="cole sua chave de API aqui" style="flex:1;min-width:220px;background:var(--panel);border:1px solid var(--line-soft);color:var(--text);padding:8px 10px;font-size:12.5px;border-radius:2px;">
+            <button class="small" id="btnSaveCqKey">Salvar</button>
+            <span id="cqKeyStatus" style="font-family:var(--font-mono);font-size:10.5px;color:var(--text-faint);"></span>
+          </div>
+          <div style="font-size:10.5px;color:var(--text-faint);margin-top:6px;">Nenhuma chave sai deste navegador (localStorage). Nunca são enviadas pra mim nem pra ninguém além da própria fonte de dado.</div>
+        </div>
+        <div id="motorsContainer"></div>
+      </div>
+    </details>
+  </section>
+
+  <!-- § SCENARIO ENGINE -->
+  <section class="panel" id="panelScenarios">
+    <div class="panel-head">
+      <div>
+        <div class="panel-mark">§ Scenario Engine</div>
+        <h2 class="panel-title">Cenários</h2>
+      </div>
+      <div class="panel-desc">Nenhum cenário é certeza. Clique em "Gerar automático" — sem digitar nada — ou crie o seu manualmente.</div>
+    </div>
+    <div class="card-list" id="scenarioList"></div>
+    <div style="margin-top:14px;display:flex;gap:8px;flex-wrap:wrap;">
+      <button class="primary" id="btnAutoScenario">🤖 Gerar cenário automático (sem digitar nada)</button>
+      <button class="ghost" id="btnNewScenario">+ Novo cenário manual</button>
+    </div>
+    <form class="inline-form" id="formScenario"></form>
+  </section>
+
+  <!-- § PREMISE TRACKER -->
+  <section class="panel" id="panelPremises">
+    <div class="panel-head">
+      <div>
+        <div class="panel-mark">§ Premise Tracker Engine</div>
+        <h2 class="panel-title">Premissas</h2>
+      </div>
+      <div class="panel-desc">A base que sustenta cada cenário. Muda de estado só com evidência registrada.</div>
+    </div>
+    <div id="premiseList"></div>
+    <div style="margin-top:14px;"><button id="btnNewPremise">+ Nova premissa</button></div>
+    <form class="inline-form" id="formPremise"></form>
+  </section>
+
+  <!-- § DECISION ENGINE -->
+  <section class="panel" id="panelDecision">
+    <div class="panel-head">
+      <div>
+        <div class="panel-mark">§ Decision Engine</div>
+        <h2 class="panel-title">Leitura e recomendação</h2>
+      </div>
+      <div class="panel-desc">Determinística e auditável — cada fator abaixo é rastreável até a fonte.</div>
+    </div>
+    <div class="decision-block">
+      <div class="decision-verdict">
+        <div class="lbl">Recomendação</div>
+        <div class="action" id="decisionAction">Aguardar confirmação</div>
+        <button class="small" id="btnLogDecision" style="margin-top:8px;">Forçar novo registro agora</button>
+      </div>
+      <div class="decision-reasoning">
+        <h4>Maior peso nesta leitura</h4>
+        <div class="top-factors" id="topFactors"></div>
+        <h4 style="margin-top:14px;">Rastro de explicação</h4>
+        <ul id="decisionReasoning"></ul>
+      </div>
+    </div>
+  </section>
+
+
+
+  <!-- § BACKTEST ENGINE -->
+  <section class="panel" id="panelBacktest">
+    <div class="panel-head">
+      <div>
+        <div class="panel-mark">§ Backtest Engine (embrião)</div>
+        <h2 class="panel-title">O que os dados dizem historicamente</h2>
+      </div>
+      <div class="panel-desc">12 meses de preço real, público. Testa contra o passado o que os indicadores e o score completo costumam significar.</div>
+    </div>
+    <div style="display:flex;gap:8px;flex-wrap:wrap;">
+      <button id="btnRunBacktest">🧠 Rodar backtest de indicadores (RSI/MM50)</button>
+      <button class="primary" id="btnRunScoreBacktest">📊 Calibrar o Score Geral (testa os cortes 40/15/-15/-55)</button>
+    </div>
+    <div class="wrap" id="calibrationLogWrap" style="display:none;padding:0;">
+      <div id="calibrationLog"></div>
+    </div>
+    <div id="backtestResults" style="margin-top:16px;"></div>
+    <div id="scoreBacktestResults" style="margin-top:16px;"></div>
+  </section>
+
+  <!-- § LEARNING LOG -->
+  <section class="panel" id="panelHistory">
+    <div class="panel-head">
+      <div>
+        <div class="panel-mark">§ Learning Engine (embrião)</div>
+        <h2 class="panel-title">Histórico de decisões</h2>
+      </div>
+      <div class="panel-desc">Registra e resolve o resultado sozinho, a cada atualização — sem você digitar nada.</div>
+    </div>
+    <div id="historyWrap"></div>
+  </section>
+
+  <!-- § MEMÓRIA CONSULTÁVEL -->
+  <section class="panel" id="panelMemory">
+    <div class="panel-head">
+      <div>
+        <div class="panel-mark">§ Memória consultável (embrião)</div>
+        <h2 class="panel-title">O que aconteceu quando o sistema disse isso antes</h2>
+      </div>
+      <div class="panel-desc">Agrupa o seu histórico real de uso — não é simulação, é o que aconteceu de verdade nas suas atualizações.</div>
+    </div>
+    <div id="memoryWrap"></div>
+  </section>
+
+</div>
+
+<footer class="wrap">
+  <div style="font-family:var(--font-mono);font-size:10px;color:var(--copper);margin-bottom:8px;">build 2026-08-06.11-clean — se essa linha não aparecer no seu arquivo, você está num arquivo antigo, baixe o mais recente</div>
+  SEIOS CRIPTO — instrumento local. Todos os dados ficam salvos apenas neste navegador (localStorage), no seu HD. Nada é enviado para nenhum servidor. Preços via CoinGecko · Sentimento via Alternative.me F&amp;G Index · Funding via Binance (best-effort, sem chave). Este instrumento não é recomendação de investimento.
+</footer>
+
+<script>
+(function(){
+"use strict";
+
+/* =====================================================================
+   § STORAGE — tudo fica local, no navegador, no HD do usuário
+   ===================================================================== */
+const STORAGE_KEY = "seios_btc_v2";
+
+// indicador padrão — auto = tenta buscar sozinho; manual = você preenche
+function ind(label, source, note){
+  return { label, source, value:null, note: note||"", locked:false, fetchFailed:false };
+}
+
+// pesos revisados em 05/08/2026 com base em pesquisa de mercado (VanEck,
+// estudo acadêmico de liquidez, análises institucionais de fim de 2025):
+// liquidez macro é o fator com maior poder explicativo documentado sobre o
+// preço do BTC — por isso Macro sobe e Técnico desce frente ao documento
+// original. Onchain/Institucional mantidos: bons para estrutura de ciclo.
+function defaultState(){
+  return {
+    apiKeys: { cryptoquant:"", fred:"" }, // ficam só no seu navegador, nunca são enviadas a mim
+    lastExportAt: null,
+    motors: {
+      macro:         { label:"Macro",                       weight:.32, indicators:{
+        juros:     ind("Juros — Fed Funds Rate (FRED, se conectado)", "auto"),
+        inflacao:  ind("Inflação — CPI YoY, tendência (FRED, se conectado)", "auto"),
+        liquidez:  ind("Liquidez global — M2 YoY (FRED, se conectado)", "auto"),
+        dxy:       ind("DXY — dólar ponderado (FRED, se conectado)", "auto"),
+        curva:     ind("Curva de juros 10y-2y (FRED, se conectado)", "auto")
+      }},
+      institucional: { label:"Fluxo institucional (ETFs)",   weight:.15, indicators:{
+        coinbasePremium: ind("Prêmio Coinbase (Coinbase vs. mercado)", "auto"),
+        etfFlow:   ind("Fluxo líquido ETFs spot (semanal)", "manual"),
+        custodia:  ind("Custódia institucional / compras corporativas", "manual"),
+        soberanos: ind("Fundos soberanos / governos", "manual")
+      }},
+      onchain:       { label:"On-chain",                     weight:.15, indicators:{
+        mvrv:      ind("MVRV (CoinMetrics grátis; CryptoQuant refina, se conectado)", "auto"),
+        nupl:      ind("NUPL (derivado matematicamente do MVRV)", "auto"),
+        sopr:      ind("SOPR", "manual"),
+        exchangeFlow: ind("Exchange netflow — z-score 30d (CryptoQuant, se conectado)", "auto"),
+        activeAddresses: ind("Endereços ativos — tendência 90d (CoinMetrics)", "auto"),
+        whales:    ind("Atividade de baleias", "manual"),
+        hashrate:  ind("Hash rate (tendência 90d)", "auto")
+      }},
+      derivativos:   { label:"Derivativos",                  weight:.15, indicators:{
+        funding:   ind("Funding rate", "auto"),
+        openInterest: ind("Open Interest (variação)", "auto"),
+        putCall:   ind("Put/Call ratio (Deribit)", "auto"),
+        longShort: ind("Long/Short ratio (posicionamento, Binance)", "auto"),
+        takerRatio: ind("Taker buy/sell ratio (agressão do book, Binance)", "auto"),
+        liquidClusters: ind("Proximidade de clusters de liquidação", "manual")
+      }},
+      tecnico:       { label:"Técnico",                      weight:.08, indicators:{
+        tendencia: ind("Tendência 30d", "auto"),
+        momentum:  ind("Momentum 24h", "auto"),
+        rsi:       ind("RSI (14)", "auto"),
+        mediaMovel:ind("Preço vs. Média Móvel 50d", "auto"),
+        bookImbalance: ind("Desequilíbrio do livro de ofertas (Binance)", "auto")
+      }},
+      sentimento:    { label:"Sentimento",                   weight:.05, indicators:{
+        fearGreed: ind("Fear & Greed Index", "auto"),
+        social:    ind("Sentimento social (X/Reddit/Telegram) — qualitativo", "manual")
+      }},
+      geopolitico:   { label:"Geopolítico",                  weight:.05, indicators:{
+        tensao:    ind("Tensão geopolítica global", "manual")
+      }},
+      eventos:       { label:"Eventos extraordinários",      weight:.05, indicators:{} } // usa S.events[]
+    },
+    events: [], // {id, title, date, impact(-100..100)}
+    market: { price:null, change24h:null, volatility:null, prevOpenInterest:null, prevOICheckedAt:null, lastFetch:null, priceHistory:[], previousComposites:null, previousIndicatorValues:null, lastDeltas:null, lastAnomalies:null },
+    scenarios: [],
+    premises: [],
+    history: [],
+    nextId: 1
+  };
+}
+
+function loadState(){
+  try{
+    let raw = localStorage.getItem(STORAGE_KEY);
+    if(!raw){
+      // migração: se existir uma versão anterior (v1), aproveita cenários,
+      // premissas e histórico já criados — só o modelo de dimensões muda.
+      const oldRaw = localStorage.getItem("seios_btc_v1");
+      if(oldRaw){
+        try{
+          const old = JSON.parse(oldRaw);
+          const base = defaultState();
+          base.scenarios = old.scenarios || [];
+          base.premises = old.premises || [];
+          base.history = old.history || [];
+          base.nextId = old.nextId || 1;
+          if(old.market){
+            base.market.price = old.market.price ?? null;
+            base.market.change24h = old.market.change24h ?? null;
+          }
+          localStorage.setItem(STORAGE_KEY, JSON.stringify(base));
+          return base;
+        }catch(e){ /* segue para o default puro */ }
+      }
+      return defaultState();
+    }
+    const parsed = JSON.parse(raw);
+    // merge profundo por motor/indicador para tolerar versões antigas / campos novos
+    const base = defaultState();
+    const merged = Object.assign({}, base, parsed);
+    merged.motors = base.motors;
+    if(parsed.motors){
+      Object.keys(base.motors).forEach(mk=>{
+        if(parsed.motors[mk] && parsed.motors[mk].indicators){
+          Object.keys(base.motors[mk].indicators).forEach(ik=>{
+            if(parsed.motors[mk].indicators[ik]){
+              merged.motors[mk].indicators[ik] = Object.assign(
+                {}, base.motors[mk].indicators[ik], parsed.motors[mk].indicators[ik]
+              );
+            }
+          });
+        }
+      });
+    }
+    merged.events = parsed.events || [];
+    merged.market = Object.assign({}, base.market, parsed.market || {});
+    merged.apiKeys = Object.assign({}, base.apiKeys, parsed.apiKeys || {});
+    return merged;
+  }catch(e){
+    console.warn("Falha ao ler localStorage, usando estado padrão.", e);
+    return defaultState();
+  }
+}
+
+function saveState(){
+  try{
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(S));
+  }catch(e){
+    console.error("Falha ao salvar no localStorage", e);
+    const el = document.getElementById("backupWarning");
+    if(el){
+      el.innerHTML = `<div class="wrap"><div style="margin-top:12px;padding:10px 14px;border:1px solid var(--brick);background:var(--brick-soft);font-family:var(--font-mono);font-size:11.5px;color:var(--brick);">⚠ Não consegui salvar localmente agora — verifique se o navegador permite localStorage aqui. Seus dados dessa sessão podem se perder se você fechar a página.</div></div>`;
+    }
+  }
+}
+
+function newId(prefix){
+  const id = prefix + "-" + String(S.nextId).padStart(4,"0");
+  S.nextId += 1;
+  return id;
+}
+
+let S = loadState();
+
+/* =====================================================================
+   § DATA FETCH — melhor esforço, sem chave, com fallback manual
+   ===================================================================== */
+
+// tenta direto primeiro; se a fonte bloquear CORS (comum em APIs gov/financeiras
+// pensadas pra uso servidor-a-servidor), tenta de novo via um proxy CORS público
+// gratuito. Isso significa que a URL completa (incluindo eventual api_key na
+// query string) passa por esse intermediário — aceitável para dados públicos
+// como preço ou séries econômicas, mas é uma concessão de privacidade real.
+function sleep(ms){ return new Promise(r=>setTimeout(r,ms)); }
+
+async function smartFetchOnce(url){
+  try{
+    const res = await fetch(url);
+    if(res.ok) return res;
+    throw new Error("status " + res.status);
+  }catch(directErr){
+    const proxied = "https://api.allorigins.win/raw?url=" + encodeURIComponent(url);
+    const res2 = await fetch(proxied);
+    if(!res2.ok) throw directErr;
+    return res2;
+  }
+}
+
+// tenta direto, depois via proxy CORS; se as duas falharem (comum sob rajada
+// de chamadas seguidas, não é a fonte "quebrada"), espera meio segundo e
+// tenta a sequência inteira mais uma vez antes de desistir de verdade
+async function smartFetch(url){
+  try{
+    return await smartFetchOnce(url);
+  }catch(firstErr){
+    await sleep(700);
+    return await smartFetchOnce(url);
+  }
+}
+
+async function fetchPrice(){
+  const res = await smartFetch("https://api.coingecko.com/api/v3/simple/price?ids=bitcoin&vs_currencies=usd&include_24hr_change=true");
+  if(!res.ok) throw new Error("coingecko simple/price falhou");
+  const data = await res.json();
+  return { price: data.bitcoin.usd, change24h: data.bitcoin.usd_24h_change };
+}
+
+async function fetchMarketChart(days){
+  const res = await smartFetch(`https://api.coingecko.com/api/v3/coins/bitcoin/market_chart?vs_currency=usd&days=${days}`);
+  if(!res.ok) throw new Error("coingecko market_chart falhou");
+  const data = await res.json();
+  return data.prices; // [[ts, price], ...]
+}
+
+async function fetchFearGreed(){
+  const res = await smartFetch("https://api.alternative.me/fng/?limit=1");
+  if(!res.ok) throw new Error("alternative.me falhou");
+  const data = await res.json();
+  const item = data.data[0];
+  return { value: Number(item.value), label: item.value_classification };
+}
+
+async function fetchFunding(){
+  const res = await smartFetch("https://fapi.binance.com/fapi/v1/premiumIndex?symbol=BTCUSDT");
+  if(!res.ok) throw new Error("binance falhou");
+  const data = await res.json();
+  return Number(data.lastFundingRate);
+}
+
+async function fetchOpenInterest(){
+  const res = await smartFetch("https://fapi.binance.com/fapi/v1/openInterest?symbol=BTCUSDT");
+  if(!res.ok) throw new Error("binance OI falhou");
+  const data = await res.json();
+  return Number(data.openInterest);
+}
+
+// hash rate — dado público direto da rede Bitcoin, via mempool.space (sem chave)
+async function fetchHashrateTrend(){
+  const res = await smartFetch("https://mempool.space/api/v1/mining/hashrate/3m");
+  if(!res.ok) throw new Error("mempool.space hashrate falhou");
+  const data = await res.json();
+  const series = data.hashrates;
+  if(!series || series.length < 2) throw new Error("série de hashrate vazia");
+  const first = series[0].avgHashrate;
+  const last = series[series.length-1].avgHashrate;
+  const pct = ((last - first) / first) * 100;
+  return pct; // variação % do hash rate nos últimos ~90 dias
+}
+
+/* --- CoinMetrics Community API — gratuita, sem chave, sem cadastro.
+   MVRV + Endereços Ativos em uma chamada só. --- */
+async function fetchCoinMetricsOnchain(){
+  const url = "https://community-api.coinmetrics.io/v4/timeseries/asset-metrics?assets=btc&metrics=CapMVRVCur,AdrActCnt&frequency=1d&page_size=95";
+  const res = await smartFetch(url);
+  if(!res.ok) throw new Error("CoinMetrics falhou");
+  const data = await res.json();
+  const rows = (data.data || []).map(r=>({
+    time: r.time, mvrv: Number(r.CapMVRVCur), addr: Number(r.AdrActCnt)
+  })).filter(r=>Number.isFinite(r.mvrv) || Number.isFinite(r.addr))
+    .sort((a,b)=> a.time < b.time ? -1 : 1);
+  if(!rows.length) throw new Error("CoinMetrics sem dado");
+  return rows;
+}
+
+/* --- Deribit — livro de opções público, sem chave. Put/Call por open interest. --- */
+async function fetchDeribitPutCall(){
+  const url = "https://www.deribit.com/api/v2/public/get_book_summary_by_currency?currency=BTC&kind=option";
+  const res = await smartFetch(url);
+  if(!res.ok) throw new Error("Deribit falhou");
+  const data = await res.json();
+  const rows = data.result || [];
+  let putOI = 0, callOI = 0;
+  rows.forEach(r=>{
+    const oi = Number(r.open_interest) || 0;
+    if(String(r.instrument_name).endsWith("-P")) putOI += oi;
+    else if(String(r.instrument_name).endsWith("-C")) callOI += oi;
+  });
+  if(!callOI) throw new Error("Deribit sem open interest de calls");
+  return putOI / callOI;
+}
+
+/* --- Binance futures — posicionamento da manada, sem chave. --- */
+async function fetchBinanceLongShort(){
+  const res = await smartFetch("https://fapi.binance.com/futures/data/globalLongShortAccountRatio?symbol=BTCUSDT&period=1h&limit=1");
+  if(!res.ok) throw new Error("Binance long/short falhou");
+  const data = await res.json();
+  if(!data.length) throw new Error("Binance long/short sem dado");
+  return Number(data[0].longShortRatio);
+}
+async function fetchBinanceTakerRatio(){
+  const res = await smartFetch("https://fapi.binance.com/futures/data/takerlongshortRatio?symbol=BTCUSDT&period=1h&limit=1");
+  if(!res.ok) throw new Error("Binance taker ratio falhou");
+  const data = await res.json();
+  if(!data.length) throw new Error("Binance taker ratio sem dado");
+  return Number(data[0].buySellRatio);
+}
+
+/* --- Coinbase — preço isolado, pra medir prêmio institucional americano. --- */
+async function fetchCoinbasePremium(){
+  if(!S.market.price) throw new Error("preço de referência ainda não carregado");
+  const res = await smartFetch("https://api.exchange.coinbase.com/products/BTC-USD/ticker");
+  if(!res.ok) throw new Error("Coinbase falhou");
+  const data = await res.json();
+  const cbPrice = Number(data.price);
+  if(!cbPrice) throw new Error("Coinbase sem preço");
+  return ((cbPrice - S.market.price) / S.market.price) * 100; // % de prêmio/desconto
+}
+
+/* --- Binance orderbook — desequilíbrio de compra/venda, sem chave. --- */
+async function fetchBinanceBookImbalance(){
+  const res = await smartFetch("https://api.binance.com/api/v3/depth?symbol=BTCUSDT&limit=100");
+  if(!res.ok) throw new Error("Binance depth falhou");
+  const data = await res.json();
+  const sumQty = (arr)=> (arr||[]).reduce((a,r)=>a+Number(r[1]),0);
+  const bidQty = sumQty(data.bids), askQty = sumQty(data.asks);
+  const total = bidQty + askQty;
+  if(!total) throw new Error("Binance depth vazio");
+  return ((bidQty - askQty) / total) * 100;
+}
+
+/* --- CryptoQuant (paga, ~$99-109/mês plano Professional) ---
+   pega o primeiro campo numérico da linha, já que o nome exato do
+   campo pode variar entre métricas — mais resiliente do que apostar
+   num nome de campo específico que eu não posso confirmar sem sua chave. */
+function extractMetricValue(row){
+  if(!row) return null;
+  for(const k of Object.keys(row)){
+    if(/date|time/i.test(k)) continue;
+    if(typeof row[k] === "number") return row[k];
+  }
+  return null;
+}
+
+async function fetchCryptoQuantSeries(path, apiKey, limit){
+  const url = `https://api.cryptoquant.com/v1/${path}?window=day&limit=${limit}&api_key=${encodeURIComponent(apiKey)}`;
+  const res = await smartFetch(url);
+  if(!res.ok) throw new Error("cryptoquant falhou: " + path + " (" + res.status + ")");
+  const data = await res.json();
+  const rows = data.result && data.result.data;
+  if(!rows || !rows.length) throw new Error("cryptoquant sem dado: " + path);
+  return rows.map(extractMetricValue).filter(v => v !== null);
+}
+
+/* --- FRED (Federal Reserve Economic Data, St. Louis Fed) — gratuito, chave
+   instantânea em fredaccount.stlouisfed.org. Retorna observações mais
+   recentes primeiro; ignora pontos ausentes (marcados como "."). --- */
+async function fetchFredSeries(seriesId, apiKey, limit){
+  const url = `https://api.stlouisfed.org/fred/series/observations?series_id=${seriesId}&api_key=${encodeURIComponent(apiKey)}&file_type=json&sort_order=desc&limit=${limit}`;
+  const res = await smartFetch(url);
+  if(!res.ok) throw new Error("FRED falhou: " + seriesId + " (" + res.status + ")");
+  const data = await res.json();
+  const obs = (data.observations || [])
+    .filter(o => o.value !== ".")
+    .map(o => ({ date:o.date, value:Number(o.value) }));
+  if(!obs.length) throw new Error("FRED sem dado: " + seriesId);
+  return obs; // obs[0] = mais recente
+}
+
+function clamp(v,min,max){ return Math.max(min, Math.min(max, v)); }
+
+// RSI de Wilder (14 períodos) a partir de uma série [[ts,price],...]
+function computeRSI(prices, period){
+  period = period || 14;
+  if(!prices || prices.length < period+1) return null;
+  const slice = prices.slice(-(period+1));
+  let gains=0, losses=0;
+  for(let i=1;i<slice.length;i++){
+    const diff = slice[i][1]-slice[i-1][1];
+    if(diff>=0) gains+=diff; else losses-=diff;
+  }
+  const avgGain = gains/period, avgLoss = losses/period;
+  if(avgLoss === 0) return 100;
+  const rs = avgGain/avgLoss;
+  return 100 - (100/(1+rs));
+}
+
+// Média móvel simples dos últimos N pontos
+function computeSMA(prices, period){
+  if(!prices || prices.length < period) return null;
+  const slice = prices.slice(-period);
+  const sum = slice.reduce((a,p)=>a+p[1],0);
+  return sum/period;
+}
+
+function setAuto(motorKey, indKey, value, note){
+  const ind = S.motors[motorKey].indicators[indKey];
+  ind.fetchFailed = false;
+  if(!ind.locked){
+    ind.value = value;
+    ind.note = note;
+  }
+}
+function setFailed(motorKey, indKey){
+  S.motors[motorKey].indicators[indKey].fetchFailed = true;
+}
+
+/* --- log ao vivo estilo terminal — "consultando X... feito" --- */
+function logClear(logId, wrapId){
+  logId = logId || "refreshLog"; wrapId = wrapId || "refreshLogWrap";
+  const log = document.getElementById(logId);
+  const wrap = document.getElementById(wrapId);
+  if(wrap) wrap.style.display = "block";
+  if(log) log.innerHTML = "";
+}
+function logStep(label, logId){
+  logId = logId || "refreshLog";
+  const log = document.getElementById(logId);
+  if(!log) return null;
+  const line = document.createElement("div");
+  line.className = "log-line";
+  line.innerHTML = `<span class="log-dot">›</span>${label}<span class="log-dots">…</span>`;
+  log.appendChild(line);
+  log.scrollTop = log.scrollHeight;
+  return line;
+}
+function logDone(line, ok, extra, logId){
+  logId = logId || "refreshLog";
+  if(!line) return;
+  const dotsEl = line.querySelector(".log-dots");
+  if(dotsEl) dotsEl.remove();
+  const status = document.createElement("span");
+  status.className = ok ? "log-ok" : "log-fail";
+  status.textContent = (ok ? " ✓ feito" : " ✗ falhou") + (extra ? ` — ${extra}` : "");
+  line.appendChild(status);
+  const log = document.getElementById(logId);
+  if(log) log.scrollTop = log.scrollHeight;
+}
+function logFinal(text, logId){
+  logId = logId || "refreshLog";
+  const log = document.getElementById(logId);
+  if(!log) return;
+  const line = document.createElement("div");
+  line.className = "log-summary";
+  line.textContent = text;
+  log.appendChild(line);
+  log.scrollTop = log.scrollHeight;
+}
+
+async function refreshMarketData(){
+  const btn = document.getElementById("btnRefresh");
+  btn.disabled = true;
+  btn.textContent = "atualizando…";
+  logClear();
+  const results = { ok:[], fail:[] };
+  const tec = S.motors.tecnico.indicators;
+  const der = S.motors.derivativos.indicators;
+  const sen = S.motors.sentimento.indicators;
+
+  // snapshot de "antes" — usado no final pra mostrar o que mudou e flagar
+  // saltos bruscos em algum indicador específico (anomalia simples, sem magia)
+  const beforeValues = {};
+  Object.entries(S.motors).forEach(([mk,motor])=>{
+    Object.entries(motor.indicators).forEach(([ik,ind])=>{
+      beforeValues[`${mk}.${ik}`] = { label: ind.label, motor: motor.label, value: ind.value };
+    });
+  });
+
+  // FRED adiantado — roda primeiro, antes das outras ~15 chamadas, pra pegar
+  // o proxy de CORS "fresco". Macro (32% do peso) é o motor mais importante,
+  // por isso tem prioridade quando o proxy gratuito começa a engasgar sob uso.
+  if(S.apiKeys.fred){
+    await sleep(300);
+    { const line = logStep("consultando juros — Fed Funds (FRED)");
+      try{ // Fed Funds Rate diário — sobe = aperto monetário = baixista
+        const obs = await fetchFredSeries("DFF", S.apiKeys.fred, 95);
+        const latest = obs[0].value, past = obs[obs.length-1].value;
+        const delta = latest - past;
+        setAuto("macro","juros", clamp(-delta*40, -100, 100), `Fed Funds ${latest.toFixed(2)}% (${delta>=0?"+":""}${delta.toFixed(2)}pp em ~90d)`);
+        results.ok.push("juros (FRED)");
+        logDone(line, true, `${latest.toFixed(2)}%`);
+      }catch(e){ setFailed("macro","juros"); results.fail.push("juros (FRED)"); logDone(line, false, e.message); }
+    }
+    await sleep(250);
+
+    { const line = logStep("consultando inflação — CPI (FRED)");
+      try{ // CPI — compara inflação YoY de agora com a de ~3 meses atrás; acelerando = baixista
+        // pede 20 (margem de segurança) em vez de 16 — se algum mês vier "." (ausente)
+        // e for filtrado, ainda sobra o suficiente pra acessar obs[15] sem quebrar
+        const obs = await fetchFredSeries("CPIAUCSL", S.apiKeys.fred, 20);
+        if(obs.length < 16) throw new Error(`CPI: só ${obs.length} meses válidos retornados (precisa de 16)`);
+        const yoyNow = (obs[0].value / obs[12].value - 1) * 100;
+        const yoyPast = (obs[3].value / obs[15].value - 1) * 100;
+        const delta = yoyNow - yoyPast;
+        setAuto("macro","inflacao", clamp(-delta*25, -100, 100), `CPI YoY ${yoyNow.toFixed(1)}% (${delta>=0?"acelerando":"desacelerando"})`);
+        results.ok.push("inflação (FRED)");
+        logDone(line, true, `YoY ${yoyNow.toFixed(1)}%`);
+      }catch(e){ setFailed("macro","inflacao"); results.fail.push("inflação (FRED)"); logDone(line, false, e.message); }
+    }
+    await sleep(250);
+
+    { const line = logStep("consultando liquidez — M2 (FRED)");
+      try{ // M2 — crescimento YoY da oferta monetária; mais liquidez = bullish (correlação documentada)
+        const obs = await fetchFredSeries("M2SL", S.apiKeys.fred, 16);
+        if(obs.length < 13) throw new Error(`M2: só ${obs.length} meses válidos retornados (precisa de 13)`);
+        const yoy = (obs[0].value / obs[12].value - 1) * 100;
+        setAuto("macro","liquidez", clamp(yoy*15, -100, 100), `M2 YoY ${yoy>=0?"+":""}${yoy.toFixed(1)}%`);
+        results.ok.push("liquidez/M2 (FRED)");
+        logDone(line, true, `YoY ${yoy>=0?"+":""}${yoy.toFixed(1)}%`);
+      }catch(e){ setFailed("macro","liquidez"); results.fail.push("liquidez/M2 (FRED)"); logDone(line, false, e.message); }
+    }
+    await sleep(250);
+
+    { const line = logStep("consultando dólar — DXY (FRED)");
+      try{ // dólar ponderado — dólar mais forte tende a pressionar BTC pra baixo
+        const obs = await fetchFredSeries("DTWEXBGS", S.apiKeys.fred, 95);
+        const latest = obs[0].value, past = obs[obs.length-1].value;
+        const pct = ((latest-past)/past)*100;
+        setAuto("macro","dxy", clamp(-pct*8, -100, 100), `dólar ${pct>=0?"+":""}${pct.toFixed(1)}% em ~90d`);
+        results.ok.push("dxy (FRED)");
+        logDone(line, true, `${pct>=0?"+":""}${pct.toFixed(1)}%`);
+      }catch(e){ setFailed("macro","dxy"); results.fail.push("dxy (FRED)"); logDone(line, false, e.message); }
+    }
+    await sleep(250);
+
+    { const line = logStep("consultando curva de juros — 10y-2y (FRED)");
+      try{ // spread 10y-2y — invertido (negativo) sinaliza estresse macro
+        const obs = await fetchFredSeries("T10Y2Y", S.apiKeys.fred, 5);
+        const spread = obs[0].value;
+        setAuto("macro","curva", clamp(spread*40, -100, 100), `spread 10y-2y ${spread>=0?"+":""}${spread.toFixed(2)}pp`);
+        results.ok.push("curva de juros (FRED)");
+        logDone(line, true, `${spread>=0?"+":""}${spread.toFixed(2)}pp`);
+      }catch(e){ setFailed("macro","curva"); results.fail.push("curva de juros (FRED)"); logDone(line, false, e.message); }
+    }
+  }
+
+  await sleep(200);
+  { const line = logStep("consultando preço e variação 24h (CoinGecko)");
+    try{
+      const p = await fetchPrice();
+      S.market.price = p.price;
+      S.market.change24h = p.change24h;
+      S.market.priceHistory = S.market.priceHistory || [];
+      S.market.priceHistory.push({ t: Date.now(), price: p.price });
+      if(S.market.priceHistory.length > 200) S.market.priceHistory = S.market.priceHistory.slice(-200);
+      setAuto("tecnico","momentum", clamp(p.change24h * 12, -100, 100), `variação 24h: ${p.change24h.toFixed(2)}%`);
+      results.ok.push("preço/momentum");
+      logDone(line, true, `$${p.price.toLocaleString("en-US",{maximumFractionDigits:0})}`);
+    }catch(e){ setFailed("tecnico","momentum"); results.fail.push("preço/momentum"); logDone(line, false, e.message); }
+  }
+
+  await sleep(200);
+  // histórico 90d → Tendência, Volatilidade, RSI, Média Móvel 50d
+  { const line = logStep("consultando histórico de preço — tendência, RSI, média móvel (CoinGecko)");
+    try{
+      const prices = await fetchMarketChart(90);
+      if(prices && prices.length > 50){
+        const last30 = prices.slice(-30);
+        const first30 = last30[0][1];
+        const lastPrice = last30[last30.length-1][1];
+        const pct30 = ((lastPrice - first30) / first30) * 100;
+        setAuto("tecnico","tendencia", clamp(pct30 * 4, -100, 100), `variação 30d: ${pct30.toFixed(1)}%`);
+
+        const rets = [];
+        for(let i=1;i<last30.length;i++){
+          rets.push((last30[i][1]-last30[i-1][1]) / last30[i-1][1]);
+        }
+        const mean = rets.reduce((a,b)=>a+b,0) / rets.length;
+        const variance = rets.reduce((a,b)=>a + Math.pow(b-mean,2), 0) / rets.length;
+        S.market.volatility = Math.sqrt(variance);
+
+        const rsi = computeRSI(prices, 14);
+        if(rsi !== null){
+          setAuto("tecnico","rsi", clamp((rsi-50)*2, -100, 100), `RSI(14): ${rsi.toFixed(0)}`);
+        }
+
+        const sma50 = computeSMA(prices, 50);
+        if(sma50 !== null){
+          const pctFromSma = ((lastPrice - sma50) / sma50) * 100;
+          setAuto("tecnico","mediaMovel", clamp(pctFromSma * 8, -100, 100), `preço ${pctFromSma>=0?"+":""}${pctFromSma.toFixed(1)}% vs. MM50`);
+        }
+        results.ok.push("tendência/volatilidade/rsi/mm50");
+        logDone(line, true, `RSI ${rsi!==null?rsi.toFixed(0):"—"}`);
+      } else {
+        logDone(line, false, "histórico insuficiente retornado");
+      }
+    }catch(e){
+      ["tendencia","rsi","mediaMovel"].forEach(k=>setFailed("tecnico",k));
+      results.fail.push("tendência/volatilidade/rsi/mm50");
+      logDone(line, false, e.message);
+    }
+  }
+
+  await sleep(200);
+  // sentimento — Fear & Greed
+  { const line = logStep("consultando sentimento — Fear & Greed (Alternative.me)");
+    try{
+      const fg = await fetchFearGreed();
+      setAuto("sentimento","fearGreed", clamp((fg.value - 50) * 2, -100, 100), `F&G ${fg.value} · ${fg.label}`);
+      results.ok.push("sentimento");
+      logDone(line, true, `${fg.value} (${fg.label})`);
+    }catch(e){ setFailed("sentimento","fearGreed"); results.fail.push("sentimento"); logDone(line, false, e.message); }
+  }
+
+  await sleep(200);
+  // funding (derivativos) — sinal contrário: funding muito positivo = longs
+  // muito alavancados = viés levemente baixista de curto prazo, e vice-versa
+  { const line = logStep("consultando funding rate (Binance)");
+    try{
+      const rate = await fetchFunding();
+      setAuto("derivativos","funding", clamp(-rate * 100000, -100, 100), `funding rate: ${(rate*100).toFixed(4)}%`);
+      results.ok.push("funding");
+      logDone(line, true, `${(rate*100).toFixed(4)}%`);
+    }catch(e){ setFailed("derivativos","funding"); results.fail.push("funding"); logDone(line, false, e.message); }
+  }
+
+  await sleep(200);
+  // open interest — comparado ao valor anterior salvo localmente (proxy de tendência)
+  { const line = logStep("consultando open interest (Binance)");
+    try{
+      const oi = await fetchOpenInterest();
+      const prev = S.market.prevOpenInterest;
+      if(prev){
+        const pct = ((oi - prev) / prev) * 100;
+        setAuto("derivativos","openInterest", clamp(pct * 10, -100, 100), `OI ${pct>=0?"+":""}${pct.toFixed(2)}% desde a última leitura`);
+        logDone(line, true, `${pct>=0?"+":""}${pct.toFixed(2)}%`);
+      } else {
+        setAuto("derivativos","openInterest", null, "primeira leitura registrada — compare na próxima atualização");
+        logDone(line, true, "primeira leitura");
+      }
+      S.market.prevOpenInterest = oi;
+      S.market.prevOICheckedAt = new Date().toISOString();
+      results.ok.push("open interest");
+    }catch(e){ setFailed("derivativos","openInterest"); results.fail.push("open interest"); logDone(line, false, e.message); }
+  }
+
+  await sleep(200);
+  // hash rate — segurança/saúde da rede, dado público direto da blockchain
+  { const line = logStep("consultando hash rate (mempool.space)");
+    try{
+      const pct = await fetchHashrateTrend();
+      setAuto("onchain","hashrate", clamp(pct * 6, -100, 100), `hash rate ${pct>=0?"+":""}${pct.toFixed(1)}% em 90d`);
+      results.ok.push("hash rate");
+      logDone(line, true, `${pct>=0?"+":""}${pct.toFixed(1)}% em 90d`);
+    }catch(e){ setFailed("onchain","hashrate"); results.fail.push("hash rate"); logDone(line, false, e.message); }
+  }
+
+  await sleep(200);
+  // CoinMetrics — MVRV grátis (finalmente!) + NUPL derivado + endereços ativos
+  { const line = logStep("consultando on-chain — MVRV, NUPL, endereços ativos (CoinMetrics)");
+    try{
+      const rows = await fetchCoinMetricsOnchain();
+      const latest = rows[rows.length-1];
+      let extra = "";
+      if(Number.isFinite(latest.mvrv)){
+        setAuto("onchain","mvrv", clamp((2-latest.mvrv)*40, -100, 100), `MVRV ${latest.mvrv.toFixed(2)} (CoinMetrics)`);
+        results.ok.push("mvrv (coinmetrics)");
+        // NUPL = 1 − 1/MVRV — identidade matemática padrão, não é fonte nova
+        const nupl = 1 - (1/latest.mvrv);
+        setAuto("onchain","nupl", clamp(-nupl*120, -100, 100), `NUPL ${nupl.toFixed(2)} (derivado do MVRV)`);
+        results.ok.push("nupl (derivado)");
+        extra = `MVRV ${latest.mvrv.toFixed(2)}`;
+      }
+      const past = rows.find(r=>Number.isFinite(r.addr)) && rows[Math.max(0, rows.length-91)];
+      if(Number.isFinite(latest.addr) && past && Number.isFinite(past.addr) && past.addr){
+        const pct = ((latest.addr - past.addr) / past.addr) * 100;
+        setAuto("onchain","activeAddresses", clamp(pct*5, -100, 100), `endereços ativos ${pct>=0?"+":""}${pct.toFixed(1)}% em 90d`);
+        results.ok.push("endereços ativos");
+      }
+      logDone(line, true, extra);
+    }catch(e){
+      setFailed("onchain","mvrv"); setFailed("onchain","nupl"); setFailed("onchain","activeAddresses");
+      results.fail.push("coinmetrics on-chain");
+      logDone(line, false, e.message);
+    }
+  }
+
+  await sleep(200);
+  // Deribit — put/call real, via open interest de opções
+  { const line = logStep("consultando put/call ratio (Deribit)");
+    try{
+      const ratio = await fetchDeribitPutCall();
+      setAuto("derivativos","putCall", clamp(-(ratio-1)*60, -100, 100), `put/call OI ${ratio.toFixed(2)}`);
+      results.ok.push("put/call (deribit)");
+      logDone(line, true, ratio.toFixed(2));
+    }catch(e){ setFailed("derivativos","putCall"); results.fail.push("put/call (deribit)"); logDone(line, false, e.message); }
+  }
+
+  await sleep(200);
+  // Binance — posicionamento (long/short) e agressão (taker buy/sell)
+  { const line = logStep("consultando long/short ratio (Binance)");
+    try{
+      const ratio = await fetchBinanceLongShort();
+      setAuto("derivativos","longShort", clamp(-(ratio-1)*40, -100, 100), `long/short ${ratio.toFixed(2)} (contrário: manada muito comprada = risco)`);
+      results.ok.push("long/short");
+      logDone(line, true, ratio.toFixed(2));
+    }catch(e){ setFailed("derivativos","longShort"); results.fail.push("long/short"); logDone(line, false, e.message); }
+  }
+
+  await sleep(200);
+  { const line = logStep("consultando taker buy/sell ratio (Binance)");
+    try{
+      const ratio = await fetchBinanceTakerRatio();
+      setAuto("derivativos","takerRatio", clamp((ratio-1)*80, -100, 100), `taker buy/sell ${ratio.toFixed(2)}`);
+      results.ok.push("taker ratio");
+      logDone(line, true, ratio.toFixed(2));
+    }catch(e){ setFailed("derivativos","takerRatio"); results.fail.push("taker ratio"); logDone(line, false, e.message); }
+  }
+
+  await sleep(200);
+  // Coinbase — prêmio institucional americano (primeiro auto do motor Institucional)
+  { const line = logStep("consultando prêmio Coinbase");
+    try{
+      const premium = await fetchCoinbasePremium();
+      setAuto("institucional","coinbasePremium", clamp(premium*50, -100, 100), `prêmio Coinbase ${premium>=0?"+":""}${premium.toFixed(3)}%`);
+      results.ok.push("prêmio coinbase");
+      logDone(line, true, `${premium>=0?"+":""}${premium.toFixed(3)}%`);
+    }catch(e){ setFailed("institucional","coinbasePremium"); results.fail.push("prêmio coinbase"); logDone(line, false, e.message); }
+  }
+
+  await sleep(200);
+  // Binance orderbook — desequilíbrio de compra/venda
+  { const line = logStep("consultando desequilíbrio do book (Binance)");
+    try{
+      const imb = await fetchBinanceBookImbalance();
+      setAuto("tecnico","bookImbalance", clamp(imb, -100, 100), `desequilíbrio do book ${imb>=0?"+":""}${imb.toFixed(1)}%`);
+      results.ok.push("book imbalance");
+      logDone(line, true, `${imb>=0?"+":""}${imb.toFixed(1)}%`);
+    }catch(e){ setFailed("tecnico","bookImbalance"); results.fail.push("book imbalance"); logDone(line, false, e.message); }
+  }
+
+  await sleep(200);
+  // CryptoQuant — só tenta se você tiver colado uma chave (plano Professional, ~$99-109/mês)
+  if(S.apiKeys.cryptoquant){
+    { const line = logStep("consultando MVRV (CryptoQuant)");
+      try{
+        const series = await fetchCryptoQuantSeries("btc/market-indicator/mvrv-ratio", S.apiKeys.cryptoquant, 1);
+        const mvrv = series[0];
+        // limiares documentados pela própria CryptoQuant: <1 = subvalorizado, >3.7 = sobrevalorizado
+        setAuto("onchain","mvrv", clamp((2 - mvrv) * 40, -100, 100), `MVRV ${mvrv.toFixed(2)}`);
+        results.ok.push("mvrv (cryptoquant)");
+        logDone(line, true, mvrv.toFixed(2));
+      }catch(e){ setFailed("onchain","mvrv"); results.fail.push("mvrv (cryptoquant)"); logDone(line, false, e.message); }
+    }
+
+    { const line = logStep("consultando exchange netflow (CryptoQuant)");
+      try{
+        const series = await fetchCryptoQuantSeries("btc/exchange-flows/netflow", S.apiKeys.cryptoquant, 31);
+        if(series.length >= 5){
+          const latest = series[series.length-1];
+          const rest = series.slice(0,-1);
+          const mean = rest.reduce((a,b)=>a+b,0)/rest.length;
+          const variance = rest.reduce((a,b)=>a+Math.pow(b-mean,2),0)/rest.length;
+          const std = Math.sqrt(variance) || 1;
+          const z = (latest-mean)/std;
+          // netflow positivo (entrando em exchange) tende a ser baixista; por isso inverte o sinal
+          setAuto("onchain","exchangeFlow", clamp(-z*30, -100, 100), `netflow z-score ${z.toFixed(2)} (negativo = saída = bullish)`);
+          results.ok.push("exchange netflow (cryptoquant)");
+          logDone(line, true, `z-score ${z.toFixed(2)}`);
+        } else {
+          logDone(line, false, "amostra insuficiente (<5 dias)");
+        }
+      }catch(e){ setFailed("onchain","exchangeFlow"); results.fail.push("exchange netflow (cryptoquant)"); logDone(line, false, e.message); }
+    }
+  }
+
+
+  S.market.lastFetch = new Date().toISOString();
+
+  // "o que mudou desde a última leitura" — compara score por motor com o
+  // snapshot salvo na atualização anterior (não com o "antes" desta rodada,
+  // que já vira o novo "antes" quando a atualização começou)
+  {
+    const ms = computeMarketState();
+    const deltas = [];
+    if(S.market.previousComposites){
+      Object.entries(S.motors).forEach(([mk,motor])=>{
+        const now = ms.composites[mk], before = S.market.previousComposites[mk];
+        if(now !== null && before !== null && now !== undefined && before !== undefined){
+          const d = now - before;
+          if(Math.abs(d) >= 3) deltas.push({ label: motor.label, before, now, delta: d });
+        }
+      });
+      deltas.sort((a,b)=>Math.abs(b.delta)-Math.abs(a.delta));
+    }
+    S.market.lastDeltas = deltas.slice(0,6);
+    S.market.previousComposites = ms.composites;
+
+    // anomalia simples: indicador individual que saltou muito desde o "antes"
+    // desta própria rodada (mesmo conceito, granularidade mais fina)
+    const anomalies = [];
+    Object.entries(S.motors).forEach(([mk,motor])=>{
+      Object.entries(motor.indicators).forEach(([ik,ind])=>{
+        const before = beforeValues[`${mk}.${ik}`];
+        if(before && before.value !== null && ind.value !== null){
+          const d = ind.value - before.value;
+          if(Math.abs(d) >= 45){
+            anomalies.push({ label: ind.label, motor: motor.label, before: before.value, now: ind.value, delta: d });
+          }
+        }
+      });
+    });
+    S.market.lastAnomalies = anomalies;
+  }
+
+  // higiene de armazenamento — sem isso o localStorage cresce pra sempre;
+  // mantém as últimas 500 leituras "quentes", export continua tendo o resto
+  // enquanto você não limpar o histórico exportado por fora
+  if(S.history.length > 500) S.history = S.history.slice(-500);
+  S.scenarios.forEach(sc=>{ if(sc.revisions && sc.revisions.length > 20) sc.revisions = sc.revisions.slice(-20); });
+
+  autoLogHistory();
+  autoResolveOutcomes();
+  saveState();
+  renderAll();
+
+  btn.disabled = false;
+  btn.textContent = "↻ Atualizar dados de mercado";
+  logFinal(`concluído — ${results.ok.length} ok, ${results.fail.length} falharam`);
+
+  if(results.ok.length === 0 && results.fail.length > 0){
+    showNetworkWarning();
+  } else {
+    hideNetworkWarning();
+  }
+  if(results.fail.length){
+    console.warn("Falharam (provavelmente rede/CORS, preencha manualmente se persistir):", results.fail);
+  }
+}
+
+/* =====================================================================
+   § LEARNING ENGINE (embrião) — zero digitação:
+   registra sozinho a cada atualização, e resolve o resultado sozinho
+   comparando o preço de então com o preço de agora.
+   ===================================================================== */
+const LOG_COOLDOWN_MS = 6 * 3600 * 1000;      // não registra mais que 1x a cada 6h
+const OUTCOME_HORIZON_MS = 7 * 24 * 3600 * 1000; // resolve resultado após 7 dias
+
+function autoLogHistory(){
+  if(!S.market.price) return; // sem preço, não há o que registrar
+  const last = S.history[S.history.length - 1];
+  if(last && (Date.now() - new Date(last.date).getTime()) < LOG_COOLDOWN_MS) return;
+
+  const ms = computeMarketState();
+  const d = computeDecision();
+  S.history.push({
+    id: newId("LOG"),
+    date: new Date().toISOString(),
+    price: S.market.price,
+    marketScore: ms.score,
+    action: d.action,
+    leaderTitle: d.leader ? d.leader.title : null,
+    resultado: "",
+    auto: true
+  });
+}
+
+function autoResolveOutcomes(){
+  if(!S.market.price) return;
+  S.history.forEach(h=>{
+    if(h.resultado) return; // já resolvido
+    const ageMs = Date.now() - new Date(h.date).getTime();
+    if(ageMs < OUTCOME_HORIZON_MS) return; // ainda não completou o horizonte
+    if(!h.price) return;
+    const pct = ((S.market.price - h.price) / h.price) * 100;
+    const days = Math.round(ageMs / (24*3600*1000));
+    h.resultado = `${pct>=0?"+":""}${pct.toFixed(1)}% em ${days}d (auto)`;
+  });
+}
+
+function showNetworkWarning(){
+  let el = document.getElementById("netWarning");
+  if(!el){
+    el = document.createElement("div");
+    el.id = "netWarning";
+    el.style.cssText = "font-family:var(--font-mono);font-size:11.5px;color:var(--gold);background:var(--gold-soft);border:1px solid var(--gold);padding:10px 14px;margin-top:12px;";
+    el.innerHTML = "⚠ Nenhuma fonte automática respondeu — provavelmente este visualizador bloqueia acesso à rede externa. Abra o arquivo salvo diretamente num navegador (Safari/Chrome), ou use o cadeado ✎ em cada dimensão abaixo para preencher manualmente.";
+    document.querySelector(".controls-row").after(el);
+  }
+}
+function hideNetworkWarning(){
+  const el = document.getElementById("netWarning");
+  if(el) el.remove();
+}
+
+/* =====================================================================
+   § MARKET STATE ENGINE — síntese ponderada e explicável
+   ===================================================================== */
+
+// classificação de horizonte natural de cada motor — não é opinião, é o que
+// cada dado realmente mede: funding/sentimento mudam em horas, macro/on-chain
+// levam meses pra virar. Calibrado pro ritmo do Bitcoin, não do mercado
+// tradicional (onde "curto prazo" costuma significar semanas, não aqui).
+const HORIZON_MAP = {
+  derivativos: "curto", sentimento: "curto",
+  tecnico: "medio", institucional: "medio", eventos: "medio",
+  macro: "longo", onchain: "longo", geopolitico: "longo"
+};
+const HORIZON_LABELS = {
+  curto: { title: "Curto prazo", window: "24–72 horas" },
+  medio: { title: "Médio prazo", window: "1–4 semanas" },
+  longo: { title: "Longo prazo", window: "2–6 meses (ciclo)" }
+};
+
+function scoreLabel(score){
+  if(score >= 40) return "Bull forte";
+  if(score >= 15) return "Bull";
+  if(score <= -40) return "Bear forte";
+  if(score <= -15) return "Bear";
+  return "Neutro";
+}
+
+// mesma matemática do score geral, mas só com os motores daquele horizonte
+function computeHorizonScores(composites){
+  const groups = { curto: {sum:0, w:0}, medio: {sum:0, w:0}, longo: {sum:0, w:0} };
+  Object.entries(S.motors).forEach(([key, motor])=>{
+    const c = composites[key];
+    if(c === null || c === undefined) return;
+    const h = HORIZON_MAP[key];
+    groups[h].sum += c * motor.weight;
+    groups[h].w += motor.weight;
+  });
+  const out = {};
+  Object.entries(groups).forEach(([h,g])=>{
+    const score = g.w > 0 ? g.sum / g.w : null;
+    out[h] = { score, completeness: g.w, label: score === null ? "Sem dados" : scoreLabel(score) };
+  });
+  return out;
+}
+
+// composto do motor = média dos indicadores preenchidos (evento usa S.events)
+function motorComposite(motorKey){
+  const motor = S.motors[motorKey];
+  if(motorKey === "eventos"){
+    const cutoff = Date.now() - 14*24*3600*1000;
+    const recent = S.events.filter(e => new Date(e.date).getTime() >= cutoff);
+    if(!recent.length) return null;
+    return recent.reduce((a,e)=>a+e.impact,0) / recent.length;
+  }
+  const vals = Object.values(motor.indicators)
+    .map(i=>i.value)
+    .filter(v=>v!==null && v!==undefined && !Number.isNaN(v));
+  if(!vals.length) return null;
+  return vals.reduce((a,b)=>a+b,0) / vals.length;
+}
+
+function computeMarketState(){
+  let weightedSum = 0, weightUsed = 0;
+  const composites = {};
+  Object.entries(S.motors).forEach(([key,motor])=>{
+    const c = motorComposite(key);
+    composites[key] = c;
+    if(c !== null){
+      weightedSum += c * motor.weight;
+      weightUsed += motor.weight;
+    }
+  });
+  const score = weightUsed > 0 ? (weightedSum / weightUsed) : 0;
+  const completeness = weightUsed; // 0..1, soma dos pesos preenchidos
+
+  // divergência: quanto os motores preenchidos discordam entre si (desvio-padrão)
+  const filled = Object.values(composites).filter(v=>v!==null);
+  let divergence = 0;
+  if(filled.length > 1){
+    const mean = filled.reduce((a,b)=>a+b,0)/filled.length;
+    divergence = Math.sqrt(filled.reduce((a,b)=>a+Math.pow(b-mean,2),0)/filled.length);
+  }
+
+  let label = "Neutro";
+  if(score >= 40) label = "Bull forte";
+  else if(score >= 15) label = "Bull";
+  else if(score <= -40) label = "Bear forte";
+  else if(score <= -15) label = "Bear";
+
+  return { score, completeness, label, composites, divergence };
+}
+
+function volatilityLabel(){
+  const v = S.market.volatility;
+  if(v === null || v === undefined) return "—";
+  if(v > 0.05) return "alta";
+  if(v > 0.025) return "média";
+  return "baixa";
+}
+
+/* =====================================================================
+   § BACKTEST ENGINE (embrião) — testa os indicadores automáticos
+   contra 12 meses de preço real e público. Não é opinião: é contagem.
+   ===================================================================== */
+function rsiAtIndex(closes, i, period){
+  if(i < period) return null;
+  let gains=0, losses=0;
+  for(let k=i-period+1; k<=i; k++){
+    const diff = closes[k] - closes[k-1];
+    if(diff>=0) gains+=diff; else losses-=diff;
+  }
+  const avgGain = gains/period, avgLoss = losses/period;
+  if(avgLoss===0) return 100;
+  const rs = avgGain/avgLoss;
+  return 100 - (100/(1+rs));
+}
+
+function smaAtIndex(closes, i, period){
+  if(i < period-1) return null;
+  let sum=0;
+  for(let k=i-period+1; k<=i; k++) sum += closes[k];
+  return sum/period;
+}
+
+function analyzeBacktest(prices, forwardDays){
+  const closes = prices.map(p=>p[1]);
+  const n = closes.length;
+  const buckets = {
+    rsiOversold:  { label:"RSI(14) abaixo de 30 (sobrevendido)", hits:[] },
+    rsiOverbought:{ label:"RSI(14) acima de 70 (sobrecomprado)", hits:[] },
+    aboveSma:     { label:"Preço acima da Média Móvel 50d", hits:[] },
+    belowSma:     { label:"Preço abaixo da Média Móvel 50d", hits:[] }
+  };
+  for(let i=50; i<n-forwardDays; i++){
+    const rsi = rsiAtIndex(closes, i, 14);
+    const sma = smaAtIndex(closes, i, 50);
+    const fwd = ((closes[i+forwardDays]-closes[i]) / closes[i]) * 100;
+    if(rsi !== null){
+      if(rsi < 30) buckets.rsiOversold.hits.push(fwd);
+      if(rsi > 70) buckets.rsiOverbought.hits.push(fwd);
+    }
+    if(sma !== null){
+      if(closes[i] > sma) buckets.aboveSma.hits.push(fwd);
+      else buckets.belowSma.hits.push(fwd);
+    }
+  }
+  return Object.values(buckets).map(b=>{
+    const count = b.hits.length;
+    const avg = count ? b.hits.reduce((a,x)=>a+x,0)/count : null;
+    const winRate = count ? (b.hits.filter(x=>x>0).length/count)*100 : null;
+    return { label:b.label, count, avg, winRate };
+  });
+}
+
+async function runBacktest(){
+  const btn = document.getElementById("btnRunBacktest");
+  const out = document.getElementById("backtestResults");
+  btn.disabled = true;
+  btn.textContent = "rodando…";
+  out.innerHTML = `<div class="empty-state">Buscando 12 meses de preço real…</div>`;
+  try{
+    const prices = await fetchMarketChart(365);
+    if(!prices || prices.length < 100){
+      out.innerHTML = `<div class="empty-state">Histórico insuficiente retornado pela fonte. Tente novamente mais tarde.</div>`;
+      return;
+    }
+    const stats = analyzeBacktest(prices, 30);
+    out.innerHTML = `
+      <table class="hist">
+        <thead><tr><th>Condição observada</th><th>Ocorrências (12m)</th><th>Retorno médio em 30d</th><th>% das vezes que subiu</th></tr></thead>
+        <tbody>
+          ${stats.map(s=>`
+            <tr>
+              <td>${s.label}</td>
+              <td>${s.count}${s.count < 8 ? ' <span style="color:var(--gold);font-size:9.5px;">amostra pequena</span>' : ""}</td>
+              <td style="color:${s.avg===null?"var(--text-faint)":(s.avg>=0?"var(--teal)":"var(--brick)")};">${s.avg===null?"—":(s.avg>=0?"+":"")+s.avg.toFixed(1)+"%"}</td>
+              <td>${s.winRate===null?"—":s.winRate.toFixed(0)+"%"}</td>
+            </tr>
+          `).join("")}
+        </tbody>
+      </table>
+      <p style="font-family:var(--font-mono);font-size:10.5px;color:var(--text-faint);margin-top:10px;">
+        Baseado em preço diário público (CoinGecko), últimos ~12 meses. Retorno futuro medido 30 dias após a condição.
+        Isso descreve o que aconteceu no passado recente — não é garantia do que vai acontecer agora.
+      </p>
+    `;
+  }catch(e){
+    out.innerHTML = `<div class="empty-state">Não foi possível buscar o histórico agora (rede/CORS). Tente de novo em instantes.</div>`;
+  }finally{
+    btn.disabled = false;
+    btn.textContent = "🧠 Rodar backtest de indicadores (RSI/MM50)";
+  }
+}
+
+/* =====================================================================
+   § SCORE BACKTEST — testa o Score Geral (mesmos pesos e fórmulas do
+   sistema ao vivo) contra 12 meses de dado histórico real, pra calibrar
+   os cortes de decisão (40 / 15 / -15 / -55) em vez de aceitá-los de olho.
+   ===================================================================== */
+function dateKey(msEpoch){ return new Date(msEpoch).toISOString().slice(0,10); }
+function avg(arr){ return arr.length ? arr.reduce((a,b)=>a+b,0)/arr.length : null; }
+
+async function fetchFearGreedHistoryMap(limit){
+  const res = await smartFetch(`https://api.alternative.me/fng/?limit=${limit}`);
+  if(!res.ok) throw new Error("F&G histórico falhou");
+  const data = await res.json();
+  const map = {};
+  (data.data || []).forEach(item=>{ map[dateKey(Number(item.timestamp)*1000)] = Number(item.value); });
+  return map;
+}
+
+async function fetchFundingHistoryMap(){
+  const res = await smartFetch("https://fapi.binance.com/fapi/v1/fundingRate?symbol=BTCUSDT&limit=1000");
+  if(!res.ok) throw new Error("funding histórico falhou");
+  const data = await res.json();
+  const byDate = {};
+  data.forEach(r=>{
+    const d = dateKey(Number(r.fundingTime));
+    (byDate[d] = byDate[d] || []).push(Number(r.fundingRate));
+  });
+  const map = {};
+  Object.entries(byDate).forEach(([d,arr])=>{ map[d] = avg(arr); });
+  return map; // cobre só ~330 dias (limite de 1000 registros a cada 8h)
+}
+
+async function fetchHashrateHistorySeries(){
+  const res = await smartFetch("https://mempool.space/api/v1/mining/hashrate/1y");
+  if(!res.ok) throw new Error("hashrate histórico falhou");
+  const data = await res.json();
+  return (data.hashrates || [])
+    .map(h=>({ date: dateKey(Number(h.timestamp)*1000), value: h.avgHashrate }))
+    .sort((a,b)=> a.date < b.date ? -1 : 1);
+}
+
+function hashrateScoreAtDate(series, dateStr){
+  if(!series.length) return null;
+  const curIdx = series.findIndex(p=>p.date >= dateStr);
+  const cur = curIdx === -1 ? series[series.length-1] : series[curIdx];
+  const target = new Date(dateStr); target.setDate(target.getDate()-90);
+  const pastStr = target.toISOString().slice(0,10);
+  const pastIdx = series.findIndex(p=>p.date >= pastStr);
+  if(pastIdx === -1 || !series[pastIdx].value) return null;
+  const pct = ((cur.value - series[pastIdx].value) / series[pastIdx].value) * 100;
+  return clamp(pct*6, -100, 100);
+}
+
+async function fetchFredSeriesRange(seriesId, apiKey, startDate){
+  const url = `https://api.stlouisfed.org/fred/series/observations?series_id=${seriesId}&api_key=${encodeURIComponent(apiKey)}&file_type=json&sort_order=asc&observation_start=${startDate}`;
+  const res = await smartFetch(url);
+  if(!res.ok) throw new Error("FRED falhou: " + seriesId);
+  const data = await res.json();
+  return (data.observations || []).filter(o=>o.value !== ".").map(o=>({date:o.date, value:Number(o.value)}));
+}
+
+function fillDailyRange(map, fromDate, toDate, value){
+  for(let d = new Date(fromDate); d < toDate; d.setDate(d.getDate()+1)){
+    map[d.toISOString().slice(0,10)] = value;
+  }
+}
+
+async function fetchMacroHistoryMaps(apiKey){
+  const startDaily = new Date(Date.now() - 400*24*3600*1000).toISOString().slice(0,10);
+  // 900 dias garante observações suficientes pra que o preenchimento por
+  // meses cubra o ano inteiro do backtest (bug anterior: só cobria ~2 meses)
+  const startMonthly = new Date(Date.now() - 900*24*3600*1000).toISOString().slice(0,10);
+  const maps = {};
+
+  try{
+    const obs = await fetchFredSeriesRange("DFF", apiKey, startDaily);
+    maps.juros = {};
+    obs.forEach((o,idx)=>{
+      const past = obs[Math.max(0, idx-90)];
+      maps.juros[o.date] = clamp(-(o.value - past.value)*40, -100, 100);
+    });
+  }catch(e){ /* segue sem esse indicador nesse backtest */ }
+
+  try{
+    const obs = await fetchFredSeriesRange("DTWEXBGS", apiKey, startDaily);
+    maps.dxy = {};
+    obs.forEach((o,idx)=>{
+      const past = obs[Math.max(0, idx-90)];
+      const pct = past.value ? ((o.value - past.value)/past.value)*100 : 0;
+      maps.dxy[o.date] = clamp(-pct*8, -100, 100);
+    });
+  }catch(e){}
+
+  try{
+    const obs = await fetchFredSeriesRange("T10Y2Y", apiKey, startDaily);
+    maps.curva = {};
+    obs.forEach(o=>{ maps.curva[o.date] = clamp(o.value*40, -100, 100); });
+  }catch(e){}
+
+  try{
+    const obs = await fetchFredSeriesRange("CPIAUCSL", apiKey, startMonthly);
+    maps.inflacao = {};
+    for(let idx=15; idx<obs.length; idx++){
+      const yoyNow = (obs[idx].value/obs[idx-12].value - 1)*100;
+      const yoyPast = (obs[idx-3].value/obs[idx-15].value - 1)*100;
+      const score = clamp(-(yoyNow-yoyPast)*25, -100, 100);
+      const to = idx+1 < obs.length ? new Date(obs[idx+1].date) : new Date();
+      fillDailyRange(maps.inflacao, new Date(obs[idx].date), to, score);
+    }
+  }catch(e){}
+
+  try{
+    const obs = await fetchFredSeriesRange("M2SL", apiKey, startMonthly);
+    maps.liquidez = {};
+    for(let idx=12; idx<obs.length; idx++){
+      const yoy = (obs[idx].value/obs[idx-12].value - 1)*100;
+      const score = clamp(yoy*15, -100, 100);
+      const to = idx+1 < obs.length ? new Date(obs[idx+1].date) : new Date();
+      fillDailyRange(maps.liquidez, new Date(obs[idx].date), to, score);
+    }
+  }catch(e){}
+
+  return maps;
+}
+
+async function fetchOnchainHistoryMaps(apiKey){
+  const maps = {};
+  try{
+    const url = `https://api.cryptoquant.com/v1/btc/market-indicator/mvrv-ratio?window=day&limit=370&api_key=${encodeURIComponent(apiKey)}`;
+    const res = await smartFetch(url);
+    if(res.ok){
+      const data = await res.json();
+      const rows = (data.result && data.result.data) || [];
+      maps.mvrv = {};
+      rows.forEach(row=>{
+        const dateField = Object.keys(row).find(k=>/date/i.test(k));
+        const val = extractMetricValue(row);
+        if(dateField && val !== null) maps.mvrv[String(row[dateField]).slice(0,10)] = clamp((2-val)*40, -100, 100);
+      });
+    }
+  }catch(e){}
+  return maps;
+}
+
+// CoinMetrics Community — gratuita, sem chave. MVRV + NUPL(derivado) + endereços
+// ativos, com histórico suficiente pra cobrir o ano inteiro do backtest.
+async function fetchCoinMetricsHistoryRows(){
+  const url = "https://community-api.coinmetrics.io/v4/timeseries/asset-metrics?assets=btc&metrics=CapMVRVCur,AdrActCnt&frequency=1d&page_size=500";
+  const res = await smartFetch(url);
+  if(!res.ok) throw new Error("CoinMetrics histórico falhou");
+  const data = await res.json();
+  return (data.data || [])
+    .map(r=>({ date:String(r.time).slice(0,10), mvrv:Number(r.CapMVRVCur), addr:Number(r.AdrActCnt) }))
+    .sort((a,b)=> a.date < b.date ? -1 : 1);
+}
+
+// tendência genérica de uma série {date,value}[] contra ~N dias atrás —
+// mesma lógica de hashrateScoreAtDate, generalizada pra reaproveitar em endereços ativos
+function trendScoreAtDate(series, dateStr, scaleFactor, lookbackDays){
+  lookbackDays = lookbackDays || 90;
+  if(!series.length) return null;
+  const curIdx = series.findIndex(p=>p.date >= dateStr);
+  const cur = curIdx === -1 ? series[series.length-1] : series[curIdx];
+  const target = new Date(dateStr); target.setDate(target.getDate()-lookbackDays);
+  const pastStr = target.toISOString().slice(0,10);
+  const pastIdx = series.findIndex(p=>p.date >= pastStr);
+  if(pastIdx === -1 || !series[pastIdx].value) return null;
+  const pct = ((cur.value - series[pastIdx].value) / series[pastIdx].value) * 100;
+  return clamp(pct*scaleFactor, -100, 100);
+}
+
+// Coinbase — candles diários públicos (até ~300 dias por chamada, sem chave).
+// Usado pra reconstruir o prêmio Coinbase histórico contra o preço de referência.
+async function fetchCoinbaseHistoricalCandles(){
+  const res = await smartFetch("https://api.exchange.coinbase.com/products/BTC-USD/candles?granularity=86400");
+  if(!res.ok) throw new Error("Coinbase histórico falhou");
+  const data = await res.json(); // [[time, low, high, open, close, volume], ...]
+  return data.map(c=>({ date: new Date(c[0]*1000).toISOString().slice(0,10), close:Number(c[4]) }));
+}
+
+// mesma matemática de ponderação do sistema ao vivo (computeMarketState),
+// mas recebendo composites de uma data histórica em vez do estado atual
+function aggregateScore(composites){
+  let weightedSum = 0, weightUsed = 0;
+  Object.entries(S.motors).forEach(([key,motor])=>{
+    const c = composites[key];
+    if(c !== null && c !== undefined){
+      weightedSum += c*motor.weight;
+      weightUsed += motor.weight;
+    }
+  });
+  return { score: weightUsed>0 ? weightedSum/weightUsed : 0, completeness: weightUsed };
+}
+// mesmo cálculo do score, mas excluindo um motor — usado no contrafactual
+// "sem esse motor, o score iria pra onde" no Decision Engine
+function scoreWithoutMotor(composites, excludeKey){
+  let weightedSum = 0, weightUsed = 0;
+  Object.entries(S.motors).forEach(([key,motor])=>{
+    if(key === excludeKey) return;
+    const c = composites[key];
+    if(c !== null && c !== undefined){
+      weightedSum += c*motor.weight;
+      weightUsed += motor.weight;
+    }
+  });
+  return weightUsed>0 ? weightedSum/weightUsed : 0;
+}
+function computeDivergence(composites){
+  const vals = Object.values(composites).filter(v=>v!==null && v!==undefined);
+  if(vals.length < 2) return 0;
+  const mean = avg(vals);
+  return Math.sqrt(avg(vals.map(v=>Math.pow(v-mean,2))));
+}
+function bucketAction(score, completeness, divergence){
+  if(completeness < 0.5) return "Aguardar confirmação (dados insuficientes)";
+  if(score >= 40) return "Reforçar";
+  if(score >= 15) return "Entrar parcialmente";
+  if(score > -15) return "Observar";
+  if(score > -55) return "Reduzir";
+  return (completeness >= 0.7 && divergence < 35) ? "Avaliar posição vendida (short)" : "Sair";
+}
+
+async function runScoreBacktest(){
+  const btn = document.getElementById("btnRunScoreBacktest");
+  const out = document.getElementById("scoreBacktestResults");
+  btn.disabled = true;
+  btn.textContent = "rodando…";
+  logClear("calibrationLog", "calibrationLogWrap");
+  out.innerHTML = "";
+
+  try{
+    let line = logStep("consultando preço histórico — 365 dias (CoinGecko)", "calibrationLog");
+    const prices = await fetchMarketChart(365);
+    if(!prices || prices.length < 120){
+      logDone(line, false, "histórico insuficiente", "calibrationLog");
+      out.innerHTML = `<div class="empty-state">Histórico insuficiente retornado pela fonte. Tente novamente mais tarde.</div>`;
+      return;
+    }
+    logDone(line, true, `${prices.length} dias`, "calibrationLog");
+    const closes = prices.map(p=>p[1]);
+    const dates = prices.map(p=>dateKey(p[0]));
+    const dateToIdx = {}; dates.forEach((d,i)=>{ dateToIdx[d] = i; });
+
+    line = logStep("consultando sentimento histórico — Fear & Greed (Alternative.me)", "calibrationLog");
+    const fgMap = await fetchFearGreedHistoryMap(370).catch(()=>({}));
+    logDone(line, Object.keys(fgMap).length>0, `${Object.keys(fgMap).length} dias`, "calibrationLog");
+    await sleep(200);
+
+    line = logStep("consultando funding histórico (Binance)", "calibrationLog");
+    const fundingMap = await fetchFundingHistoryMap().catch(()=>({}));
+    logDone(line, Object.keys(fundingMap).length>0, `${Object.keys(fundingMap).length} dias`, "calibrationLog");
+    await sleep(200);
+
+    line = logStep("consultando hash rate histórico (mempool.space)", "calibrationLog");
+    const hashSeries = await fetchHashrateHistorySeries().catch(()=>[]);
+    logDone(line, hashSeries.length>0, `${hashSeries.length} pontos`, "calibrationLog");
+    await sleep(200);
+
+    line = logStep("consultando on-chain histórico — MVRV/NUPL (CoinMetrics)", "calibrationLog");
+    const cmRows = await fetchCoinMetricsHistoryRows().catch(()=>[]);
+    logDone(line, cmRows.length>0, `${cmRows.length} dias`, "calibrationLog");
+    await sleep(200);
+
+    line = logStep("consultando prêmio Coinbase histórico", "calibrationLog");
+    const cbCandles = await fetchCoinbaseHistoricalCandles().catch(()=>[]);
+    logDone(line, cbCandles.length>0, `${cbCandles.length} candles`, "calibrationLog");
+    await sleep(200);
+
+    let macroMaps = {};
+    if(S.apiKeys.fred){
+      line = logStep("consultando macro histórico — Fed/CPI/M2/DXY/curva (FRED)", "calibrationLog");
+      macroMaps = await fetchMacroHistoryMaps(S.apiKeys.fred).catch(()=>({}));
+      logDone(line, Object.keys(macroMaps).length>0, `${Object.keys(macroMaps).length} séries`, "calibrationLog");
+      await sleep(200);
+    }
+
+    let onchainMaps = {};
+    if(S.apiKeys.cryptoquant){
+      line = logStep("consultando MVRV histórico (CryptoQuant)", "calibrationLog");
+      onchainMaps = await fetchOnchainHistoryMaps(S.apiKeys.cryptoquant).catch(()=>({}));
+      logDone(line, Object.keys(onchainMaps).length>0, "", "calibrationLog");
+      await sleep(200);
+    }
+
+    // mapas derivados de CoinMetrics: MVRV/NUPL por data + série de endereços ativos pra tendência
+    const cmMvrvByDate = {}, cmNuplByDate = {};
+    cmRows.forEach(r=>{
+      if(Number.isFinite(r.mvrv)){
+        cmMvrvByDate[r.date] = clamp((2-r.mvrv)*40, -100, 100);
+        const nupl = 1 - (1/r.mvrv);
+        cmNuplByDate[r.date] = clamp(-nupl*120, -100, 100);
+      }
+    });
+    const addrSeries = cmRows.filter(r=>Number.isFinite(r.addr)).map(r=>({date:r.date, value:r.addr}));
+
+    // prêmio Coinbase histórico: candle da Coinbase vs. preço de referência do mesmo dia
+    const coinbaseByDate = {};
+    cbCandles.forEach(c=>{
+      const idx = dateToIdx[c.date];
+      if(idx !== undefined && closes[idx]){
+        const premium = ((c.close - closes[idx]) / closes[idx]) * 100;
+        coinbaseByDate[c.date] = clamp(premium*50, -100, 100);
+      }
+    });
+
+    const forwardDays = 30;
+    const buckets = {};
+    const allForwardReturns = [];
+    const refRsiOversold = [], refFgFear = [];
+    let sourcesUsed = new Set();
+
+    const calcLine = logStep(`calibrando — testando os cortes dia a dia (${closes.length} dias)`, "calibrationLog");
+
+    for(let i=50; i<closes.length-forwardDays; i++){
+      const date = dates[i];
+
+      const rsi = rsiAtIndex(closes, i, 14);
+      const sma = smaAtIndex(closes, i, 50);
+      const trendPct = ((closes[i]-closes[i-29])/closes[i-29])*100;
+      const momPct = ((closes[i]-closes[i-1])/closes[i-1])*100;
+      const tecVals = [clamp(trendPct*4,-100,100), clamp(momPct*12,-100,100)];
+      if(rsi !== null) tecVals.push(clamp((rsi-50)*2,-100,100));
+      if(sma !== null) tecVals.push(clamp(((closes[i]-sma)/sma*100)*8,-100,100));
+      const tecnico = avg(tecVals);
+
+      const fg = fgMap[date];
+      const sentimento = fg !== undefined ? clamp((fg-50)*2,-100,100) : null;
+      if(fg !== undefined) sourcesUsed.add("Sentimento (F&G)");
+
+      const fr = fundingMap[date];
+      const derivativos = fr !== undefined ? clamp(-fr*100000,-100,100) : null;
+      if(fr !== undefined) sourcesUsed.add("Derivativos (funding)");
+
+      // on-chain — mesma composição do motor ao vivo: hash rate + MVRV + NUPL + endereços ativos
+      const hrScore = hashrateScoreAtDate(hashSeries, date);
+      const addrScore = trendScoreAtDate(addrSeries, date, 5, 90);
+      const onchainVals = [];
+      if(hrScore !== null){ onchainVals.push(hrScore); sourcesUsed.add("On-chain (hash rate)"); }
+      if(addrScore !== null){ onchainVals.push(addrScore); sourcesUsed.add("On-chain (endereços ativos)"); }
+      if(onchainMaps.mvrv && onchainMaps.mvrv[date] !== undefined){
+        onchainVals.push(onchainMaps.mvrv[date]); sourcesUsed.add("On-chain (MVRV, CryptoQuant)");
+      } else if(cmMvrvByDate[date] !== undefined){
+        onchainVals.push(cmMvrvByDate[date]); onchainVals.push(cmNuplByDate[date]);
+        sourcesUsed.add("On-chain (MVRV+NUPL, CoinMetrics)");
+      }
+      const onchain = onchainVals.length ? avg(onchainVals) : null;
+
+      // institucional — prêmio Coinbase histórico (primeira vez que esse motor entra no teste)
+      const institucional = coinbaseByDate[date] !== undefined ? coinbaseByDate[date] : null;
+      if(institucional !== null) sourcesUsed.add("Institucional (prêmio Coinbase)");
+
+      let macro = null;
+      const macroVals = [];
+      ["juros","inflacao","liquidez","dxy","curva"].forEach(k=>{
+        if(macroMaps[k] && macroMaps[k][date] !== undefined) macroVals.push(macroMaps[k][date]);
+      });
+      if(macroVals.length){ macro = avg(macroVals); sourcesUsed.add("Macro (FRED)"); }
+
+      const composites = { macro, institucional, onchain, derivativos, tecnico, sentimento, geopolitico:null, eventos:null };
+      const { score, completeness } = aggregateScore(composites);
+      const divergence = computeDivergence(composites);
+      const action = bucketAction(score, completeness, divergence);
+      const fwd = ((closes[i+forwardDays]-closes[i])/closes[i])*100;
+
+      (buckets[action] = buckets[action] || []).push(fwd);
+      allForwardReturns.push(fwd);
+
+      // estratégias de referência simples, pra comparar se o sistema completo
+      // realmente agrega algo sobre "só olhar um indicador isolado"
+      if(rsi !== null && rsi < 30) refRsiOversold.push(fwd);
+      if(fg !== undefined && fg < 25) refFgFear.push(fwd);
+    }
+    logDone(calcLine, true, `${allForwardReturns.length} dias classificados`, "calibrationLog");
+
+    const baseline = {
+      avg: avg(allForwardReturns),
+      winRate: (allForwardReturns.filter(x=>x>0).length / allForwardReturns.length) * 100,
+      count: allForwardReturns.length
+    };
+    const refStrategies = [
+      { label:"Só RSI < 30 (sobrevendido), sem mais nada", arr: refRsiOversold },
+      { label:"Só Fear & Greed < 25 (medo extremo), sem mais nada", arr: refFgFear }
+    ].filter(r=>r.arr.length >= 3).map(r=>({
+      label: r.label, count: r.arr.length, avg: avg(r.arr),
+      winRate: (r.arr.filter(x=>x>0).length/r.arr.length)*100
+    }));
+
+    const order = ["Reforçar","Entrar parcialmente","Observar","Reduzir","Avaliar posição vendida (short)","Sair","Aguardar confirmação (dados insuficientes)"];
+    const rows = order.filter(k=>buckets[k] && buckets[k].length).map(k=>{
+      const arr = buckets[k];
+      const meanRet = avg(arr);
+      const winRate = (arr.filter(x=>x>0).length/arr.length)*100;
+      return { label:k, count:arr.length, avg:meanRet, winRate, vsBaseline: meanRet - baseline.avg };
+    });
+
+    if(!rows.length){
+      out.innerHTML = `<div class="empty-state">Não houve dados suficientes cruzados pra nenhuma faixa. Conecte FRED/CryptoQuant pra cobrir mais motores no teste.</div>`;
+      return;
+    }
+
+    out.innerHTML = `
+      <div style="font-family:var(--font-mono);font-size:11.5px;padding:10px 14px;border:1px solid var(--copper);background:var(--copper-soft);margin-bottom:12px;">
+        📏 Referência (comprar e segurar, qualquer dia do período, sem filtro nenhum): retorno médio 30d
+        <strong style="color:${baseline.avg>=0?"var(--teal)":"var(--brick)"};">${baseline.avg>=0?"+":""}${baseline.avg.toFixed(1)}%</strong>
+        · ${baseline.winRate.toFixed(0)}% das vezes subiu · ${baseline.count} dias.
+        Compare cada linha abaixo contra isso — o que importa não é se deu positivo, é se bateu essa referência.
+      </div>
+      ${refStrategies.length ? `
+      <div style="font-family:var(--font-mono);font-size:10.5px;color:var(--text-faint);margin-bottom:12px;">
+        ${refStrategies.map(r=>`${r.label}: <span style="color:${r.avg>=0?"var(--teal)":"var(--brick)"};">${r.avg>=0?"+":""}${r.avg.toFixed(1)}%</span> · ${r.winRate.toFixed(0)}% acerto · ${r.count} dias`).join(" &nbsp;|&nbsp; ")}
+        <br>— se o sistema completo não bater essas estratégias de 1 indicador só, todos os motores extras não estão agregando valor.
+      </div>` : ""}
+      <table class="hist">
+        <thead><tr><th>Recomendação que o sistema teria dado</th><th>Dias (12m)</th><th>Retorno médio em 30d</th><th>vs. referência</th><th>% das vezes que subiu</th></tr></thead>
+        <tbody>
+          ${rows.map(r=>`
+            <tr>
+              <td>${r.label}</td>
+              <td>${r.count}${r.count < 15 ? ' <span style="color:var(--gold);font-size:9.5px;">amostra pequena</span>' : ""}</td>
+              <td style="color:${r.avg>=0?"var(--teal)":"var(--brick)"};">${r.avg>=0?"+":""}${r.avg.toFixed(1)}%</td>
+              <td style="color:${r.vsBaseline>=0?"var(--teal)":"var(--brick)"};">${r.vsBaseline>=0?"+":""}${r.vsBaseline.toFixed(1)}pp</td>
+              <td>${r.winRate.toFixed(0)}%</td>
+            </tr>
+          `).join("")}
+        </tbody>
+      </table>
+      <p style="font-family:var(--font-mono);font-size:10.5px;color:var(--text-faint);margin-top:10px;">
+        Fontes usadas neste teste: ${Array.from(sourcesUsed).join(", ") || "nenhuma (verifique conexão)"}.
+        Macro e On-chain só entram se você tiver conectado FRED/CryptoQuant — sem isso, o teste roda só com Técnico, Sentimento e Derivativos (funding), e o resultado é menos representativo do sistema completo.
+        Institucional, Geopolítico e Eventos nunca entram aqui (sem fonte histórica gratuita).
+        Retorno medido 30 dias após cada dia classificado. Passado recente, não garantia de futuro.
+      </p>
+    `;
+    logFinal("concluído — calibração pronta, veja a tabela abaixo", "calibrationLog");
+  }catch(e){
+    out.innerHTML = `<div class="empty-state">Falha ao rodar (rede/CORS). Tente de novo em instantes.</div>`;
+    logFinal(`falhou — ${e.message}`, "calibrationLog");
+    console.error(e);
+  }finally{
+    btn.disabled = false;
+    btn.textContent = "📊 Calibrar o Score Geral (testa os cortes 40/15/-15/-55)";
+  }
+}
+
+/* =====================================================================
+   § SCENARIO ENGINE
+   ===================================================================== */
+const CONF_WEIGHT = { baixa:.5, media:.75, alta:1 };
+
+function scenarioWeight(sc){
+  return (sc.probability/100) * (CONF_WEIGHT[sc.confidence] || .5);
+}
+
+function leaderScenario(){
+  const active = S.scenarios.filter(s => s.status === "ativa" || s.status === "confirmada");
+  if(!active.length) return null;
+  return active.reduce((best, s) => scenarioWeight(s) > scenarioWeight(best) ? s : best, active[0]);
+}
+
+function scenarioHasInvalidatedPremise(sc){
+  return sc.premiseIds.some(pid => {
+    const p = S.premises.find(x => x.id === pid);
+    return p && p.status === "invalidada";
+  });
+}
+
+// gera um cenário inteiro a partir do estado de mercado atual — zero digitação.
+// é um retrato factual dos números de agora, não uma previsão inventada.
+function generateAutoScenario(){
+  const ms = computeMarketState();
+  const now = new Date().toISOString();
+  const dateLabel = new Date().toLocaleDateString("pt-BR");
+
+  let type = "base";
+  if(ms.score >= 15) type = "bull";
+  else if(ms.score <= -15) type = "bear";
+
+  const filledMotors = Object.entries(S.motors)
+    .filter(([k])=>ms.composites[k] !== null)
+    .map(([k,m])=>`${m.label} ${ms.composites[k].toFixed(0)}`);
+
+  const tec = S.motors.tecnico.indicators;
+  const der = S.motors.derivativos.indicators;
+
+  const confirmTriggers = [];
+  const invalidateTriggers = [];
+  if(tec.mediaMovel.value !== null){
+    confirmTriggers.push("Preço se mantém acima da Média Móvel 50d");
+    invalidateTriggers.push("Preço fecha abaixo da Média Móvel 50d");
+  }
+  if(tec.rsi.value !== null){
+    confirmTriggers.push("RSI(14) permanece acima de 50");
+    invalidateTriggers.push("RSI(14) cai abaixo de 40");
+  }
+  if(der.funding.value !== null){
+    confirmTriggers.push("Funding rate permanece saudável (sem alavancagem excessiva)");
+    invalidateTriggers.push("Funding rate dispara, indicando sobre-alavancagem");
+  }
+  if(!confirmTriggers.length){
+    confirmTriggers.push("Score de mercado permanece na mesma faixa (" + ms.label + ")");
+    invalidateTriggers.push("Score de mercado muda de faixa (deixa de ser " + ms.label + ")");
+  }
+
+  // probabilidade cresce com a força do score NA DIREÇÃO do tipo do próprio
+  // cenário — score muito negativo deve dar probabilidade ALTA pro cenário
+  // bear, não baixa (bug corrigido: antes usava a mesma fórmula pros dois tipos)
+  let probability;
+  if(type === "bull") probability = clamp(Math.round(50 + ms.score/2), 10, 90);
+  else if(type === "bear") probability = clamp(Math.round(50 - ms.score/2), 10, 90);
+  else probability = clamp(Math.round(55 - Math.abs(ms.score)), 35, 65);
+  const confidence = ms.completeness >= 0.7 ? "alta" : (ms.completeness >= 0.4 ? "media" : "baixa");
+
+  const description = `Gerado automaticamente a partir do estado de mercado: score ${ms.score.toFixed(0)} (escala -100 a +100), confiança dos dados ${(ms.completeness*100).toFixed(0)}%. Baseado apenas nos motores com dado real preenchido — edite livremente se quiser incluir sua própria leitura.`;
+  const premiseDescription = `Motores automáticos (${filledMotors.join(", ") || "nenhum preenchido ainda"}) sustentam a leitura de mercado "${ms.label}" em ${dateLabel}.`;
+
+  // procura um cenário automático já existente e ainda ativo — atualiza em vez de duplicar
+  let existing = S.scenarios.find(s => s.auto && s.status === "ativa");
+
+  if(existing){
+    existing.title = `Cenário automático — ${ms.label} (${dateLabel})`;
+    existing.type = type;
+    existing.probability = probability;
+    existing.confidence = confidence;
+    existing.description = description;
+    existing.confirmTriggers = confirmTriggers;
+    existing.invalidateTriggers = invalidateTriggers;
+    existing.updatedAt = now;
+    existing.revisions = existing.revisions || [];
+    existing.revisions.push({ date:now, note:`Recalculado: score ${ms.score.toFixed(0)}` });
+
+    const linkedPremise = S.premises.find(p => existing.premiseIds.includes(p.id) && p.auto);
+    if(linkedPremise){
+      linkedPremise.description = premiseDescription;
+      linkedPremise.evidenceFor = filledMotors;
+      linkedPremise.updatedAt = now;
+    } else {
+      const premiseId = newId("PR");
+      S.premises.push({
+        id: premiseId, description: premiseDescription, evidenceFor: filledMotors, evidenceAgainst: [],
+        scenarioIds: [existing.id], status: "ativa", auto:true,
+        history: [{date:now, from:null, to:"ativa"}], createdAt: now, updatedAt: now
+      });
+      existing.premiseIds.push(premiseId);
+    }
+  } else {
+    const id = newId("SC");
+    const premiseId = newId("PR");
+    S.premises.push({
+      id: premiseId, description: premiseDescription, evidenceFor: filledMotors, evidenceAgainst: [],
+      scenarioIds: [id], status: "ativa", auto:true,
+      history: [{date:now, from:null, to:"ativa"}], createdAt: now, updatedAt: now
+    });
+    S.scenarios.push({
+      id, title: `Cenário automático — ${ms.label} (${dateLabel})`, type, probability, confidence,
+      horizon: "7–30 dias", description, confirmTriggers, invalidateTriggers,
+      premiseIds: [premiseId], status: "ativa", auto:true, createdAt: now, updatedAt: now
+    });
+  }
+
+  generateRivalScenario(ms, type, probability, confidence, confirmTriggers, invalidateTriggers, dateLabel, now);
+
+  saveState();
+  renderAll();
+}
+
+// gera (ou atualiza) o cenário rival — sempre o oposto do dominante, reaproveitando
+// os mesmos gatilhos invertidos: o que invalida o principal é o que confirma o rival,
+// e vice-versa. Isso garante que nunca exista só uma tese sozinha na tela.
+function generateRivalScenario(ms, mainType, mainProbability, mainConfidence, mainConfirm, mainInvalidate, dateLabel, now){
+  let rivalType = "bear";
+  if(mainType === "bear") rivalType = "bull";
+  else if(mainType === "bull") rivalType = "bear";
+  else rivalType = ms.score >= 0 ? "bear" : "bull";
+
+  const rivalProbability = clamp(100 - mainProbability, 10, 90);
+  const rivalTitle = `Cenário rival — ${rivalType === "bull" ? "Bull" : "Bear"} (${dateLabel})`;
+  const rivalDescription = `Contraponto obrigatório ao cenário dominante. Representa o que precisaria se confirmar pra essa leitura se inverter — usa os mesmos gatilhos do cenário principal, só que trocados de lado. Não é uma previsão paralela, é o "e se eu estiver errado" formalizado.`;
+
+  let existingRival = S.scenarios.find(s => s.auto && s.rival && s.status === "ativa");
+  if(existingRival){
+    existingRival.title = rivalTitle;
+    existingRival.type = rivalType;
+    existingRival.probability = rivalProbability;
+    existingRival.confidence = mainConfidence;
+    existingRival.description = rivalDescription;
+    existingRival.confirmTriggers = mainInvalidate;
+    existingRival.invalidateTriggers = mainConfirm;
+    existingRival.updatedAt = now;
+    existingRival.revisions = existingRival.revisions || [];
+    existingRival.revisions.push({ date:now, note:`Recalculado junto com o cenário dominante` });
+  } else {
+    S.scenarios.push({
+      id: newId("SC"), title: rivalTitle, type: rivalType, probability: rivalProbability,
+      confidence: mainConfidence, horizon: "7–30 dias", description: rivalDescription,
+      confirmTriggers: mainInvalidate, invalidateTriggers: mainConfirm,
+      premiseIds: [], status: "ativa", auto:true, rival:true, createdAt: now, updatedAt: now
+    });
+  }
+}
+
+
+/* =====================================================================
+   § DECISION ENGINE — determinístico e auditável
+   ===================================================================== */
+function computeDecision(){
+  const ms = computeMarketState();
+  const reasoning = [];
+
+  Object.entries(S.motors).forEach(([key,motor])=>{
+    const c = ms.composites[key];
+    if(c !== null){
+      reasoning.push(`${motor.label} (peso ${(motor.weight*100).toFixed(0)}%): ${c.toFixed(0)} pontos`);
+    }
+  });
+
+  reasoning.push(`Confiança dos dados: ${(ms.completeness*100).toFixed(0)}% do peso total preenchido · divergência entre motores: ${ms.divergence.toFixed(0)} · volatilidade 30d: ${volatilityLabel()}`);
+
+  // temporalidade — a "Recomendação" abaixo é uma mistura de prazos, não um
+  // prazo só. Isso deixa explícito quanto de cada horizonte está dentro dela.
+  const hs = computeHorizonScores(ms.composites);
+  const horizonBits = ["curto","medio","longo"]
+    .filter(k=>hs[k].score !== null)
+    .map(k=>`${HORIZON_LABELS[k].title} (${HORIZON_LABELS[k].window}): ${hs[k].label}`);
+  if(horizonBits.length){
+    reasoning.push(`Por prazo — ${horizonBits.join(" · ")}. A recomendação abaixo mistura os três; veja o painel "Temporalidade" pra separar.`);
+  }
+
+  // fatores de maior peso (contribuição = composite × peso do motor)
+  const topFactors = Object.entries(S.motors)
+    .map(([key,motor])=>({ key, label:motor.label, contribution: (ms.composites[key]||0)*motor.weight, filled: ms.composites[key]!==null }))
+    .filter(f=>f.filled)
+    .sort((a,b)=>Math.abs(b.contribution)-Math.abs(a.contribution))
+    .slice(0,3);
+
+  // contrafactual: "sem esse motor, o score iria pra onde" — mostra o quanto
+  // cada motor preenchido realmente pesa na leitura final
+  const filledEntries = Object.entries(ms.composites).filter(([,v])=>v!==null);
+  if(filledEntries.length >= 2){
+    const counterfactuals = filledEntries.map(([key])=>{
+      const without = scoreWithoutMotor(ms.composites, key);
+      return { key, label:S.motors[key].label, without, delta: without - ms.score };
+    }).sort((a,b)=>Math.abs(b.delta)-Math.abs(a.delta)).slice(0,2);
+    counterfactuals.forEach(cf=>{
+      reasoning.push(`Sem ${cf.label}: o score iria de ${ms.score.toFixed(0)} para ${cf.without.toFixed(0)} (Δ${cf.delta>=0?"+":""}${cf.delta.toFixed(0)})`);
+    });
+  }
+
+  // concentração: alerta se um único motor está carregando desproporcionalmente o resultado
+  if(topFactors.length){
+    const totalAbs = topFactors.reduce((a,f)=>a+Math.abs(f.contribution),0)
+      + Object.entries(S.motors).reduce((a,[k,m])=>{
+          const c = ms.composites[k];
+          return (c!==null && !topFactors.find(f=>f.key===k)) ? a+Math.abs(c*m.weight) : a;
+        },0);
+    const topShare = totalAbs ? Math.abs(topFactors[0].contribution)/totalAbs : 0;
+    if(topShare > 0.45){
+      reasoning.push(`⚠ Dependência concentrada: ${(topShare*100).toFixed(0)}% da força direcional vem só de ${topFactors[0].label} — os demais motores confirmam pouco.`);
+    }
+  }
+
+  if(ms.completeness < 0.5){
+    reasoning.push("Dados insuficientes (menos de 50% do peso total preenchido) para sustentar uma leitura confiável.");
+    return { action:"Aguardar confirmação", reasoning, leader:null, topFactors };
+  }
+
+  const leader = leaderScenario();
+  let leaderFlag = false;
+  if(leader){
+    reasoning.push(`Cenário líder: "${leader.title}" (${leader.type}, ${leader.probability}% prob., confiança ${leader.confidence})`);
+    if(scenarioHasInvalidatedPremise(leader)){
+      leaderFlag = true;
+      reasoning.push(`⚠ Uma premissa-chave do cenário líder está invalidada — leitura rebaixada até revisão.`);
+    }
+  } else {
+    reasoning.push("Nenhum cenário ativo cadastrado ainda — leitura baseada apenas no estado de mercado.");
+  }
+
+  const highConviction = ms.completeness >= 0.7 && ms.divergence < 35;
+  if(ms.divergence >= 35 && ms.completeness >= 0.5){
+    reasoning.push(`⚠ Os motores discordam fortemente entre si (divergência ${ms.divergence.toFixed(0)}) — leitura menos confiável do que o score isolado sugere.`);
+  }
+
+  let action;
+  if(leaderFlag){
+    action = "Aguardar confirmação";
+  } else if(ms.score >= 40){
+    action = "Reforçar";
+  } else if(ms.score >= 15){
+    action = "Entrar parcialmente";
+  } else if(ms.score > -15){
+    action = "Observar";
+  } else if(ms.score > -55){
+    action = "Reduzir";
+  } else if(highConviction){
+    action = "Avaliar posição vendida (short)";
+    reasoning.push("Score fortemente negativo, dados completos e motores em concordância — cenário extremo o suficiente para cogitar hedge/short, não apenas redução.");
+  } else {
+    action = "Sair";
+  }
+
+  return { action, reasoning, leader, topFactors };
+}
+
+/* =====================================================================
+   § RENDER — dimensões / gauge
+   ===================================================================== */
+function barColor(v){
+  if(v === null) return "var(--text-faint)";
+  if(v > 10) return "var(--teal)";
+  if(v < -10) return "var(--brick)";
+  return "var(--gold)";
+}
+
+function motorScoreColor(v){
+  if(v === null) return "var(--text-faint)";
+  if(v > 10) return "var(--teal)";
+  if(v < -10) return "var(--brick)";
+  return "var(--gold)";
+}
+
+function renderIndicatorRow(motorKey, indKey, d){
+  const isAuto = d.source === "auto";
+  const showSlider = !isAuto || d.locked || d.fetchFailed;
+  let srcLabel = d.source;
+  if(isAuto && d.locked) srcLabel = "manual (travado)";
+  else if(isAuto && d.fetchFailed) srcLabel = "falhou — preencha";
+  const pct = d.value === null ? 50 : ((d.value + 100) / 200) * 100;
+  return `
+    <div class="indicator-row">
+      <div>
+        <div class="ind-top">
+          <span class="ind-name">${d.label}</span>
+          <span class="ind-src ${isAuto && !d.locked && !d.fetchFailed ? "auto" : "manual"}">${srcLabel}</span>
+        </div>
+        <div class="ind-bar-track">
+          <div class="ind-bar-mid"></div>
+          <div class="ind-bar-fill" style="width:${pct}%; background:${barColor(d.value)};"></div>
+        </div>
+        <div class="ind-note">${d.value === null ? "—" : d.value.toFixed(0)}${d.note ? " · " + d.note : ""}</div>
+      </div>
+      <div class="ind-edit-col">
+        ${showSlider ? `<input type="range" min="-100" max="100" value="${d.value===null?0:d.value}" data-motor="${motorKey}" data-ind="${indKey}">` : ""}
+        ${isAuto ? `<button class="small ghost ind-lock-btn" data-toggle-lock-motor="${motorKey}" data-toggle-lock-ind="${indKey}">${d.locked ? "🔓 auto de novo" : "✎ editar"}</button>` : ""}
+      </div>
+    </div>
+  `;
+}
+
+function renderMotors(){
+  const container = document.getElementById("motorsContainer");
+  const ms = computeMarketState();
+  const openByDefault = { tecnico:true, derivativos:true };
+  container.innerHTML = Object.entries(S.motors).map(([key,motor])=>{
+    const composite = ms.composites[key];
+    const badgeTxt = composite === null ? "sem dados" : composite.toFixed(0);
+    let body;
+    if(key === "eventos"){
+      body = renderEventLogHTML();
+    } else {
+      body = Object.entries(motor.indicators).map(([ik,d])=>renderIndicatorRow(key,ik,d)).join("");
+    }
+    return `
+      <details class="motor-group" ${openByDefault[key] ? "open" : ""}>
+        <summary>
+          <span class="motor-name">${motor.label}<span class="motor-weight">peso ${(motor.weight*100).toFixed(0)}%</span></span>
+          <span class="motor-score-badge" style="color:${motorScoreColor(composite)};border-color:${motorScoreColor(composite)};">${badgeTxt}</span>
+        </summary>
+        <div class="motor-body">${body}</div>
+      </details>
+    `;
+  }).join("");
+
+  container.querySelectorAll("input[type=range]").forEach(inp=>{
+    inp.addEventListener("input", (e)=>{
+      const mk = e.target.dataset.motor, ik = e.target.dataset.ind;
+      const d = S.motors[mk].indicators[ik];
+      d.value = Number(e.target.value);
+      if(d.source === "auto"){ d.locked = true; d.note = "valor definido manualmente"; }
+      saveState(); renderMotors(); renderState(); renderDecision();
+    });
+  });
+  container.querySelectorAll("[data-toggle-lock-motor]").forEach(btn=>{
+    btn.addEventListener("click", ()=>{
+      const mk = btn.dataset.toggleLockMotor, ik = btn.dataset.toggleLockInd;
+      const d = S.motors[mk].indicators[ik];
+      d.locked = !d.locked;
+      if(!d.locked) d.note = "";
+      saveState(); renderMotors(); renderState(); renderDecision();
+    });
+  });
+  wireEventLogHandlers();
+}
+
+/* --- log de eventos (motor "Eventos extraordinários") --- */
+function renderEventLogHTML(){
+  const cutoff = Date.now() - 14*24*3600*1000;
+  const rows = S.events.slice().sort((a,b)=>new Date(b.date)-new Date(a.date)).map(ev=>{
+    const stale = new Date(ev.date).getTime() < cutoff;
+    return `
+      <div class="event-row" style="${stale ? "opacity:.5;" : ""}">
+        <div><div class="ev-title">${ev.title}</div><div class="ev-date">${new Date(ev.date).toLocaleDateString("pt-BR")}${stale ? " · fora da janela de 14d" : ""}</div></div>
+        <span style="font-family:var(--font-mono);font-size:12px;color:${motorScoreColor(ev.impact)};">${ev.impact>0?"+":""}${ev.impact}</span>
+        <button class="small danger" data-del-event="${ev.id}">✕</button>
+      </div>`;
+  }).join("") || `<div class="empty-state" style="border:none;padding:8px 0;">Nenhum evento registrado. Só entram no score os eventos dos últimos 14 dias.</div>`;
+  return `
+    ${rows}
+    <div class="event-add-row">
+      <input type="text" id="evTitle" placeholder="evento (ex: Fed corta juros em 0,25pp)">
+      <input type="number" id="evImpact" placeholder="impacto -100 a 100" min="-100" max="100">
+      <button class="small" id="btnAddEvent">Adicionar</button>
+    </div>
+  `;
+}
+function wireEventLogHandlers(){
+  const btn = document.getElementById("btnAddEvent");
+  if(btn){
+    btn.addEventListener("click", ()=>{
+      const title = document.getElementById("evTitle").value.trim();
+      const impact = Number(document.getElementById("evImpact").value);
+      if(!title || Number.isNaN(impact)) return;
+      S.events.push({ id:newId("EV"), title, date:new Date().toISOString(), impact:clamp(impact,-100,100) });
+      saveState(); renderMotors(); renderState(); renderDecision();
+    });
+  }
+  document.querySelectorAll("[data-del-event]").forEach(b=>{
+    b.addEventListener("click", ()=>{
+      S.events = S.events.filter(e=>e.id!==b.dataset.delEvent);
+      saveState(); renderMotors(); renderState(); renderDecision();
+    });
+  });
+}
+
+/* cores fixas em hex — evita depender de var() dentro de atributos SVG */
+const COLOR = { teal:"#4fa394", brick:"#b14a3d", gold:"#d6a94b", copper:"#c97c3d", faint:"#5c606a", line:"#33373f", text:"#ece7dd" };
+
+function gaugeSVG(pct, color, size, stroke){
+  const r = (size - stroke) / 2;
+  const c = 2 * Math.PI * r;
+  const offset = c * (1 - clamp(pct,0,100)/100);
+  return `<svg width="${size}" height="${size}" viewBox="0 0 ${size} ${size}">
+    <circle cx="${size/2}" cy="${size/2}" r="${r}" fill="none" stroke="${COLOR.line}" stroke-width="${stroke}"/>
+    <circle cx="${size/2}" cy="${size/2}" r="${r}" fill="none" stroke="${color}" stroke-width="${stroke}"
+      stroke-dasharray="${c}" stroke-dashoffset="${offset}" stroke-linecap="round"
+      transform="rotate(-90 ${size/2} ${size/2})" style="transition:stroke-dashoffset .4s ease;"/>
+  </svg>`;
+}
+
+function dialWidget(label, pct, color, sublabel, size, stroke, fontSize, displayValue){
+  size = size || 90; stroke = stroke || 8; fontSize = fontSize || 15;
+  const shown = displayValue !== undefined ? displayValue : (pct===null ? null : Math.round(pct));
+  return `
+    <div class="dial-widget">
+      <div class="dial-ring" style="width:${size}px;height:${size}px;">
+        ${gaugeSVG(pct===null ? 0 : pct, pct===null ? COLOR.faint : color, size, stroke)}
+        <div class="dial-center" style="font-size:${fontSize}px;">${shown === null ? "—" : (shown>0 ? "+"+shown : shown)}</div>
+      </div>
+      <div class="dial-label">${label}</div>
+      ${sublabel ? `<div class="dial-sublabel">${sublabel}</div>` : ""}
+    </div>
+  `;
+}
+
+function sparklineSVG(history){
+  const width = 300, height = 56;
+  if(!history || history.length < 2){
+    return `<div style="font-family:var(--font-mono);font-size:10px;color:var(--text-faint);padding:18px 0;">acumulando histórico de preço a cada atualização…</div>`;
+  }
+  const prices = history.map(h=>h.price);
+  const min = Math.min(...prices), max = Math.max(...prices);
+  const range = (max - min) || 1;
+  const pts = history.map((h,i)=>{
+    const x = (i/(history.length-1)) * width;
+    const y = height - ((h.price - min)/range) * (height-6) - 3;
+    return `${x.toFixed(1)},${y.toFixed(1)}`;
+  }).join(" ");
+  const up = prices[prices.length-1] >= prices[0];
+  const color = up ? COLOR.teal : COLOR.brick;
+  return `<svg width="${width}" height="${height}" viewBox="0 0 ${width} ${height}" preserveAspectRatio="none">
+    <polyline points="${pts}" fill="none" stroke="${color}" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/>
+  </svg>`;
+}
+
+function renderTicker(){
+  document.getElementById("priceVal").textContent = S.market.price ? `$${S.market.price.toLocaleString("en-US",{maximumFractionDigits:0})}` : "—";
+  const dEl = document.getElementById("priceDelta");
+  if(S.market.change24h !== null && S.market.change24h !== undefined){
+    const up = S.market.change24h >= 0;
+    dEl.textContent = `variação 24h: ${up ? "+" : ""}${S.market.change24h.toFixed(2)}%`;
+    dEl.className = "ticker-delta " + (up ? "up" : "down");
+  } else {
+    dEl.textContent = "variação 24h: —";
+    dEl.className = "ticker-delta";
+  }
+  document.getElementById("lastUpdate").textContent = S.market.lastFetch
+    ? "atualizado " + new Date(S.market.lastFetch).toLocaleString("pt-BR")
+    : "nunca atualizado";
+}
+
+function renderState(){
+  const ms = computeMarketState();
+  const dash = document.getElementById("summaryDash");
+  if(!dash) return;
+
+  const motorDials = Object.entries(S.motors).map(([key,motor])=>{
+    const c = ms.composites[key];
+    const pct = c === null ? null : clamp((c+100)/2, 0, 100);
+    const color = c === null ? COLOR.faint : (c > 10 ? COLOR.teal : (c < -10 ? COLOR.brick : COLOR.gold));
+    return dialWidget(motor.label, pct, color, `peso ${(motor.weight*100).toFixed(0)}%`, 90, 8, 15, c===null?null:Math.round(c));
+  }).join("");
+
+  const overallPct = clamp((ms.score+100)/2, 0, 100);
+  const overallColor = ms.score > 10 ? COLOR.teal : (ms.score < -10 ? COLOR.brick : COLOR.gold);
+  const overallDial = dialWidget(ms.label, overallPct, overallColor, "score geral (-100 a +100)", 140, 12, 22, Math.round(ms.score));
+
+  const priceUp = S.market.priceHistory && S.market.priceHistory.length > 1
+    ? S.market.priceHistory[S.market.priceHistory.length-1].price >= S.market.priceHistory[0].price
+    : (S.market.change24h || 0) >= 0;
+
+  const changesHTML = renderChangesPanel();
+  const horizonHTML = renderHorizonPanel(ms);
+
+  dash.innerHTML = `
+    <div class="dash-top">
+      ${overallDial}
+      <div class="dash-price-card">
+        <div class="dash-price-value">${S.market.price ? "$"+S.market.price.toLocaleString("en-US",{maximumFractionDigits:0}) : "—"}</div>
+        <div class="dash-price-delta" style="color:${priceUp?COLOR.teal:COLOR.brick};">${S.market.change24h!=null ? (S.market.change24h>=0?"+":"")+S.market.change24h.toFixed(2)+"% (24h)" : "—"}</div>
+        <div class="dash-sparkline">${sparklineSVG(S.market.priceHistory)}</div>
+        <div class="dash-price-meta">${S.market.priceHistory ? S.market.priceHistory.length : 0} pontos registrados · confiança dos dados ${(ms.completeness*100).toFixed(0)}% · volatilidade ${volatilityLabel()}</div>
+      </div>
+    </div>
+    <div class="dials-grid">${motorDials}</div>
+    ${horizonHTML}
+    ${changesHTML}
+  `;
+}
+
+function horizonColor(score){
+  if(score === null) return COLOR.faint;
+  return score > 10 ? COLOR.teal : (score < -10 ? COLOR.brick : COLOR.gold);
+}
+
+function renderHorizonPanel(ms){
+  const h = computeHorizonScores(ms.composites);
+  const dials = ["curto","medio","longo"].map(key=>{
+    const info = HORIZON_LABELS[key];
+    const g = h[key];
+    const pct = g.score === null ? null : clamp((g.score+100)/2, 0, 100);
+    return dialWidget(info.title, pct, horizonColor(g.score), info.window, 100, 9, 17, g.score===null?null:Math.round(g.score));
+  }).join("");
+
+  // interpretação automática — combina os 3 sem inventar, só descreve o que os números já dizem
+  let interpretation = "";
+  const filled = ["curto","medio","longo"].filter(k=>h[k].score !== null);
+  if(filled.length >= 2){
+    const signs = filled.map(k=> h[k].score > 10 ? 1 : (h[k].score < -10 ? -1 : 0));
+    const allSame = signs.every(s=>s === signs[0]) && signs[0] !== 0;
+    const curto = h.curto.score, longo = h.longo.score;
+    if(allSame){
+      interpretation = `Os prazos concordam entre si — sem conflito entre timing e estrutura.`;
+    } else if(curto !== null && longo !== null && curto <= -15 && longo >= 15){
+      interpretation = `⚠ Curto prazo fraco dentro de longo prazo forte — pode ser correção passageira dentro de uma tendência maior, não necessariamente reversão.`;
+    } else if(curto !== null && longo !== null && curto >= 15 && longo <= -15){
+      interpretation = `⚠ Curto prazo forte dentro de longo prazo fraco — pode ser alívio de curto fôlego dentro de uma estrutura ainda ruim, cuidado pra não confundir com virada real.`;
+    } else {
+      interpretation = `Os prazos estão divergindo entre si — vale olhar cada relógio separado antes de agir, o score geral sozinho está escondendo essa mistura.`;
+    }
+  }
+
+  return `
+    <div style="margin-top:18px;padding-top:16px;border-top:1px solid var(--line-soft);">
+      <div style="font-family:var(--font-mono);font-size:10px;color:var(--text-faint);text-transform:uppercase;letter-spacing:.06em;margin-bottom:12px;">
+        § Temporalidade — o mesmo dado, separado por prazo (calibrado pro ritmo do BTC, não do mercado tradicional)
+      </div>
+      <div class="dials-grid" style="grid-template-columns:repeat(3,1fr);">${dials}</div>
+      ${interpretation ? `<div style="margin-top:12px;font-size:12.5px;color:var(--text-dim);">${interpretation}</div>` : ""}
+    </div>
+  `;
+}
+
+function renderChangesPanel(){
+  const deltas = S.market.lastDeltas || [];
+  const anomalies = S.market.lastAnomalies || [];
+  if(!deltas.length && !anomalies.length) return "";
+
+  let html = `<div style="margin-top:18px;padding-top:16px;border-top:1px solid var(--line-soft);">`;
+  if(deltas.length){
+    html += `<div style="font-family:var(--font-mono);font-size:10px;color:var(--text-faint);text-transform:uppercase;letter-spacing:.06em;margin-bottom:8px;">Desde a última atualização</div>`;
+    html += `<div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:${anomalies.length?"14px":"0"};">`;
+    html += deltas.map(d=>{
+      const color = d.delta >= 0 ? COLOR.teal : COLOR.brick;
+      return `<span class="factor-chip" style="color:${color};border-color:currentColor;">${d.label} ${d.delta>=0?"+":""}${d.delta.toFixed(0)}</span>`;
+    }).join("");
+    html += `</div>`;
+  }
+  if(anomalies.length){
+    html += `<div style="font-family:var(--font-mono);font-size:10px;color:var(--gold);text-transform:uppercase;letter-spacing:.06em;margin-bottom:8px;">⚡ Salto brusco num indicador específico</div>`;
+    html += `<ul style="margin:0;padding-left:18px;font-size:12.5px;color:var(--text-dim);">`;
+    html += anomalies.map(a=>`<li>${a.label} (${a.motor}): ${a.before.toFixed(0)} → ${a.now.toFixed(0)} (${a.delta>=0?"+":""}${a.delta.toFixed(0)})</li>`).join("");
+    html += `</ul>`;
+  }
+  html += `</div>`;
+  return html;
+}
+
+/* =====================================================================
+   § RENDER — cenários
+   ===================================================================== */
+function renderScenarios(){
+  const list = document.getElementById("scenarioList");
+  list.innerHTML = "";
+  if(!S.scenarios.length){
+    list.innerHTML = `<div class="empty-state">Nenhum cenário cadastrado. Comece pelo cenário-base.</div>`;
+    return;
+  }
+  const leader = leaderScenario();
+  S.scenarios.forEach(sc=>{
+    const card = document.createElement("div");
+    card.className = "card" + (leader && leader.id === sc.id ? " leader" : "");
+    const linkedPremises = sc.premiseIds.map(pid => S.premises.find(p=>p.id===pid)).filter(Boolean);
+    card.innerHTML = `
+      <div class="card-top">
+        <div>
+          <div class="card-title">${sc.title}${leader && leader.id === sc.id ? " ★" : ""}</div>
+          <div class="card-badges">
+            <span class="stamp ty-${sc.type}">${sc.type}</span>
+            <span class="stamp st-${sc.status}">${sc.status}</span>
+          </div>
+          <div class="card-meta">horizonte: ${sc.horizon || "—"} · confiança: ${sc.confidence} · atualizado ${new Date(sc.updatedAt).toLocaleDateString("pt-BR")}</div>
+        </div>
+        <div style="text-align:right;">
+          <div class="prob-track"><div class="prob-fill" style="width:${sc.probability}%;"></div></div>
+          <div class="card-meta">${sc.probability}% probabilidade</div>
+        </div>
+      </div>
+      <div class="card-body">${sc.description || ""}</div>
+      <div class="card-cols">
+        <div class="card-col">
+          <h4>Gatilhos de confirmação</h4>
+          <ul>${(sc.confirmTriggers||[]).map(t=>`<li>${t}</li>`).join("") || "<li>—</li>"}</ul>
+        </div>
+        <div class="card-col">
+          <h4>Gatilhos de invalidação</h4>
+          <ul>${(sc.invalidateTriggers||[]).map(t=>`<li>${t}</li>`).join("") || "<li>—</li>"}</ul>
+        </div>
+      </div>
+      <div class="card-col" style="margin-top:10px;">
+        <h4>Premissas vinculadas (${linkedPremises.length})</h4>
+        <ul>${linkedPremises.map(p=>`<li>${p.id} — ${p.description} <span class="stamp st-${p.status}" style="transform:none;padding:1px 5px;font-size:8.5px;">${p.status}</span></li>`).join("") || "<li>nenhuma ainda</li>"}</ul>
+      </div>
+      <div class="card-foot">
+        <div>
+          <button class="small" data-act="confirm" data-id="${sc.id}">Confirmar</button>
+          <button class="small" data-act="invalidate" data-id="${sc.id}">Invalidar</button>
+        </div>
+        <button class="small danger" data-act="delete-scenario" data-id="${sc.id}">Excluir</button>
+      </div>
+    `;
+    list.appendChild(card);
+  });
+
+  list.querySelectorAll("button[data-act]").forEach(btn=>{
+    btn.addEventListener("click", ()=>{
+      const id = btn.dataset.id;
+      const sc = S.scenarios.find(s=>s.id===id);
+      if(!sc) return;
+      if(btn.dataset.act === "confirm"){ sc.status = "confirmada"; sc.updatedAt = new Date().toISOString(); saveState(); renderAll(); return; }
+      if(btn.dataset.act === "invalidate"){ sc.status = "invalidada"; sc.updatedAt = new Date().toISOString(); saveState(); renderAll(); return; }
+      if(btn.dataset.act === "delete-scenario"){
+        if(btn.dataset.armed === "1"){
+          S.scenarios = S.scenarios.filter(s=>s.id!==id);
+          saveState(); renderAll();
+        } else {
+          btn.dataset.armed = "1";
+          btn.textContent = "Toque de novo pra confirmar";
+          setTimeout(()=>{ if(btn.isConnected){ btn.dataset.armed=""; btn.textContent="Excluir"; } }, 4000);
+        }
+      }
+    });
+  });
+}
+
+/* =====================================================================
+   § RENDER — premissas
+   ===================================================================== */
+function renderPremises(){
+  const wrap = document.getElementById("premiseList");
+  wrap.innerHTML = "";
+  if(!S.premises.length){
+    wrap.innerHTML = `<div class="empty-state">Nenhuma premissa registrada ainda.</div>`;
+    return;
+  }
+  S.premises.forEach(p=>{
+    const row = document.createElement("div");
+    row.className = "premise-row";
+    const linkedTitles = p.scenarioIds.map(sid => (S.scenarios.find(s=>s.id===sid)||{}).title).filter(Boolean);
+    row.innerHTML = `
+      <span class="premise-id">${p.id}</span>
+      <div>
+        <div class="premise-desc">${p.description}</div>
+        <div class="premise-link">cenários: ${linkedTitles.join(", ") || "nenhum"} · evidências a favor: ${(p.evidenceFor||[]).length} · contrárias: ${(p.evidenceAgainst||[]).length}</div>
+      </div>
+      <span class="stamp st-${p.status}">${p.status}</span>
+      <div class="premise-actions">
+        <button class="small" data-act="confirmar" data-id="${p.id}">Confirmar</button>
+        <button class="small" data-act="enfraquecer" data-id="${p.id}">Enfraquecer</button>
+        <button class="small danger" data-act="invalidar" data-id="${p.id}">Invalidar</button>
+        <button class="small danger" data-act="excluir-premissa" data-id="${p.id}">Excluir</button>
+      </div>
+    `;
+    wrap.appendChild(row);
+  });
+
+  wrap.querySelectorAll("button[data-act]").forEach(btn=>{
+    btn.addEventListener("click", ()=>{
+      const p = S.premises.find(x=>x.id===btn.dataset.id);
+      if(!p) return;
+      if(btn.dataset.act === "excluir-premissa"){
+        if(btn.dataset.armed === "1"){
+          S.premises = S.premises.filter(x=>x.id!==p.id);
+          // remove a referência em qualquer cenário que ainda apontava pra ela
+          S.scenarios.forEach(sc=>{ sc.premiseIds = sc.premiseIds.filter(pid=>pid!==p.id); });
+          saveState(); renderAll();
+        } else {
+          btn.dataset.armed = "1";
+          btn.textContent = "Toque de novo pra confirmar";
+          setTimeout(()=>{ if(btn.isConnected){ btn.dataset.armed=""; btn.textContent="Excluir"; } }, 4000);
+        }
+        return;
+      }
+      const map = { confirmar:"confirmada", enfraquecer:"enfraquecida", invalidar:"invalidada" };
+      const novoStatus = map[btn.dataset.act];
+      p.history = p.history || [];
+      p.history.push({ date:new Date().toISOString(), from:p.status, to:novoStatus });
+      p.status = novoStatus;
+      p.updatedAt = new Date().toISOString();
+      saveState(); renderAll();
+    });
+  });
+}
+
+/* =====================================================================
+   § RENDER — decisão
+   ===================================================================== */
+function renderDecision(){
+  const d = computeDecision();
+  document.getElementById("decisionAction").textContent = d.action;
+  const ul = document.getElementById("decisionReasoning");
+  ul.innerHTML = d.reasoning.map(r=>`<li>${r}</li>`).join("");
+  const chips = document.getElementById("topFactors");
+  chips.innerHTML = d.topFactors.length
+    ? d.topFactors.map(f=>`<span class="factor-chip" style="color:${motorScoreColor(f.contribution*10)};border-color:currentColor;">${f.label}</span>`).join("")
+    : `<span class="factor-chip" style="color:var(--text-faint);">sem dados suficientes ainda</span>`;
+}
+
+/* =====================================================================
+   § RENDER — histórico / learning log
+   ===================================================================== */
+// extrai o número percentual de dentro do texto "resultado" (ex: "+2.1% em 7d (auto)")
+function parseResultadoPct(resultado){
+  if(!resultado) return null;
+  const m = String(resultado).match(/(-?\d+(?:\.\d+)?)\s*%/);
+  return m ? Number(m[1]) : null;
+}
+
+function computePersonalTrackRecord(){
+  const groups = {};
+  S.history.forEach(h=>{
+    const pct = parseResultadoPct(h.resultado);
+    if(pct === null) return; // ainda não resolveu (menos de 7 dias) — não entra na conta
+    const key = h.action || "—";
+    (groups[key] = groups[key] || []).push(pct);
+  });
+  return Object.entries(groups).map(([label, arr])=>({
+    label,
+    count: arr.length,
+    avg: arr.reduce((a,b)=>a+b,0)/arr.length,
+    winRate: (arr.filter(x=>x>0).length/arr.length)*100
+  })).sort((a,b)=>b.count-a.count);
+}
+
+function renderMemoryPanel(){
+  const wrap = document.getElementById("memoryWrap");
+  if(!wrap) return;
+  const resolved = S.history.filter(h=>parseResultadoPct(h.resultado)!==null).length;
+  const pending = S.history.length - resolved;
+
+  if(!S.history.length){
+    wrap.innerHTML = `<div class="empty-state">Ainda sem histórico nenhum — começa a se preencher sozinho na próxima atualização.</div>`;
+    return;
+  }
+  if(!resolved){
+    wrap.innerHTML = `<div class="empty-state">${S.history.length} registro(s) no histórico, mas nenhum ainda resolveu o resultado (leva 7 dias). Volte aqui depois — a tabela aparece sozinha assim que o primeiro resolver.</div>`;
+    return;
+  }
+
+  const stats = computePersonalTrackRecord();
+  wrap.innerHTML = `
+    <table class="hist">
+      <thead><tr><th>Quando o sistema recomendou</th><th>Quantas vezes (resolvidas)</th><th>Retorno médio 30d depois</th><th>% das vezes que subiu</th></tr></thead>
+      <tbody>
+        ${stats.map(s=>`
+          <tr>
+            <td>${s.label}</td>
+            <td>${s.count}${s.count < 8 ? ' <span style="color:var(--gold);font-size:9.5px;">amostra insuficiente ainda</span>' : ""}</td>
+            <td style="color:${s.avg>=0?"var(--teal)":"var(--brick)"};">${s.avg>=0?"+":""}${s.avg.toFixed(1)}%</td>
+            <td>${s.winRate.toFixed(0)}%</td>
+          </tr>
+        `).join("")}
+      </tbody>
+    </table>
+    <p style="font-family:var(--font-mono);font-size:10.5px;color:var(--text-faint);margin-top:10px;">
+      ${resolved} registro(s) resolvido(s), ${pending} ainda aguardando os 7 dias.
+      Isso é o seu uso real, não simulação — quanto mais tempo o sistema rodar, mais essa tabela fica confiável.
+      Com poucas linhas, trate como curiosidade, não como prova de nada ainda.
+    </p>
+  `;
+}
+
+function renderHistory(){
+  const wrap = document.getElementById("historyWrap");
+  if(!S.history.length){
+    wrap.innerHTML = `<div class="empty-state">Ainda sem histórico — ele se preenche sozinho a partir da próxima atualização de dados.</div>`;
+    return;
+  }
+  const rows = S.history.slice().reverse().map(h=>`
+    <tr data-id="${h.id}">
+      <td>${new Date(h.date).toLocaleString("pt-BR")}${h.auto ? ' <span style="color:var(--text-faint);font-size:9.5px;">auto</span>' : ""}</td>
+      <td>${h.price ? "$"+h.price.toLocaleString("en-US",{maximumFractionDigits:0}) : "—"}</td>
+      <td>${h.marketScore.toFixed(0)}</td>
+      <td>${h.action}</td>
+
+      <td>${h.leaderTitle || "—"}</td>
+      <td><input type="text" value="${h.resultado || ""}" placeholder="resolve sozinho em 7 dias…" data-id="${h.id}"></td>
+    </tr>
+  `).join("");
+  wrap.innerHTML = `
+    <table class="hist">
+      <thead><tr><th>Data</th><th>Preço</th><th>Score</th><th>Recomendação</th><th>Cenário líder</th><th>Resultado observado</th></tr></thead>
+      <tbody>${rows}</tbody>
+    </table>
+  `;
+  wrap.querySelectorAll("input[data-id]").forEach(inp=>{
+    inp.addEventListener("change", ()=>{
+      const h = S.history.find(x=>x.id===inp.dataset.id);
+      if(h){ h.resultado = inp.value; saveState(); }
+    });
+  });
+}
+
+function renderAll(){
+  renderTicker();
+  renderMotors();
+  renderState();
+  renderScenarios();
+  renderPremises();
+  renderDecision();
+  renderHistory();
+  renderMemoryPanel();
+  renderBackupWarning();
+}
+
+/* =====================================================================
+   § FORMS — novo cenário / nova premissa
+   ===================================================================== */
+function premiseCheckboxes(selectedIds){
+  selectedIds = selectedIds || [];
+  if(!S.premises.length) return `<p style="font-size:12px;color:var(--text-faint);">Cadastre premissas primeiro para poder vinculá-las.</p>`;
+  return S.premises.map(p=>`
+    <label style="display:flex;align-items:center;gap:6px;font-family:var(--font-body);text-transform:none;letter-spacing:0;font-size:12.5px;margin-bottom:4px;">
+      <input type="checkbox" value="${p.id}" ${selectedIds.includes(p.id)?"checked":""}> ${p.id} — ${p.description}
+    </label>
+  `).join("");
+}
+
+function openScenarioForm(){
+  const form = document.getElementById("formScenario");
+  form.innerHTML = `
+    <div class="form-grid">
+      <div><label>Título</label><input required name="title" placeholder="ex: Continuação de alta institucional"></div>
+      <div><label>Tipo</label>
+        <select name="type">
+          <option value="base">base</option><option value="bull">bull</option>
+          <option value="bear">bear</option><option value="tail">tail (cauda)</option>
+        </select>
+      </div>
+      <div><label>Probabilidade (%)</label><input type="number" name="probability" min="0" max="100" value="40"></div>
+      <div><label>Confiança</label>
+        <select name="confidence"><option value="baixa">baixa</option><option value="media" selected>média</option><option value="alta">alta</option></select>
+      </div>
+      <div class="form-full"><label>Horizonte</label><input name="horizon" placeholder="ex: 30–90 dias"></div>
+      <div class="form-full"><label>Descrição</label><textarea name="description" placeholder="a tese do cenário, em poucas frases"></textarea></div>
+      <div class="form-full"><label>Gatilhos de confirmação (um por linha)</label><textarea name="confirmTriggers"></textarea></div>
+      <div class="form-full"><label>Gatilhos de invalidação (um por linha)</label><textarea name="invalidateTriggers"></textarea></div>
+      <div class="form-full"><label>Premissas vinculadas</label>${premiseCheckboxes()}</div>
+    </div>
+    <div class="form-actions">
+      <button type="button" id="cancelScenario" class="ghost">Cancelar</button>
+      <button type="submit" class="primary">Salvar cenário</button>
+    </div>
+  `;
+  form.classList.add("open");
+  document.getElementById("cancelScenario").addEventListener("click", ()=>{
+    form.classList.remove("open"); form.innerHTML = "";
+  });
+  form.onsubmit = (e)=>{
+    e.preventDefault();
+    const fd = new FormData(form);
+    const checked = Array.from(form.querySelectorAll('input[type=checkbox]:checked')).map(c=>c.value);
+    const now = new Date().toISOString();
+    S.scenarios.push({
+      id: newId("SC"),
+      title: fd.get("title"),
+      type: fd.get("type"),
+      probability: Number(fd.get("probability")),
+      confidence: fd.get("confidence"),
+      horizon: fd.get("horizon"),
+      description: fd.get("description"),
+      confirmTriggers: String(fd.get("confirmTriggers")||"").split("\n").map(s=>s.trim()).filter(Boolean),
+      invalidateTriggers: String(fd.get("invalidateTriggers")||"").split("\n").map(s=>s.trim()).filter(Boolean),
+      premiseIds: checked,
+      status: "ativa",
+      createdAt: now,
+      updatedAt: now
+    });
+    saveState();
+    form.classList.remove("open"); form.innerHTML = "";
+    renderAll();
+  };
+}
+
+function openPremiseForm(){
+  const form = document.getElementById("formPremise");
+  form.innerHTML = `
+    <div class="form-grid">
+      <div class="form-full"><label>Descrição da premissa</label><textarea required name="description" placeholder="ex: ETFs spot continuam com fluxo líquido positivo"></textarea></div>
+      <div class="form-full"><label>Evidências a favor (uma por linha)</label><textarea name="evidenceFor"></textarea></div>
+      <div class="form-full"><label>Evidências contrárias (uma por linha)</label><textarea name="evidenceAgainst"></textarea></div>
+      <div class="form-full"><label>Vincular a cenários existentes</label>${scenarioCheckboxes()}</div>
+    </div>
+    <div class="form-actions">
+      <button type="button" id="cancelPremise" class="ghost">Cancelar</button>
+      <button type="submit" class="primary">Salvar premissa</button>
+    </div>
+  `;
+  form.classList.add("open");
+  document.getElementById("cancelPremise").addEventListener("click", ()=>{
+    form.classList.remove("open"); form.innerHTML = "";
+  });
+  form.onsubmit = (e)=>{
+    e.preventDefault();
+    const fd = new FormData(form);
+    const checked = Array.from(form.querySelectorAll('input[type=checkbox]:checked')).map(c=>c.value);
+    const now = new Date().toISOString();
+    const id = newId("PR");
+    S.premises.push({
+      id,
+      description: fd.get("description"),
+      evidenceFor: String(fd.get("evidenceFor")||"").split("\n").map(s=>s.trim()).filter(Boolean),
+      evidenceAgainst: String(fd.get("evidenceAgainst")||"").split("\n").map(s=>s.trim()).filter(Boolean),
+      scenarioIds: checked,
+      status: "ativa",
+      history: [{date:now, from:null, to:"ativa"}],
+      createdAt: now,
+      updatedAt: now
+    });
+    // também atualiza os cenários marcados para referenciar esta premissa
+    checked.forEach(sid=>{
+      const sc = S.scenarios.find(s=>s.id===sid);
+      if(sc && !sc.premiseIds.includes(id)) sc.premiseIds.push(id);
+    });
+    saveState();
+    form.classList.remove("open"); form.innerHTML = "";
+    renderAll();
+  };
+}
+
+function scenarioCheckboxes(){
+  if(!S.scenarios.length) return `<p style="font-size:12px;color:var(--text-faint);">Nenhum cenário cadastrado ainda.</p>`;
+  return S.scenarios.map(s=>`
+    <label style="display:flex;align-items:center;gap:6px;font-family:var(--font-body);text-transform:none;letter-spacing:0;font-size:12.5px;margin-bottom:4px;">
+      <input type="checkbox" value="${s.id}"> ${s.title}
+    </label>
+  `).join("");
+}
+
+/* =====================================================================
+   § EVENTOS GLOBAIS
+   ===================================================================== */
+function renderCqKeyStatus(){
+  const status = document.getElementById("cqKeyStatus");
+  if(!status) return;
+  status.textContent = S.apiKeys.cryptoquant ? "✓ chave salva" : "sem chave — MVRV e netflow ficam manuais";
+  status.style.color = S.apiKeys.cryptoquant ? "var(--teal)" : "var(--text-faint)";
+}
+function renderFredKeyStatus(){
+  const status = document.getElementById("fredKeyStatus");
+  if(!status) return;
+  status.textContent = S.apiKeys.fred ? "✓ chave salva" : "sem chave — motor Macro fica manual";
+  status.style.color = S.apiKeys.fred ? "var(--teal)" : "var(--text-faint)";
+}
+document.getElementById("btnSaveFredKey").addEventListener("click", ()=>{
+  const input = document.getElementById("fredApiKeyInput");
+  S.apiKeys.fred = input.value.trim();
+  saveState();
+  renderFredKeyStatus();
+  input.value = "";
+  input.placeholder = S.apiKeys.fred ? "chave salva (oculta)" : "cole sua chave gratuita aqui";
+  if(S.apiKeys.fred) refreshMarketData().catch(()=>{});
+});
+renderFredKeyStatus();
+document.getElementById("btnSaveCqKey").addEventListener("click", ()=>{
+  const input = document.getElementById("cqApiKeyInput");
+  S.apiKeys.cryptoquant = input.value.trim();
+  saveState();
+  renderCqKeyStatus();
+  input.value = "";
+  input.placeholder = S.apiKeys.cryptoquant ? "chave salva (oculta)" : "cole sua chave de API aqui";
+  if(S.apiKeys.cryptoquant) refreshMarketData().catch(()=>{});
+});
+renderCqKeyStatus();
+
+document.getElementById("btnRefresh").addEventListener("click", refreshMarketData);
+
+document.getElementById("btnAutoScenario").addEventListener("click", generateAutoScenario);
+document.getElementById("btnRunBacktest").addEventListener("click", runBacktest);
+document.getElementById("btnRunScoreBacktest").addEventListener("click", runScoreBacktest);
+
+document.getElementById("btnNewScenario").addEventListener("click", ()=>{
+  const f = document.getElementById("formScenario");
+  f.classList.contains("open") ? (f.classList.remove("open"), f.innerHTML="") : openScenarioForm();
+});
+
+document.getElementById("btnNewPremise").addEventListener("click", ()=>{
+  const f = document.getElementById("formPremise");
+  f.classList.contains("open") ? (f.classList.remove("open"), f.innerHTML="") : openPremiseForm();
+});
+
+document.getElementById("btnLogDecision").addEventListener("click", ()=>{
+  const d = computeDecision();
+  const ms = computeMarketState();
+  S.history.push({
+    id: newId("LOG"),
+    date: new Date().toISOString(),
+    price: S.market.price,
+    marketScore: ms.score,
+    action: d.action,
+    leaderTitle: d.leader ? d.leader.title : null,
+    resultado: ""
+  });
+  saveState();
+  renderHistory();
+});
+
+// dispara o download normal, mostra confirmação clara, e deixa um link
+// manual de apoio na tela — pra quando o clique automático não emplaca
+// nesse tipo de visualizador embutido (silencioso, sem erro nenhum)
+function triggerDownloadWithFallback(blob, filename){
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+}
+
+document.getElementById("btnExport").addEventListener("click", ()=>{
+  S.lastExportAt = new Date().toISOString();
+  saveState();
+  renderBackupWarning();
+  const blob = new Blob([JSON.stringify(S, null, 2)], {type:"application/json"});
+  triggerDownloadWithFallback(blob, `seios-btc-export-${new Date().toISOString().slice(0,10)}.json`);
+});
+
+document.getElementById("btnExportCsv").addEventListener("click", ()=>{
+  const esc = (v)=> `"${String(v??"").replace(/"/g,'""')}"`;
+  const header = ["data","preco_usd","score","recomendacao","cenario_lider","resultado_observado","auto"];
+  const rows = S.history.slice().sort((a,b)=>new Date(a.date)-new Date(b.date)).map(h=>[
+    new Date(h.date).toLocaleString("pt-BR"),
+    h.price ?? "",
+    h.marketScore?.toFixed?.(1) ?? "",
+    h.action ?? "",
+    h.leaderTitle ?? "",
+    h.resultado ?? "",
+    h.auto ? "sim" : "não"
+  ].map(esc).join(","));
+  const csv = "\uFEFF" + [header.map(esc).join(","), ...rows].join("\r\n"); // BOM pro Excel ler acentos certo
+  const blob = new Blob([csv], {type:"text/csv;charset=utf-8"});
+  triggerDownloadWithFallback(blob, `seios-btc-historico-${new Date().toISOString().slice(0,10)}.csv`);
+});
+
+/* --- importar/restaurar backup — fecha o ciclo do risco de localStorage --- */
+document.getElementById("btnImport").addEventListener("click", ()=>{
+  document.getElementById("importFileInput").click();
+});
+document.getElementById("importFileInput").addEventListener("change", (e)=>{
+  const file = e.target.files[0];
+  if(!file) return;
+  const preview = document.getElementById("importPreview");
+  const reader = new FileReader();
+  reader.onload = (evt)=>{
+    let parsed;
+    try{
+      parsed = JSON.parse(evt.target.result);
+    }catch(err){
+      if(preview) preview.innerHTML = `<div style="margin-top:10px;padding:10px 14px;border:1px solid var(--brick);background:var(--brick-soft);font-family:var(--font-mono);font-size:11.5px;color:var(--brick);">Não consegui ler esse arquivo como JSON válido: ${err.message}</div>`;
+      document.getElementById("importFileInput").value = "";
+      return;
+    }
+    if(!parsed || typeof parsed !== "object" || !parsed.motors){
+      if(preview) preview.innerHTML = `<div style="margin-top:10px;padding:10px 14px;border:1px solid var(--brick);background:var(--brick-soft);font-family:var(--font-mono);font-size:11.5px;color:var(--brick);">Esse arquivo não parece ser um backup do SEIOS (esperava um .json exportado daqui pelo botão "Exportar dados").</div>`;
+      document.getElementById("importFileInput").value = "";
+      return;
+    }
+
+    // confirmação na própria tela — sem diálogo nativo, que esse
+    // visualizador pode engolir silenciosamente (mesma lição do confirm())
+    if(preview){
+      preview.innerHTML = `
+        <div style="margin-top:10px;padding:12px 14px;border:1px solid var(--gold);background:var(--gold-soft);font-family:var(--font-mono);font-size:11.5px;">
+          Esse backup tem ${parsed.history?.length||0} registro(s) de histórico, ${parsed.scenarios?.length||0} cenário(s), ${parsed.premises?.length||0} premissa(s).
+          Importar vai <strong>substituir</strong> os dados atuais deste navegador.
+          <div style="margin-top:10px;display:flex;gap:8px;">
+            <button class="small" id="btnConfirmImport">✓ Sim, restaurar esse backup</button>
+            <button class="small ghost" id="btnCancelImport">Cancelar</button>
+          </div>
+        </div>
+      `;
+      document.getElementById("btnConfirmImport").addEventListener("click", ()=>{
+        localStorage.setItem(STORAGE_KEY, JSON.stringify(parsed));
+        S = loadState();
+        saveState();
+        renderAll();
+        preview.innerHTML = `<div style="margin-top:10px;padding:10px 14px;border:1px solid var(--teal);background:var(--teal-soft);font-family:var(--font-mono);font-size:11.5px;color:var(--teal);">✓ Backup restaurado com sucesso.</div>`;
+      });
+      document.getElementById("btnCancelImport").addEventListener("click", ()=>{
+        preview.innerHTML = "";
+      });
+    }
+    document.getElementById("importFileInput").value = "";
+  };
+  reader.readAsText(file);
+});
+
+// aviso quando faz tempo que você não exporta um backup — só aparece se
+// já existe dado que valeria a pena perder (sem isso, ninguém precisa
+// se preocupar em fazer backup de nada ainda)
+function renderBackupWarning(){
+  const el = document.getElementById("backupWarning");
+  if(!el) return;
+  const meaningfulData = S.history.length >= 5 || S.scenarios.length >= 2;
+  if(!meaningfulData){ el.innerHTML = ""; return; }
+
+  const daysSince = S.lastExportAt
+    ? (Date.now() - new Date(S.lastExportAt).getTime()) / (24*3600*1000)
+    : Infinity;
+
+  if(daysSince < 7){ el.innerHTML = ""; return; }
+
+  const wrap = document.createElement("div");
+  wrap.className = "wrap";
+  wrap.innerHTML = `
+    <div style="margin-top:12px;padding:10px 14px;border:1px solid var(--gold);background:var(--gold-soft);font-family:var(--font-mono);font-size:11.5px;color:var(--gold);">
+      💾 ${S.lastExportAt ? `Faz ${Math.floor(daysSince)} dias que você não exporta um backup` : "Você ainda não exportou nenhum backup"} — os dados só existem no localStorage deste navegador. Toque em "Exportar dados (.json)" e guarda uma cópia em algum lugar seguro.
+    </div>
+  `;
+  el.innerHTML = "";
+  el.appendChild(wrap);
+}
+// (chamado dentro de renderAll a cada renderização, não precisa disparar aqui solto)
+
+const btnReset = document.getElementById("btnReset");
+btnReset.addEventListener("click", ()=>{
+  if(btnReset.dataset.armed === "1"){
+    localStorage.removeItem(STORAGE_KEY);
+    S = defaultState();
+    renderAll();
+    btnReset.dataset.armed = ""; btnReset.textContent = "Zerar tudo";
+  } else {
+    btnReset.dataset.armed = "1";
+    btnReset.textContent = "Toque de novo pra confirmar";
+    setTimeout(()=>{ btnReset.dataset.armed=""; btnReset.textContent="Zerar tudo"; }, 4000);
+  }
+});
+
+/* =====================================================================
+   § INIT
+   ===================================================================== */
+// carrega só com o que já está salvo — nenhuma chamada de rede acontece
+// sozinha. Você decide quando "Atualizar dados de mercado" é acionado,
+// pra não ficar batendo no limite de consultas do FRED só de abrir a página.
+renderAll();
+
+})();
+</script>
+</body>
+</html>

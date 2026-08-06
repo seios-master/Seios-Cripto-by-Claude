@@ -2,8 +2,20 @@
 <html lang="pt-BR">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <title>SEIOS CRIPTO — Instrumento BTC</title>
+
+<!-- ==== instalável como app (PWA) — funciona no iPad via "Adicionar à
+     Tela de Início" no Safari. Ícone e manifest embutidos como data URI
+     pra não quebrar a regra de "um arquivo só". ==== -->
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="SEIOS BTC">
+<meta name="theme-color" content="#14161b">
+<link rel="apple-touch-icon" href="data:image/png;base64,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">
+<link rel="icon" href="data:image/png;base64,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">
+<link rel="manifest" href="data:application/manifest+json;base64,eyJuYW1lIjogIlNFSU9TIENyaXB0byDigJQgSW5zdHJ1bWVudG8gQlRDIiwgInNob3J0X25hbWUiOiAiU0VJT1MgQlRDIiwgInN0YXJ0X3VybCI6ICIuIiwgImRpc3BsYXkiOiAic3RhbmRhbG9uZSIsICJiYWNrZ3JvdW5kX2NvbG9yIjogIiMxNDE2MWIiLCAidGhlbWVfY29sb3IiOiAiIzE0MTYxYiIsICJpY29ucyI6IFt7InNyYyI6ICJkYXRhOmltYWdlL3BuZztiYXNlNjQsaVZCT1J3MEtHZ29BQUFBTlNVaEVVZ0FBQUxRQUFBQzBDQUlBQUFDeXI1RmxBQUFLTFVsRVFWUjRuTzJkWFd4Y1J4V0E3MTU3MSt2MTJ0NDR0aFBYalp1WXRISFRWbW1nSVlpZm9QSVRwUXEwQ0tFcUQrV3BVcHFYQktsS1JWRWZvQTlBSzRGRTFZY3Fwa0JSUVJCVUpGU2NVbFZWV3lKQ1ZDaHVnbE5RN2VMK21NYXVUYnkyZCtQMS92T3cwc3FLZCs3ZW1UdG41c3pjODcxRjhlNDljK2JiTTNQbjNqczMwdHMvNkJCRUkxemRBUkI0SVRrSUppUUh3WVRrSUppUUhBUVRrb05nUW5JUVRFZ09nZ25KUVRBaE9RZ21KQWZCaE9RZ21KQWNCSk5XM1FIbzRjelJZZDZQSEI2ZGhvZ0VNeEhyTDlrTGVPQWZ1NDJ4VXc1UUlWallKNHBWY21oeFlpUFdXR0tESEVpYzJJanBsaGdzQjFvbk5tS29KVWJLWVpBVzZ6Rk9FY1Bra0tXRlFEOXBQTFF1akpFalNOOEE5UWZDa09SaWdCeGlmYUE0KzBZRXlRdHFPVXhjeHpReFpoWkk1ZUJOTWNMOFd0QUVqSEw0VHl2Q2hHN0UzT2Jna3NQY1BEYkZ4S1loa3NObit2RGtUZ0N6Mm9oRkRqOVpRNUt5NEpqU1dQMXltSklwNmVCdnVPWTd3ZkFuQ0E0LzdkSjdvVUJuNVdqYWNqZ3R6ajU1Ky9wL0hqaCtRZTdmYzZFeEQ5NW9xeHhvTTZLZXBpM1ZWVC8weU9IZDJzT2owK0V4bzBiVEptdnhRNE1jVGMxUUZnazJzUG1oV2c0eXd4dFVmaWlWdzZOdElSeEtXSGluUXFVZjZ1VHdOa05aR0thQXdROUZjcEFaQW1qM1E0VWNaSVl3ZXYwQWw0UE1DSWhHUDJEbElET2tvTXNQd09Wek1rTXU2dk9wWVJHTXpCQkRmZDZnNUdCcFRtWUVnWlU5b01FRlJBNURuMGd6R29pY3k1ZURwaHFncUp5Y3FwdHprQm15VUpaSnlYTFFWRU1OYWlZZk11V2dxUVlHSlBhQ2ltR0Z5Z1lFQ3JJcVRRNGFVTlFEUGJqUVBxUUVFemx5VU5uUUJXanhBS3djWklZYTRQSXNRUTQ2U2NGSjhINkJxaHhVTmxRQ2xPMmdlNTlqS0J0amo5M2ExU0ZuRS9kS3BWb3FWMHNWSjErb1pIUGxiSzZjenBUbTA0WDVwZUxNZkg3NmN1N0RoWHlsS3VWUUtqaHpkRGlJTnlBYjQ1dGJObHczRW5Nak1jZEp0TG1iT2hza1o2MVFtWmkrT2o2Wi9jdkU4dnR6YStvalpIRjRkQnJYdFJVTVpVTXg4Wmk3YjZUemdic0hubjFrNUpudmpIenRjNzN4R09ybGdDQjlKTDloNXBZTlhvYXZpejk0Ny9XL2UzVDMzWi9aN0VaMFJ3T1FlWEU1UWxnMkdwSkt0cDQ4c3UySkV6dDd1cUs2WTJtTWNFOUpyaHpoS1J2WHNHZG44cWNQM1RUWTI2WTNETG41UnoxZW1rVmZLdnFURXg5TEplMTUrWldnSERTbU5HVExwdGdqM3h6U0hVVUR4UHBMWnVVSTdaaXludjI3dXc3czZkWVlnTVJlb0dGRlB2Y2ZIdEFkZ2h4RTVLQXh4WnNkQS9GYmRuVG9qdUphQkhwTjJ1ekpvREhseGRjWGYvQ3JEMWovMjk3bWRpVmFkdzdHN3hqcFBQVEpubzcyRm9GRGZINVA5MXZ2WGcwUVl5QmtyWmJhTTdXV1JTNWZ5ZVVMSDZVTDV5NnQvUHlGdVpOSHR0MjVOOFg3Slh0dlNnS0VwaHJ1WVNWVVkwcG10ZnpvTDk0N2UzR1o5NFBEQSswWTFreXZnYmZ2NUV4SURScFRlS2xVblIrZm5sa3JWTGcrRlcyTjlLVmlRQ0g1UVVxUDBObEtjOUtaMHJrSjd1TFJuUlNacktDQzVQREZQLy9EUGJ0c2J3dVpIS0dhY0t6bnlrcVI5eU1WbERjRmNmV2doTXBoOFlTalRpVENQYjNNNXNvUWtmZ25lTC9Rc09LTG5rWjNoWG16bUNsQlJLSVNrc01YdHczenJYak9wNHZMV1pJakJIUW5Xejk5RzkrMXRJbnBMRkF3S2lFNW1oQ0pPTi82eG1DaWpTOVJMLzlqQ1NZY3BkRHl1UmNkN1MwUDNudjlsejZ4aWV0VGM0dUYxLysxQWhTU1NqaCtFQTNQZ3V3N1ZZbkgzTDVVOUZPM2RCMy8rdURwNyszKzhoMThaamlPTS9ySDJWSVp4WGxzdzk3eGZ6WWJ4c3B4YUgvUG9mMDlRRjkrOXVMeXkyK2tnYjVjTVRUbmtNbmtUTzc3ejc2dk93cHBrQnpTZU9QdHpJa25wbko1dmt0MG1BbmpzQ0tkdFVMbDZiSFo1MTViUUxsaUxnN0pFWWhDc2ZMYlZ4WisvK2VGdFBucm9SdWhZU1VRc2FoN1lFLzNYZnQ3R2o1MWJUb2tSMUMyYjQwZnUrZTYzM3gzOTMwSHQwUmI4ZDMrRlFDU1F3NkpOdmZvVndkKzl1MWQycCtJbEFqSklaUHRXK09uVHQ1NEs3N25Fc1FnT1NUVDFkSDYyTEhod1Q0YjZnZkpJWit1Uk12ang0YVJiK3JpQnd2bjJFM3hmcWpKZFNNZGNUZlozcko5YTN6WFVPTE92YWtkQTNIZVF3ejF0OTEzY012VFk3UEJJdFZNR09Yd3BsS3BabGJMbWRYeTdKWEMrYmRXbnZuVDNONGJreWVQYk52V3p6ZFNIUGxDMzloZnI4d3RGb0RpVklEeHBVOEJiMDVsNzMvOGJkNGIwR05SOTU3UGJnWUtTUTBraHkvV0NwV0hUMDN6TG9NZTNOZmpJbnp3elRja2gxK3l1Zkl2WDV6aitraGZLbnJ6RFFtZ2VCVEFJVWZBTzBjczRKWHhwU3JucGJXYmgzVEtFZkQrTEtvY0hDeGxTKzl4Ymt5N2E2Z2RLQmdGa0J4ODhENzYxcjlKNStQVUFTRTUrRmhkNDd1WHB6Tmg4Qk96SkFjZnZKMmRGTm9ZQ0Fra0J4KzkzWHpiRkNPNURWME1laGtQQjV1N29yenJwQnB2S1EzZUwzekw1eER2YmREQzJTZHZYLy9QQThjdmNQMjlmd1QyYmdDRjZ6a2pHbFpnK1hBaHJ6c0VjVWdPV0NabmNycERFQWYyMWFGMnNHK2tVL2l6YjA3cGVkeGV6ejZrMWt3N1dMaHVKTkhtZGlaYXRtK05qOXlRK09MSFUwTmJ1Ty9ucURIMTN4eXFTL2E4RHphSDhYNk9qUS9LQ3M4M3ZSazdmd1hpYTVVQi9pNzcwTEt3Vkh6aC9LS1dRK3Q4bDcxOTJ5NUFjT3I1eS9raW91ZG1CWHFOemxaQWVIVjg2YVcvRzc4UmcwdzVhR1NwY2VuZHF6LzhOZk1HWm1nazlvS2dIRFN5c0JpZnpENzAxRFR2WHVuUWlQVlhHTTlXZ0toVXFxZGZYUmg5ZnJac3kwNE1rdWNjb1IxWkxyNlRmZUJIVTAvOTRiSmVNK1RtWDd4eVdMOGE1b2RpdVhyKzBzcHpyeTFjZUFmdnhxUENjd0Q1dzhxWm84UFd6MGpTbWRMNFpPWnYvODZjbTFoZVdkVzh4M2tkNmIvVlFISllYRHpLbFdxeFZDMldxdGxjZWZscWFUbGIraWhkdlB5Ly9BZnorY21aMWZrMHJndnhIZ1Q1b1lKTVNCVVhqNjg4ZkVuWnNkQUM4U3NOT2lHMWZnUXhtb0M5QTdWQ2F1dHdneE9nYk5QTGVLd0Y5Y3Q0cUhpb0FTN1BzSzhPSlQrZ1lXV1lYaDFLd0NKTkRpb2U2Z0V0RzQ2YXlrRitRS0FncXpMbG9OTVdERWpzQmNtVmd3WVhOVUFQS0RYVVRVakpEMWtveTZSOE9UemtKVCtDNDVGRDZjTTZTT1dneVlkNklISU9OYXpRNUFNQ05WT05PaG9Xd2NnUE1kVG5EVkFPbW54SVJPVlVvdzVzNVNBL3BLREZERWZCc0VKK0JFU1hHWTZhT1FmNUlZeEdNeHhsRTFMeVF3QzlaamdxejFiSUR5NjBtK0U0VHFTM2YxRE5rV3A0ZTBDclp3Nm1GS2xlNS9CdUc1VVFQR1k0V2hiQnlBOFdxTXh3MUE4cmRacEtFS29oQm1jMnROMUQyclMxNFNraE9NMXdORmFPR240TXNMaUVJRysrNXJ2UC9iVGMxaEtDM0F4SGUrV29nejlURWpHbHNWamtjSHhYQ0F4WkU4YXNOaUtTdytFWlFaQ2t6ejhtTmcyWEhEVk16S01INWpZSG94d08veVFVVzFvZEs1cUFWSTRhQXVjcDJsTnNZc3dzVU10UlEreFVWbkhHalFpU0Z3UGtxQkZrdFFPb0R4Q0dKQmRqNUtnaGEwRk1vRzgwSGxvWGhzbFJ3OUExVTRPMHFHR2tIRFVNVXNRNExXb1lMRWNkdEpZWTZrUWRHK1NvZzhRUzA1Mm9ZNVVjZGJSWVlvMFRkZXlVWXoyZ290Z254SHJzbDZNaE5xMWp3aEZTT1FnLzBENmtCQk9TZzJCQ2NoQk1TQTZDQ2NsQk1DRTVDQ1lrQjhHRTVDQ1lrQndFRTVLRFlFSnlFRXhJRG9MSi93R0E0c2dBVTBVN0RBQUFBQUJKUlU1RXJrSmdnZz09IiwgInNpemVzIjogIjE4MHgxODAiLCAidHlwZSI6ICJpbWFnZS9wbmcifV19">
 <style>
   :root{
     --bg:#14161b;
@@ -563,7 +575,7 @@
 </div>
 
 <footer class="wrap">
-  <div style="font-family:var(--font-mono);font-size:10px;color:var(--copper);margin-bottom:8px;">build 2026-08-06.11-clean — se essa linha não aparecer no seu arquivo, você está num arquivo antigo, baixe o mais recente</div>
+  <div style="font-family:var(--font-mono);font-size:10px;color:var(--copper);margin-bottom:8px;">build 2026-08-06.17-pwa — se essa linha não aparecer no seu arquivo, você está num arquivo antigo, baixe o mais recente</div>
   SEIOS CRIPTO — instrumento local. Todos os dados ficam salvos apenas neste navegador (localStorage), no seu HD. Nada é enviado para nenhum servidor. Preços via CoinGecko · Sentimento via Alternative.me F&amp;G Index · Funding via Binance (best-effort, sem chave). Este instrumento não é recomendação de investimento.
 </footer>
 
@@ -586,25 +598,33 @@ function ind(label, source, note){
 // liquidez macro é o fator com maior poder explicativo documentado sobre o
 // preço do BTC — por isso Macro sobe e Técnico desce frente ao documento
 // original. Onchain/Institucional mantidos: bons para estrutura de ciclo.
+// pesos revisados em 06/08/2026 com base em calibração real (12 meses de
+// dado histórico, "Calibração por motor"): Macro, Institucional e On-chain
+// confirmados coerentes; Técnico ficou invertido mesmo após corrigir o RSI
+// — atribuído ao regime específico de 2025-2026 (topo em out/2025 seguido de
+// correção com dois ralis que falharam, jan/2026 e abr/2026, revertidos por
+// choques macro externos: Fed hawkish, tarifas, Irã — não por exaustão
+// técnica genuína). Peso reduzido, não invertido, pra não apostar que esse
+// padrão vai se repetir se o regime mudar. Redistribuído proporcionalmente.
 function defaultState(){
   return {
     apiKeys: { cryptoquant:"", fred:"" }, // ficam só no seu navegador, nunca são enviadas a mim
     lastExportAt: null,
     motors: {
-      macro:         { label:"Macro",                       weight:.32, indicators:{
+      macro:         { label:"Macro",                       weight:.33, indicators:{
         juros:     ind("Juros — Fed Funds Rate (FRED, se conectado)", "auto"),
         inflacao:  ind("Inflação — CPI YoY, tendência (FRED, se conectado)", "auto"),
         liquidez:  ind("Liquidez global — M2 YoY (FRED, se conectado)", "auto"),
         dxy:       ind("DXY — dólar ponderado (FRED, se conectado)", "auto"),
         curva:     ind("Curva de juros 10y-2y (FRED, se conectado)", "auto")
       }},
-      institucional: { label:"Fluxo institucional (ETFs)",   weight:.15, indicators:{
+      institucional: { label:"Fluxo institucional (ETFs)",   weight:.16, indicators:{
         coinbasePremium: ind("Prêmio Coinbase (Coinbase vs. mercado)", "auto"),
         etfFlow:   ind("Fluxo líquido ETFs spot (semanal)", "manual"),
         custodia:  ind("Custódia institucional / compras corporativas", "manual"),
         soberanos: ind("Fundos soberanos / governos", "manual")
       }},
-      onchain:       { label:"On-chain",                     weight:.15, indicators:{
+      onchain:       { label:"On-chain",                     weight:.16, indicators:{
         mvrv:      ind("MVRV (CoinMetrics grátis; CryptoQuant refina, se conectado)", "auto"),
         nupl:      ind("NUPL (derivado matematicamente do MVRV)", "auto"),
         sopr:      ind("SOPR", "manual"),
@@ -613,7 +633,7 @@ function defaultState(){
         whales:    ind("Atividade de baleias", "manual"),
         hashrate:  ind("Hash rate (tendência 90d)", "auto")
       }},
-      derivativos:   { label:"Derivativos",                  weight:.15, indicators:{
+      derivativos:   { label:"Derivativos",                  weight:.16, indicators:{
         funding:   ind("Funding rate", "auto"),
         openInterest: ind("Open Interest (variação)", "auto"),
         putCall:   ind("Put/Call ratio (Deribit)", "auto"),
@@ -621,7 +641,7 @@ function defaultState(){
         takerRatio: ind("Taker buy/sell ratio (agressão do book, Binance)", "auto"),
         liquidClusters: ind("Proximidade de clusters de liquidação", "manual")
       }},
-      tecnico:       { label:"Técnico",                      weight:.08, indicators:{
+      tecnico:       { label:"Técnico",                      weight:.04, indicators:{
         tendencia: ind("Tendência 30d", "auto"),
         momentum:  ind("Momentum 24h", "auto"),
         rsi:       ind("RSI (14)", "auto"),
@@ -633,7 +653,9 @@ function defaultState(){
         social:    ind("Sentimento social (X/Reddit/Telegram) — qualitativo", "manual")
       }},
       geopolitico:   { label:"Geopolítico",                  weight:.05, indicators:{
-        tensao:    ind("Tensão geopolítica global", "manual")
+        tensao:    ind("Tensão geopolítica global (sua leitura)", "manual"),
+        gdelt:     ind("Tom das notícias mundiais (GDELT, tempo real)", "auto"),
+        epu:       ind("Incerteza de política econômica (EPU, via FRED)", "auto")
       }},
       eventos:       { label:"Eventos extraordinários",      weight:.05, indicators:{} } // usa S.events[]
     },
@@ -792,6 +814,27 @@ async function fetchOpenInterest(){
 }
 
 // hash rate — dado público direto da rede Bitcoin, via mempool.space (sem chave)
+/* --- GDELT — radar de notícia global, sem chave, CORS aberto por design
+   (eles mesmos configuram assim, pra permitir embutir em qualquer site).
+   Pega o tom médio das notícias mundiais mencionando termos de conflito/
+   crise nos últimos dias — negativo = noticiário mais tenso. --- */
+async function fetchGdeltTone(){
+  const query = encodeURIComponent('(war OR conflict OR invasion OR sanctions OR "military strike" OR terrorism OR coup)');
+  const url = `https://api.gdeltproject.org/api/v2/doc/doc?query=${query}&mode=timelinetone&format=json&timespan=3d`;
+  const res = await smartFetch(url);
+  if(!res.ok) throw new Error("GDELT falhou (" + res.status + ")");
+  const data = await res.json();
+  // parsing defensivo — a doc pública não detalha o schema exato de timelinetone,
+  // então tenta os formatos mais prováveis em vez de travar num campo só
+  const series = data.timeline && data.timeline[0];
+  const points = series && (series.data || series.Data);
+  if(!points || !points.length) throw new Error("GDELT sem dado utilizável");
+  const last = points[points.length - 1];
+  const val = last.value ?? last.Value ?? last.tone ?? last.Tone;
+  if(val === undefined || Number.isNaN(Number(val))) throw new Error("GDELT formato inesperado");
+  return Number(val); // tom médio, tipicamente entre -10 e +10
+}
+
 async function fetchHashrateTrend(){
   const res = await smartFetch("https://mempool.space/api/v1/mining/hashrate/3m");
   if(!res.ok) throw new Error("mempool.space hashrate falhou");
@@ -1078,6 +1121,18 @@ async function refreshMarketData(){
         logDone(line, true, `${spread>=0?"+":""}${spread.toFixed(2)}pp`);
       }catch(e){ setFailed("macro","curva"); results.fail.push("curva de juros (FRED)"); logDone(line, false, e.message); }
     }
+    await sleep(250);
+
+    { const line = logStep("consultando incerteza de política econômica — EPU (FRED)");
+      try{ // EPU subindo = mais incerteza = viés levemente baixista pra ativos de risco
+        const obs = await fetchFredSeries("USEPUINDXD", S.apiKeys.fred, 95);
+        const latest = obs[0].value, past = obs[obs.length-1].value;
+        const pct = past ? ((latest-past)/past)*100 : 0;
+        setAuto("geopolitico","epu", clamp(-pct*3, -100, 100), `EPU ${latest.toFixed(0)} (${pct>=0?"+":""}${pct.toFixed(1)}% em ~90d)`);
+        results.ok.push("epu (FRED)");
+        logDone(line, true, latest.toFixed(0));
+      }catch(e){ setFailed("geopolitico","epu"); results.fail.push("epu (FRED)"); logDone(line, false, e.message); }
+    }
   }
 
   await sleep(200);
@@ -1117,7 +1172,9 @@ async function refreshMarketData(){
 
         const rsi = computeRSI(prices, 14);
         if(rsi !== null){
-          setAuto("tecnico","rsi", clamp((rsi-50)*2, -100, 100), `RSI(14): ${rsi.toFixed(0)}`);
+          // leitura CONTRÁRIA — evidência de calibração (205 dias, ago/2026):
+          // RSI alto historicamente antecedeu queda, não continuação
+          setAuto("tecnico","rsi", clamp(-(rsi-50)*2, -100, 100), `RSI(14): ${rsi.toFixed(0)} (leitura contrária: alto = risco de reversão)`);
         }
 
         const sma50 = computeSMA(prices, 50);
@@ -1142,7 +1199,9 @@ async function refreshMarketData(){
   { const line = logStep("consultando sentimento — Fear & Greed (Alternative.me)");
     try{
       const fg = await fetchFearGreed();
-      setAuto("sentimento","fearGreed", clamp((fg.value - 50) * 2, -100, 100), `F&G ${fg.value} · ${fg.label}`);
+      // leitura CONTRÁRIA — "compre no medo, venda na ganância": evidência de
+      // calibração mostrou que medo extremo antecedeu alta, não queda
+      setAuto("sentimento","fearGreed", clamp(-(fg.value - 50) * 2, -100, 100), `F&G ${fg.value} · ${fg.label} (leitura contrária)`);
       results.ok.push("sentimento");
       logDone(line, true, `${fg.value} (${fg.label})`);
     }catch(e){ setFailed("sentimento","fearGreed"); results.fail.push("sentimento"); logDone(line, false, e.message); }
@@ -1273,6 +1332,17 @@ async function refreshMarketData(){
       results.ok.push("book imbalance");
       logDone(line, true, `${imb>=0?"+":""}${imb.toFixed(1)}%`);
     }catch(e){ setFailed("tecnico","bookImbalance"); results.fail.push("book imbalance"); logDone(line, false, e.message); }
+  }
+
+  await sleep(200);
+  // GDELT — radar de notícia global, sem chave nenhuma
+  { const line = logStep("consultando tom das notícias globais (GDELT)");
+    try{
+      const tone = await fetchGdeltTone();
+      setAuto("geopolitico","gdelt", clamp(tone*8, -100, 100), `tom médio: ${tone.toFixed(2)}`);
+      results.ok.push("gdelt");
+      logDone(line, true, tone.toFixed(2));
+    }catch(e){ setFailed("geopolitico","gdelt"); results.fail.push("gdelt"); logDone(line, false, e.message); }
   }
 
   await sleep(200);
@@ -1433,14 +1503,26 @@ function hideNetworkWarning(){
    § MARKET STATE ENGINE — síntese ponderada e explicável
    ===================================================================== */
 
-// classificação de horizonte natural de cada motor — não é opinião, é o que
-// cada dado realmente mede: funding/sentimento mudam em horas, macro/on-chain
-// levam meses pra virar. Calibrado pro ritmo do Bitcoin, não do mercado
-// tradicional (onde "curto prazo" costuma significar semanas, não aqui).
-const HORIZON_MAP = {
-  derivativos: "curto", sentimento: "curto",
-  tecnico: "medio", institucional: "medio", eventos: "medio",
-  macro: "longo", onchain: "longo", geopolitico: "longo"
+// classificação de horizonte POR INDICADOR — não por motor inteiro. Um motor
+// pode ter indicadores de prazos diferentes dentro dele (ex: Técnico tem
+// Momentum 24h, que é curtíssimo, e Média Móvel 50d, que não é). Isso é o
+// que realmente mede o dado, calibrado pro ritmo do Bitcoin.
+const INDICATOR_HORIZON = {
+  "derivativos.funding": "curto", "derivativos.openInterest": "curto",
+  "derivativos.putCall": "curto", "derivativos.longShort": "curto",
+  "derivativos.takerRatio": "curto", "derivativos.liquidClusters": "curto",
+  "sentimento.fearGreed": "curto", "sentimento.social": "curto",
+  "tecnico.momentum": "curto", "tecnico.bookImbalance": "curto",
+  "tecnico.tendencia": "medio", "tecnico.rsi": "medio", "tecnico.mediaMovel": "medio",
+  "institucional.coinbasePremium": "medio", "institucional.etfFlow": "medio",
+  "institucional.custodia": "medio", "institucional.soberanos": "medio",
+  "eventos": "medio",
+  "macro.juros": "longo", "macro.inflacao": "longo", "macro.liquidez": "longo",
+  "macro.dxy": "longo", "macro.curva": "longo",
+  "onchain.mvrv": "longo", "onchain.nupl": "longo", "onchain.sopr": "longo",
+  "onchain.exchangeFlow": "longo", "onchain.activeAddresses": "longo",
+  "onchain.whales": "longo", "onchain.hashrate": "longo",
+  "geopolitico.tensao": "longo", "geopolitico.gdelt": "curto", "geopolitico.epu": "curto"
 };
 const HORIZON_LABELS = {
   curto: { title: "Curto prazo", window: "24–72 horas" },
@@ -1456,16 +1538,34 @@ function scoreLabel(score){
   return "Neutro";
 }
 
-// mesma matemática do score geral, mas só com os motores daquele horizonte
-function computeHorizonScores(composites){
+// peso de cada indicador = peso do motor dividido pelo nº de indicadores
+// dele — preserva o peso total do motor, só reparte entre seus prazos
+function computeHorizonScores(){
   const groups = { curto: {sum:0, w:0}, medio: {sum:0, w:0}, longo: {sum:0, w:0} };
-  Object.entries(S.motors).forEach(([key, motor])=>{
-    const c = composites[key];
-    if(c === null || c === undefined) return;
-    const h = HORIZON_MAP[key];
-    groups[h].sum += c * motor.weight;
-    groups[h].w += motor.weight;
+
+  Object.entries(S.motors).forEach(([motorKey, motor])=>{
+    if(motorKey === "eventos"){
+      const c = motorComposite("eventos");
+      if(c !== null){
+        const h = INDICATOR_HORIZON["eventos"];
+        groups[h].sum += c * motor.weight;
+        groups[h].w += motor.weight;
+      }
+      return;
+    }
+    const indKeys = Object.keys(motor.indicators);
+    if(!indKeys.length) return;
+    const perIndWeight = motor.weight / indKeys.length;
+    indKeys.forEach(ik=>{
+      const ind = motor.indicators[ik];
+      if(ind.value === null || ind.value === undefined) return;
+      const h = INDICATOR_HORIZON[`${motorKey}.${ik}`];
+      if(!h) return; // segurança: indicador sem classificação não entra em nenhum relógio
+      groups[h].sum += ind.value * perIndWeight;
+      groups[h].w += perIndWeight;
+    });
   });
+
   const out = {};
   Object.entries(groups).forEach(([h,g])=>{
     const score = g.w > 0 ? g.sum / g.w : null;
@@ -1935,6 +2035,10 @@ async function runScoreBacktest(){
 
     const calcLine = logStep(`calibrando — testando os cortes dia a dia (${closes.length} dias)`, "calibrationLog");
 
+    const motorKeys = ["macro","institucional","onchain","derivativos","tecnico","sentimento"];
+    const motorBuckets = {};
+    motorKeys.forEach(k=> motorBuckets[k] = { bull: [], bear: [] });
+
     for(let i=50; i<closes.length-forwardDays; i++){
       const date = dates[i];
 
@@ -1943,12 +2047,12 @@ async function runScoreBacktest(){
       const trendPct = ((closes[i]-closes[i-29])/closes[i-29])*100;
       const momPct = ((closes[i]-closes[i-1])/closes[i-1])*100;
       const tecVals = [clamp(trendPct*4,-100,100), clamp(momPct*12,-100,100)];
-      if(rsi !== null) tecVals.push(clamp((rsi-50)*2,-100,100));
+      if(rsi !== null) tecVals.push(clamp(-(rsi-50)*2,-100,100)); // leitura contrária
       if(sma !== null) tecVals.push(clamp(((closes[i]-sma)/sma*100)*8,-100,100));
       const tecnico = avg(tecVals);
 
       const fg = fgMap[date];
-      const sentimento = fg !== undefined ? clamp((fg-50)*2,-100,100) : null;
+      const sentimento = fg !== undefined ? clamp(-(fg-50)*2,-100,100) : null; // leitura contrária
       if(fg !== undefined) sourcesUsed.add("Sentimento (F&G)");
 
       const fr = fundingMap[date];
@@ -1988,6 +2092,16 @@ async function runScoreBacktest(){
 
       (buckets[action] = buckets[action] || []).push(fwd);
       allForwardReturns.push(fwd);
+
+      // desempenho histórico de cada motor isolado — pra saber qual carrega
+      // sinal de verdade e qual é só ruído, sem precisar mudar peso nenhum
+      // pra descobrir isso
+      motorKeys.forEach(k=>{
+        const v = composites[k];
+        if(v === null || v === undefined) return;
+        if(v >= 15) motorBuckets[k].bull.push(fwd);
+        else if(v <= -15) motorBuckets[k].bear.push(fwd);
+      });
 
       // estratégias de referência simples, pra comparar se o sistema completo
       // realmente agrega algo sobre "só olhar um indicador isolado"
@@ -2048,6 +2162,44 @@ async function runScoreBacktest(){
           `).join("")}
         </tbody>
       </table>
+
+      <div style="font-family:var(--font-mono);font-size:10px;color:var(--text-faint);text-transform:uppercase;letter-spacing:.06em;margin:20px 0 10px;border-top:1px solid var(--line-soft);padding-top:16px;">
+        Calibração por motor — quem tem sinal de verdade, isolado
+      </div>
+      <table class="hist">
+        <thead><tr><th>Motor</th><th>Peso hoje</th><th>Dias "bullish" (score ≥15) — retorno 30d depois</th><th>Dias "bearish" (score ≤-15) — retorno 30d depois</th><th>Leitura</th></tr></thead>
+        <tbody>
+          ${motorKeys.map(k=>{
+            const motor = S.motors[k];
+            const bullArr = motorBuckets[k].bull, bearArr = motorBuckets[k].bear;
+            const bullAvg = bullArr.length ? avg(bullArr) : null;
+            const bearAvg = bearArr.length ? avg(bearArr) : null;
+            let leitura = "amostra insuficiente";
+            let leituraColor = "var(--text-faint)";
+            if(bullArr.length >= 8 && bearArr.length >= 8){
+              if(bullAvg > bearAvg){ leitura = "✓ direção coerente"; leituraColor = "var(--teal)"; }
+              else { leitura = "⚠ direção invertida"; leituraColor = "var(--brick)"; }
+            }
+            return `
+              <tr>
+                <td>${motor.label}</td>
+                <td>${(motor.weight*100).toFixed(0)}%</td>
+                <td style="color:${bullAvg===null?"var(--text-faint)":(bullAvg>=0?"var(--teal)":"var(--brick)")};">
+                  ${bullAvg===null?"—":(bullAvg>=0?"+":"")+bullAvg.toFixed(1)+"%"} ${bullArr.length?`(${bullArr.length}d)`:""}
+                </td>
+                <td style="color:${bearAvg===null?"var(--text-faint)":(bearAvg>=0?"var(--teal)":"var(--brick)")};">
+                  ${bearAvg===null?"—":(bearAvg>=0?"+":"")+bearAvg.toFixed(1)+"%"} ${bearArr.length?`(${bearArr.length}d)`:""}
+                </td>
+                <td style="color:${leituraColor};">${leitura}</td>
+              </tr>
+            `;
+          }).join("")}
+        </tbody>
+      </table>
+      <p style="font-family:var(--font-mono);font-size:10.5px;color:var(--text-faint);margin-top:10px;">
+        "Direção coerente" significa que, historicamente, quando esse motor sozinho apontou pra cima o preço tendeu mais a subir do que quando apontou pra baixo — é o teste mínimo de um motor fazer sentido.
+        Isso não decide peso sozinho — é o ponto de partida pra discutirmos juntos se algum motor merece pesar mais ou menos.
+      </p>
       <p style="font-family:var(--font-mono);font-size:10.5px;color:var(--text-faint);margin-top:10px;">
         Fontes usadas neste teste: ${Array.from(sourcesUsed).join(", ") || "nenhuma (verifique conexão)"}.
         Macro e On-chain só entram se você tiver conectado FRED/CryptoQuant — sem isso, o teste roda só com Técnico, Sentimento e Derivativos (funding), e o resultado é menos representativo do sistema completo.
@@ -2113,8 +2265,15 @@ function generateAutoScenario(){
     invalidateTriggers.push("Preço fecha abaixo da Média Móvel 50d");
   }
   if(tec.rsi.value !== null){
-    confirmTriggers.push("RSI(14) permanece acima de 50");
-    invalidateTriggers.push("RSI(14) cai abaixo de 40");
+    // leitura contrária (evidência de calibração): RSI baixo favorece alta,
+    // RSI alto favorece queda — os gatilhos têm que respeitar isso, não o oposto
+    if(type === "bear"){
+      confirmTriggers.push("RSI(14) permanece acima de 60 (sobrecompra sustentando a queda)");
+      invalidateTriggers.push("RSI(14) cai abaixo de 35 (sobrevenda pode reverter a tese)");
+    } else {
+      confirmTriggers.push("RSI(14) permanece abaixo de 40 (sobrevenda sustentando a alta)");
+      invalidateTriggers.push("RSI(14) sobe acima de 65 (sobrecompra pode reverter a tese)");
+    }
   }
   if(der.funding.value !== null){
     confirmTriggers.push("Funding rate permanece saudável (sem alavancagem excessiva)");
@@ -2241,7 +2400,7 @@ function computeDecision(){
 
   // temporalidade — a "Recomendação" abaixo é uma mistura de prazos, não um
   // prazo só. Isso deixa explícito quanto de cada horizonte está dentro dela.
-  const hs = computeHorizonScores(ms.composites);
+  const hs = computeHorizonScores();
   const horizonBits = ["curto","medio","longo"]
     .filter(k=>hs[k].score !== null)
     .map(k=>`${HORIZON_LABELS[k].title} (${HORIZON_LABELS[k].window}): ${hs[k].label}`);
@@ -2543,6 +2702,7 @@ function renderState(){
 
   const changesHTML = renderChangesPanel();
   const horizonHTML = renderHorizonPanel(ms);
+  const powerLawHTML = renderPowerLawCard();
 
   dash.innerHTML = `
     <div class="dash-top">
@@ -2552,6 +2712,7 @@ function renderState(){
         <div class="dash-price-delta" style="color:${priceUp?COLOR.teal:COLOR.brick};">${S.market.change24h!=null ? (S.market.change24h>=0?"+":"")+S.market.change24h.toFixed(2)+"% (24h)" : "—"}</div>
         <div class="dash-sparkline">${sparklineSVG(S.market.priceHistory)}</div>
         <div class="dash-price-meta">${S.market.priceHistory ? S.market.priceHistory.length : 0} pontos registrados · confiança dos dados ${(ms.completeness*100).toFixed(0)}% · volatilidade ${volatilityLabel()}</div>
+        ${powerLawHTML}
       </div>
     </div>
     <div class="dials-grid">${motorDials}</div>
@@ -2566,7 +2727,7 @@ function horizonColor(score){
 }
 
 function renderHorizonPanel(ms){
-  const h = computeHorizonScores(ms.composites);
+  const h = computeHorizonScores();
   const dials = ["curto","medio","longo"].map(key=>{
     const info = HORIZON_LABELS[key];
     const g = h[key];
@@ -2599,6 +2760,38 @@ function renderHorizonPanel(ms){
       </div>
       <div class="dials-grid" style="grid-template-columns:repeat(3,1fr);">${dials}</div>
       ${interpretation ? `<div style="margin-top:12px;font-size:12.5px;color:var(--text-dim);">${interpretation}</div>` : ""}
+    </div>
+  `;
+}
+
+// power law de Santostasi — SÓ REFERÊNCIA, nunca entra em score nenhum.
+// Preço(t) = 10^(-16,493) × t^5,688, t = dias desde o gênese (03/jan/2009).
+// Piso/teto = ±2 desvios-padrão (sigma=0,200) em log10. Matemática pura,
+// não busca nada de fora — recalcula na hora com a data de hoje.
+function computePowerLawReference(currentPrice){
+  const genesis = Date.UTC(2009, 0, 3);
+  const t = Math.floor((Date.now() - genesis) / (24*3600*1000));
+  const trend = Math.pow(10, -16.493) * Math.pow(t, 5.688);
+  const sigma = 0.200;
+  const floor = trend * Math.pow(10, -2*sigma);
+  const ceiling = trend * Math.pow(10, 2*sigma);
+  let pctToFloor = null, pctToTrend = null;
+  if(currentPrice){
+    pctToFloor = (currentPrice/floor - 1) * 100;
+    pctToTrend = (currentPrice/trend - 1) * 100;
+  }
+  return { t, trend, floor, ceiling, pctToFloor, pctToTrend };
+}
+
+function renderPowerLawCard(){
+  const pl = computePowerLawReference(S.market.price);
+  const fmt = (v)=> "$"+v.toLocaleString("en-US",{maximumFractionDigits:0});
+  const floorColor = pl.pctToFloor === null ? "var(--text-faint)" : (pl.pctToFloor >= 15 ? "var(--teal)" : (pl.pctToFloor >= 0 ? "var(--gold)" : "var(--brick)"));
+  return `
+    <div style="margin-top:10px;padding:8px 10px;border:1px dashed var(--line-soft);font-family:var(--font-mono);font-size:10px;color:var(--text-faint);">
+      <div style="text-transform:uppercase;letter-spacing:.05em;margin-bottom:4px;">Referência — Power Law (Santostasi) · informativo, não pontua no score</div>
+      <div>Piso ${fmt(pl.floor)} · Central ${fmt(pl.trend)} · Teto ${fmt(pl.ceiling)}</div>
+      ${pl.pctToFloor !== null ? `<div style="margin-top:2px;color:${floorColor};">Preço atual: ${pl.pctToFloor>=0?"+":""}${pl.pctToFloor.toFixed(1)}% sobre o piso · ${pl.pctToTrend>=0?"+":""}${pl.pctToTrend.toFixed(1)}% sobre a linha central</div>` : ""}
     </div>
   `;
 }

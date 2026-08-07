@@ -541,6 +541,7 @@
       <button id="btnRunBacktest">🧠 Rodar backtest de indicadores (RSI/MM50)</button>
       <button class="primary" id="btnRunScoreBacktest">📊 Calibrar o Score Geral (testa os cortes 40/15/-15/-55)</button>
     </div>
+    <div id="calibrationTimestamp" style="margin-top:10px;font-family:var(--font-mono);font-size:10.5px;color:var(--text-faint);"></div>
     <div class="wrap" id="calibrationLogWrap" style="display:none;padding:0;">
       <div id="calibrationLog"></div>
     </div>
@@ -576,7 +577,7 @@
 </div>
 
 <footer class="wrap">
-  <div style="font-family:var(--font-mono);font-size:10px;color:var(--copper);margin-bottom:8px;">build 2026-08-06.18-indexeddb — se essa linha não aparecer no seu arquivo, você está num arquivo antigo, baixe o mais recente</div>
+  <div style="font-family:var(--font-mono);font-size:10px;color:var(--copper);margin-bottom:8px;">build <span id="buildVersionFooter">—</span> — se essa linha não aparecer no seu arquivo, você está num arquivo antigo, baixe o mais recente</div>
   SEIOS CRIPTO — instrumento local. Todos os dados ficam salvos apenas neste navegador (localStorage), no seu HD. Nada é enviado para nenhum servidor. Preços via CoinGecko · Sentimento via Alternative.me F&amp;G Index · Funding via Binance (best-effort, sem chave). Este instrumento não é recomendação de investimento.
 </footer>
 
@@ -588,6 +589,10 @@
    § STORAGE — tudo fica local, no navegador, no HD do usuário
    ===================================================================== */
 const STORAGE_KEY = "seios_btc_v2";
+// fonte única da versão — usada no rodapé, no histórico e nos exports.
+// Muda toda vez que a fórmula de score/pesos muda, pra nunca misturar
+// decisões de regras diferentes como se fossem comparáveis.
+const BUILD_VERSION = "2026-08-06.19-eventos";
 
 // indicador padrão — auto = tenta buscar sozinho; manual = você preenche
 function ind(label, source, note){
@@ -611,6 +616,7 @@ function defaultState(){
   return {
     apiKeys: { cryptoquant:"", fred:"" }, // ficam só no seu navegador, nunca são enviadas a mim
     lastExportAt: null,
+    lastCalibratedAt: null,
     motors: {
       macro:         { label:"Macro",                       weight:.33, indicators:{
         juros:     ind("Juros — Fed Funds Rate (FRED, se conectado)", "auto"),
@@ -658,7 +664,9 @@ function defaultState(){
         gdelt:     ind("Tom das notícias mundiais (GDELT, tempo real)", "auto"),
         epu:       ind("Incerteza de política econômica (EPU, via FRED)", "auto")
       }},
-      eventos:       { label:"Eventos extraordinários",      weight:.05, indicators:{} } // usa S.events[]
+      eventos:       { label:"Eventos extraordinários",      weight:.05, indicators:{
+        volumeSpike: ind("Pico de volume de notícias de crise (GDELT)", "auto")
+      } } // combina com S.events[] (manual)
     },
     events: [], // {id, title, date, impact(-100..100)}
     market: { price:null, change24h:null, volatility:null, prevOpenInterest:null, prevOICheckedAt:null, lastFetch:null, priceHistory:[], previousComposites:null, previousIndicatorValues:null, lastDeltas:null, lastAnomalies:null },
@@ -907,6 +915,30 @@ async function fetchGdeltTone(){
   const val = last.value ?? last.Value ?? last.tone ?? last.Tone;
   if(val === undefined || Number.isNaN(Number(val))) throw new Error("GDELT formato inesperado");
   return Number(val); // tom médio, tipicamente entre -10 e +10
+}
+
+// aceleração de volume — diferente do tom: mede QUANTO se fala de crise
+// agora comparado ao normal dos últimos dias, não SE é notícia boa ou ruim.
+// É essa ideia de "aceleração" que o texto sobre motores geopolíticos trouxe.
+async function fetchGdeltVolumeSpike(){
+  const query = encodeURIComponent('(war OR conflict OR invasion OR sanctions OR "military strike" OR terrorism OR coup OR crash OR collapse OR default OR emergency)');
+  const url = `https://api.gdeltproject.org/api/v2/doc/doc?query=${query}&mode=timelinevolraw&format=json&timespan=14d`;
+  const res = await smartFetch(url);
+  if(!res.ok) throw new Error("GDELT volume falhou (" + res.status + ")");
+  const data = await res.json();
+  const series = data.timeline && data.timeline[0];
+  const points = series && (series.data || series.Data);
+  if(!points || points.length < 4) throw new Error("GDELT volume sem dado suficiente");
+  const vals = points.map(p => Number(p.value ?? p.Value ?? p["norm-count"] ?? p.count ?? p.Count)).filter(v=>!Number.isNaN(v));
+  if(vals.length < 4) throw new Error("GDELT volume formato inesperado");
+  const recentN = Math.max(2, Math.floor(vals.length*0.15));
+  const recent = vals.slice(-recentN);
+  const baseline = vals.slice(0, vals.length - recentN);
+  if(!baseline.length) throw new Error("baseline insuficiente");
+  const recentAvg = recent.reduce((a,b)=>a+b,0) / recent.length;
+  const baselineAvg = baseline.reduce((a,b)=>a+b,0) / baseline.length;
+  if(!baselineAvg) throw new Error("baseline zerada");
+  return ((recentAvg / baselineAvg) - 1) * 100; // % de quanto o volume recente está acima/abaixo do normal
 }
 
 async function fetchHashrateTrend(){
@@ -1420,6 +1452,16 @@ async function refreshMarketData(){
   }
 
   await sleep(200);
+  { const line = logStep("consultando pico de volume de notícias de crise (GDELT)");
+    try{
+      const spike = await fetchGdeltVolumeSpike();
+      setAuto("eventos","volumeSpike", clamp(-spike*1.5, -100, 100), `volume ${spike>=0?"+":""}${spike.toFixed(0)}% vs. normal`);
+      results.ok.push("gdelt volume");
+      logDone(line, true, `${spike>=0?"+":""}${spike.toFixed(0)}%`);
+    }catch(e){ setFailed("eventos","volumeSpike"); results.fail.push("gdelt volume"); logDone(line, false, e.message); }
+  }
+
+  await sleep(200);
   // CryptoQuant — só tenta se você tiver colado uma chave (plano Professional, ~$99-109/mês)
   if(S.apiKeys.cryptoquant){
     { const line = logStep("consultando MVRV (CryptoQuant)");
@@ -1545,7 +1587,8 @@ function autoLogHistory(){
     action: d.action,
     leaderTitle: d.leader ? d.leader.title : null,
     resultado: "",
-    auto: true
+    auto: true,
+    version: BUILD_VERSION
   });
 }
 
@@ -1658,8 +1701,11 @@ function motorComposite(motorKey){
   if(motorKey === "eventos"){
     const cutoff = Date.now() - 14*24*3600*1000;
     const recent = S.events.filter(e => new Date(e.date).getTime() >= cutoff);
-    if(!recent.length) return null;
-    return recent.reduce((a,e)=>a+e.impact,0) / recent.length;
+    const manualAvg = recent.length ? recent.reduce((a,e)=>a+e.impact,0)/recent.length : null;
+    const autoVal = motor.indicators.volumeSpike ? motor.indicators.volumeSpike.value : null;
+    const vals = [manualAvg, autoVal].filter(v=>v!==null && v!==undefined && !Number.isNaN(v));
+    if(!vals.length) return null;
+    return vals.reduce((a,b)=>a+b,0) / vals.length;
   }
   const vals = Object.values(motor.indicators)
     .map(i=>i.value)
@@ -2286,6 +2332,9 @@ async function runScoreBacktest(){
       </p>
     `;
     logFinal("concluído — calibração pronta, veja a tabela abaixo", "calibrationLog");
+    S.lastCalibratedAt = new Date().toISOString();
+    saveState();
+    renderCalibrationTimestamp();
   }catch(e){
     out.innerHTML = `<div class="empty-state">Falha ao rodar (rede/CORS). Tente de novo em instantes.</div>`;
     logFinal(`falhou — ${e.message}`, "calibrationLog");
@@ -2758,6 +2807,14 @@ function renderTicker(){
     : "nunca atualizado";
 }
 
+function renderCalibrationTimestamp(){
+  const el = document.getElementById("calibrationTimestamp");
+  if(!el) return;
+  el.textContent = S.lastCalibratedAt
+    ? "última calibração em " + new Date(S.lastCalibratedAt).toLocaleString("pt-BR")
+    : "ainda não calibrado nesta sessão/dispositivo";
+}
+
 function renderState(){
   const ms = computeMarketState();
   const dash = document.getElementById("summaryDash");
@@ -3121,7 +3178,7 @@ function renderHistory(){
   }
   const rows = S.history.slice().reverse().map(h=>`
     <tr data-id="${h.id}">
-      <td>${new Date(h.date).toLocaleString("pt-BR")}${h.auto ? ' <span style="color:var(--text-faint);font-size:9.5px;">auto</span>' : ""}</td>
+      <td>${new Date(h.date).toLocaleString("pt-BR")}${h.auto ? ' <span style="color:var(--text-faint);font-size:9.5px;">auto</span>' : ""}${h.version ? ` <span style="color:var(--text-faint);font-size:9px;" title="versão do sistema">· ${h.version}</span>` : ""}</td>
       <td>${h.price ? "$"+h.price.toLocaleString("en-US",{maximumFractionDigits:0}) : "—"}</td>
       <td>${h.marketScore.toFixed(0)}</td>
       <td>${h.action}</td>
@@ -3155,6 +3212,7 @@ function renderAll(){
   renderMemoryPanel();
   renderBackupWarning();
   renderArchiveStatus();
+  renderCalibrationTimestamp();
 }
 
 // assíncrono de propósito — a contagem no IndexedDB não pode travar o
@@ -3356,7 +3414,8 @@ document.getElementById("btnLogDecision").addEventListener("click", ()=>{
     marketScore: ms.score,
     action: d.action,
     leaderTitle: d.leader ? d.leader.title : null,
-    resultado: ""
+    resultado: "",
+    version: BUILD_VERSION
   });
   saveState();
   renderHistory();
@@ -3386,7 +3445,7 @@ document.getElementById("btnExport").addEventListener("click", ()=>{
 
 document.getElementById("btnExportCsv").addEventListener("click", async ()=>{
   const esc = (v)=> `"${String(v??"").replace(/"/g,'""')}"`;
-  const header = ["data","preco_usd","score","recomendacao","cenario_lider","resultado_observado","auto"];
+  const header = ["data","preco_usd","score","recomendacao","cenario_lider","resultado_observado","auto","versao_do_sistema"];
   const archived = await getAllArchivedEntries(); // inclui o que já foi pro "porão"
   const todos = [...archived, ...S.history];
   const rows = todos.slice().sort((a,b)=>new Date(a.date)-new Date(b.date)).map(h=>[
@@ -3396,7 +3455,8 @@ document.getElementById("btnExportCsv").addEventListener("click", async ()=>{
     h.action ?? "",
     h.leaderTitle ?? "",
     h.resultado ?? "",
-    h.auto ? "sim" : "não"
+    h.auto ? "sim" : "não",
+    h.version ?? "anterior ao rastreio de versão"
   ].map(esc).join(","));
   const csv = "\uFEFF" + [header.map(esc).join(","), ...rows].join("\r\n"); // BOM pro Excel ler acentos certo
   const blob = new Blob([csv], {type:"text/csv;charset=utf-8"});
@@ -3504,6 +3564,7 @@ btnReset.addEventListener("click", ()=>{
 // sozinha. Você decide quando "Atualizar dados de mercado" é acionado,
 // pra não ficar batendo no limite de consultas do FRED só de abrir a página.
 renderAll();
+document.getElementById("buildVersionFooter").textContent = BUILD_VERSION;
 
 })();
 </script>

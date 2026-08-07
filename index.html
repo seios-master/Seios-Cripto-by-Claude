@@ -749,7 +749,7 @@ const STORAGE_KEY = "seios_btc_v2";
 // fonte única da versão — usada no rodapé, no histórico e nos exports.
 // Muda toda vez que a fórmula de score/pesos muda, pra nunca misturar
 // decisões de regras diferentes como se fossem comparáveis.
-const BUILD_VERSION = "2026-08-06.39-weekly-ma-fix";
+const BUILD_VERSION = "2026-08-06.40-weekly-ma-fallback";
 
 // indicador padrão — auto = tenta buscar sozinho; manual = você preenche
 function ind(label, source, note){
@@ -3349,7 +3349,15 @@ async function fetchWeeklyMAs(){
   const cacheAge = S.market.weeklyMAsComputedAt ? Date.now() - new Date(S.market.weeklyMAsComputedAt).getTime() : Infinity;
   if(S.market.weeklyMAs && cacheAge < 24*3600*1000) return S.market.weeklyMAs; // cache ainda válido
 
-  const prices = await fetchMarketChart("max"); // pede o máximo disponível — CoinGecko honra "max" mesmo sem chave, mais confiável que pedir um número fixo de dias
+  // tenta um período grande primeiro (sobra pra MA200); se falhar (proxy não
+  // aguenta resposta grande), cai pra um período menor — melhor mostrar
+  // MA50/MA100 do que nada, em vez de tudo-ou-nada
+  let prices;
+  try{
+    prices = await fetchMarketChart(1460); // ~4 anos, sobra pra MA200
+  }catch(e){
+    prices = await fetchMarketChart(400); // ~57 semanas, cobre MA50 e quase MA100
+  }
   if(!prices || prices.length < 10) throw new Error("histórico praticamente vazio — fonte não devolveu dado");
 
   // reamostra diário -> semanal, agrupando pelo CALENDÁRIO (número da semana

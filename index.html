@@ -741,7 +741,7 @@ const STORAGE_KEY = "seios_btc_v2";
 // fonte única da versão — usada no rodapé, no histórico e nos exports.
 // Muda toda vez que a fórmula de score/pesos muda, pra nunca misturar
 // decisões de regras diferentes como se fossem comparáveis.
-const BUILD_VERSION = "2026-08-06.36-ui-fixes";
+const BUILD_VERSION = "2026-08-06.37-dual-proxy";
 
 // indicador padrão — auto = tenta buscar sozinho; manual = você preenche
 function ind(label, source, note){
@@ -992,27 +992,38 @@ let S = loadState();
 // como preço ou séries econômicas, mas é uma concessão de privacidade real.
 function sleep(ms){ return new Promise(r=>setTimeout(r,ms)); }
 
+// duas fontes de proxy CORS — se a primeira estiver com problema nessa
+// hora (comum em serviço gratuito compartilhado), tenta a segunda antes
+// de desistir, em vez de depender de uma única fonte
+const CORS_PROXIES = [
+  url => "https://api.allorigins.win/raw?url=" + encodeURIComponent(url),
+  url => "https://corsproxy.io/?" + encodeURIComponent(url)
+];
+
 async function smartFetchOnce(url){
   try{
     const res = await fetch(url);
     if(res.ok) return res;
     throw new Error("status " + res.status);
   }catch(directErr){
-    const proxied = "https://api.allorigins.win/raw?url=" + encodeURIComponent(url);
-    const res2 = await fetch(proxied);
-    if(!res2.ok) throw directErr;
-    return res2;
+    for(const buildProxyUrl of CORS_PROXIES){
+      try{
+        const res = await fetch(buildProxyUrl(url));
+        if(res.ok) return res;
+      }catch(proxyErr){ /* tenta o próximo proxy da lista */ }
+    }
+    throw directErr;
   }
 }
 
-// tenta direto, depois via proxy CORS; se as duas falharem (comum sob rajada
-// de chamadas seguidas, não é a fonte "quebrada"), espera meio segundo e
-// tenta a sequência inteira mais uma vez antes de desistir de verdade
+// tenta direto, depois os dois proxies CORS em sequência; se tudo falhar
+// (comum sob rajada de chamadas seguidas, não é a fonte "quebrada"), espera
+// e tenta a sequência inteira mais uma vez antes de desistir de verdade
 async function smartFetch(url){
   try{
     return await smartFetchOnce(url);
   }catch(firstErr){
-    await sleep(700);
+    await sleep(1000);
     return await smartFetchOnce(url);
   }
 }
@@ -3317,7 +3328,7 @@ async function fetchWeeklyMAs(){
   const cacheAge = S.market.weeklyMAsComputedAt ? Date.now() - new Date(S.market.weeklyMAsComputedAt).getTime() : Infinity;
   if(S.market.weeklyMAs && cacheAge < 24*3600*1000) return S.market.weeklyMAs; // cache ainda válido
 
-  const prices = await fetchMarketChart(1500); // [[timestamp, price], ...] — a fonte pode devolver menos que o pedido, sem key paga
+  const prices = await fetchMarketChart("max"); // pede o máximo disponível — CoinGecko honra "max" mesmo sem chave, mais confiável que pedir um número fixo de dias
   if(!prices || prices.length < 60) throw new Error("histórico insuficiente até pra MA de 50 semanas");
 
   // reamostra diário -> semanal, pegando o último preço de cada bloco de 7 dias

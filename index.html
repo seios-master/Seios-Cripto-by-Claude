@@ -739,7 +739,7 @@ const STORAGE_KEY = "seios_btc_v2";
 // fonte única da versão — usada no rodapé, no histórico e nos exports.
 // Muda toda vez que a fórmula de score/pesos muda, pra nunca misturar
 // decisões de regras diferentes como se fossem comparáveis.
-const BUILD_VERSION = "2026-08-06.34-copper-vix-mas";
+const BUILD_VERSION = "2026-08-06.35-error-fixes";
 
 // indicador padrão — auto = tenta buscar sozinho; manual = você preenche
 function ind(label, source, note){
@@ -816,7 +816,6 @@ function defaultState(){
         volumeSpike: ind("Pico de volume de notícias de crise (GDELT)", "auto")
       } }, // combina com S.events[] (manual)
       ativosGlobais: { label:"Ativos Globais",                weight:.08, indicators:{
-        ouro:    ind("Ouro (momentum 90d)", "auto"),
         petroleo: ind("Petróleo WTI (momentum 90d)", "auto"),
         euro:    ind("Euro/Dólar (momentum 90d)", "auto"),
         sp500:   ind("S&P 500 (momentum 90d)", "auto"),
@@ -1361,7 +1360,7 @@ async function refreshMarketData(){
         logDone(line, true, `${latest.toFixed(2)}%`);
       }catch(e){ setFailed("macro","juros"); results.fail.push("juros (FRED)"); logDone(line, false, e.message); }
     }
-    await sleep(250);
+    await sleep(400);
 
     { const line = logStep("consultando inflação — CPI (FRED)");
       try{ // CPI — compara inflação YoY de agora com a de ~3 meses atrás; acelerando = baixista
@@ -1377,7 +1376,7 @@ async function refreshMarketData(){
         logDone(line, true, `YoY ${yoyNow.toFixed(1)}%`);
       }catch(e){ setFailed("macro","inflacao"); results.fail.push("inflação (FRED)"); logDone(line, false, e.message); }
     }
-    await sleep(250);
+    await sleep(400);
 
     { const line = logStep("consultando liquidez — M2 (FRED)");
       try{ // M2 — crescimento YoY da oferta monetária; mais liquidez = bullish (correlação documentada)
@@ -1389,7 +1388,7 @@ async function refreshMarketData(){
         logDone(line, true, `YoY ${yoy>=0?"+":""}${yoy.toFixed(1)}%`);
       }catch(e){ setFailed("macro","liquidez"); results.fail.push("liquidez/M2 (FRED)"); logDone(line, false, e.message); }
     }
-    await sleep(250);
+    await sleep(400);
 
     { const line = logStep("consultando dólar — DXY (FRED)");
       try{ // dólar ponderado — dólar mais forte tende a pressionar BTC pra baixo
@@ -1401,7 +1400,7 @@ async function refreshMarketData(){
         logDone(line, true, `${pct>=0?"+":""}${pct.toFixed(1)}%`);
       }catch(e){ setFailed("macro","dxy"); results.fail.push("dxy (FRED)"); logDone(line, false, e.message); }
     }
-    await sleep(250);
+    await sleep(400);
 
     { const line = logStep("consultando curva de juros — 10y-2y (FRED)");
       try{ // spread 10y-2y — invertido (negativo) sinaliza estresse macro
@@ -1412,7 +1411,7 @@ async function refreshMarketData(){
         logDone(line, true, `${spread>=0?"+":""}${spread.toFixed(2)}pp`);
       }catch(e){ setFailed("macro","curva"); results.fail.push("curva de juros (FRED)"); logDone(line, false, e.message); }
     }
-    await sleep(250);
+    await sleep(400);
 
     { const line = logStep("consultando incerteza de política econômica — EPU (FRED)");
       try{ // EPU subindo = mais incerteza = viés levemente baixista pra ativos de risco
@@ -1425,21 +1424,8 @@ async function refreshMarketData(){
       }catch(e){ setFailed("geopolitico","epu"); results.fail.push("epu (FRED)"); logDone(line, false, e.message); }
     }
 
-    await sleep(250);
-    { const line = logStep("consultando ouro — momentum 90d (FRED)");
-      try{ // ouro subindo = leitura provisória de "medo"/busca por proteção,
-        // fora do BTC — direção ainda não confirmada na calibração, tratar
-        // com mais cautela que os indicadores já validados
-        const obs = await fetchFredSeries("GOLDAMGBD228NLBM", S.apiKeys.fred, 95);
-        const latest = obs[0].value, past = obs[obs.length-1].value;
-        const pct = past ? ((latest-past)/past)*100 : 0;
-        setAuto("ativosGlobais","ouro", clamp(-pct*4, -100, 100), `$${latest.toFixed(0)}/oz (${pct>=0?"+":""}${pct.toFixed(1)}% em ~90d) — leitura provisória`);
-        results.ok.push("ouro (FRED)");
-        logDone(line, true, `$${latest.toFixed(0)}`);
-      }catch(e){ setFailed("ativosGlobais","ouro"); results.fail.push("ouro (FRED)"); logDone(line, false, e.message); }
-    }
-
-    await sleep(250);
+    await sleep(400);
+    await sleep(400);
     { const line = logStep("consultando petróleo WTI — momentum 90d (FRED)");
       try{ // petróleo subindo = risco de choque inflacionário (confirmado na
         // pesquisa histórica: o Fed citou o petróleo do conflito no Irã
@@ -1453,7 +1439,7 @@ async function refreshMarketData(){
       }catch(e){ setFailed("ativosGlobais","petroleo"); results.fail.push("petroleo (FRED)"); logDone(line, false, e.message); }
     }
 
-    await sleep(250);
+    await sleep(400);
     { const line = logStep("consultando euro/dólar — momentum 90d (FRED)");
       try{ // euro subindo = dólar mais fraco = geralmente risco-on (espelha
         // a lógica do DXY, só que olhando o par específico, não a cesta)
@@ -1466,7 +1452,7 @@ async function refreshMarketData(){
       }catch(e){ setFailed("ativosGlobais","euro"); results.fail.push("euro (FRED)"); logDone(line, false, e.message); }
     }
 
-    await sleep(250);
+    await sleep(400);
     { const line = logStep("consultando S&P 500 — momentum 90d (FRED)");
       try{ // correlação BTC-Nasdaq/S&P documentada em ~0,78 na pesquisa
         // histórica — é o indicador com base empírica mais forte dos 4 novos
@@ -1479,7 +1465,7 @@ async function refreshMarketData(){
       }catch(e){ setFailed("ativosGlobais","sp500"); results.fail.push("sp500 (FRED)"); logDone(line, false, e.message); }
     }
 
-    await sleep(250);
+    await sleep(400);
     { const line = logStep("consultando cobre — momentum mensal (FRED)");
       try{ // cobre é mensal, não diário — compara mês mais recente com ~3
         // meses atrás, mesmo padrão já usado pra inflação/liquidez
@@ -1492,7 +1478,7 @@ async function refreshMarketData(){
       }catch(e){ setFailed("ativosGlobais","cobre"); results.fail.push("cobre (FRED)"); logDone(line, false, e.message); }
     }
 
-    await sleep(250);
+    await sleep(400);
     { const line = logStep("consultando VIX — índice de medo tradicional (FRED)");
       try{ // VIX é mais sobre NÍVEL que sobre variação — abaixo de 18 é
         // complacência (bullish), acima é medo crescente (bearish)
@@ -1504,7 +1490,7 @@ async function refreshMarketData(){
       }catch(e){ setFailed("ativosGlobais","vix"); results.fail.push("vix (FRED)"); logDone(line, false, e.message); }
     }
 
-    await sleep(250);
+    await sleep(400);
     { const line = logStep("consultando Treasury 10 anos — nível (FRED)");
       try{ // rendimento subindo = mais concorrência de capital contra ativos
         // de risco, mesma lógica já usada pro Fed Funds Rate (DFF)
@@ -1535,9 +1521,9 @@ async function refreshMarketData(){
   await sleep(200);
   { const line = logStep("consultando médias móveis de 200/100/50 semanas (só observação)");
     try{
-      await fetchWeeklyMAs(); // cacheado por 24h — não pesa nas atualizações seguintes do dia
+      const mas = await fetchWeeklyMAs(); // cacheado por 24h — não pesa nas atualizações seguintes do dia
       results.ok.push("médias semanais");
-      logDone(line, true, "ok");
+      logDone(line, true, `${mas.semanasDisponiveis} semanas disponíveis`);
     }catch(e){ results.fail.push("médias semanais"); logDone(line, false, e.message); }
   }
 
@@ -1725,7 +1711,9 @@ async function refreshMarketData(){
     }catch(e){ setFailed("tecnico","bookImbalance"); results.fail.push("book imbalance"); logDone(line, false, e.message); }
   }
 
-  await sleep(200);
+  await sleep(800); // mais respiro aqui — GDELT vem depois de uma sequência
+  // longa (FRED + CoinGecko + Binance + Deribit...), dá mais chance do
+  // proxy compartilhado grátis não estar congestionado
   // GDELT — radar de notícia global, sem chave nenhuma
   { const line = logStep("consultando tom das notícias globais (GDELT)");
     try{
@@ -1927,7 +1915,7 @@ const INDICATOR_HORIZON = {
   "eventos": "medio",
   "macro.juros": "longo", "macro.inflacao": "longo", "macro.liquidez": "longo",
   "macro.dxy": "longo", "macro.curva": "longo",
-  "ativosGlobais.ouro": "longo", "ativosGlobais.petroleo": "longo",
+  "ativosGlobais.petroleo": "longo",
   "ativosGlobais.euro": "longo", "ativosGlobais.sp500": "longo",
   "ativosGlobais.cobre": "longo", "ativosGlobais.vix": "curto", "ativosGlobais.juros10a": "longo",
   "onchain.mvrv": "longo", "onchain.nupl": "longo", "onchain.sopr": "longo",
@@ -2267,16 +2255,6 @@ async function fetchMacroHistoryMaps(apiKey){
   // Ativos Globais — mesmo padrão de momentum 90d, com valor bruto separado
   // pra alimentar a tabela de "Regime macro histórico" (testar por faixa)
   try{
-    const obs = await fetchFredSeriesRange("GOLDAMGBD228NLBM", apiKey, startDaily);
-    maps.ouroRaw = {};
-    obs.forEach((o,idx)=>{
-      const past = obs[Math.max(0, idx-90)];
-      const pct = past.value ? ((o.value - past.value)/past.value)*100 : 0;
-      maps.ouroRaw[o.date] = pct;
-    });
-  }catch(e){}
-
-  try{
     const obs = await fetchFredSeriesRange("DCOILWTICO", apiKey, startDaily);
     maps.petroleoRaw = {};
     obs.forEach((o,idx)=>{
@@ -2493,7 +2471,7 @@ async function runScoreBacktest(){
     const buckets = {};
     const allForwardReturns = [];
     const refRsiOversold = [], refFgFear = [];
-    const regimeRaw = { juros: [], inflacao: [], dxy: [], ouro: [], petroleo: [], euro: [], sp500: [] };
+    const regimeRaw = { juros: [], inflacao: [], dxy: [], petroleo: [], euro: [], sp500: [] };
     let sourcesUsed = new Set();
 
     const calcLine = logStep(`calibrando — testando os cortes dia a dia (${closes.length} dias)`, "calibrationLog");
@@ -2557,9 +2535,6 @@ async function runScoreBacktest(){
       }
       if(macroMaps.dxyRaw && macroMaps.dxyRaw[date] !== undefined){
         regimeRaw.dxy.push({ v: macroMaps.dxyRaw[date], fwd: ((closes[i+forwardDays]-closes[i])/closes[i])*100 });
-      }
-      if(macroMaps.ouroRaw && macroMaps.ouroRaw[date] !== undefined){
-        regimeRaw.ouro.push({ v: macroMaps.ouroRaw[date], fwd: ((closes[i+forwardDays]-closes[i])/closes[i])*100 });
       }
       if(macroMaps.petroleoRaw && macroMaps.petroleoRaw[date] !== undefined){
         regimeRaw.petroleo.push({ v: macroMaps.petroleoRaw[date], fwd: ((closes[i+forwardDays]-closes[i])/closes[i])*100 });
@@ -2697,7 +2672,6 @@ async function runScoreBacktest(){
           { key:"juros", label:"Juros do Fed (Fed Funds Rate)", unit:"%", fmt:v=>v.toFixed(2)+"%" },
           { key:"inflacao", label:"Inflação (CPI, var. anual)", unit:"%", fmt:v=>v.toFixed(1)+"%" },
           { key:"dxy", label:"Dólar (DXY, var. 90d)", unit:"%", fmt:v=>(v>=0?"+":"")+v.toFixed(1)+"%" },
-          { key:"ouro", label:"Ouro (var. 90d)", unit:"%", fmt:v=>(v>=0?"+":"")+v.toFixed(1)+"%" },
           { key:"petroleo", label:"Petróleo WTI (var. 90d)", unit:"%", fmt:v=>(v>=0?"+":"")+v.toFixed(1)+"%" },
           { key:"euro", label:"Euro/Dólar (var. 90d)", unit:"%", fmt:v=>(v>=0?"+":"")+v.toFixed(1)+"%" },
           { key:"sp500", label:"S&P 500 (var. 90d)", unit:"%", fmt:v=>(v>=0?"+":"")+v.toFixed(1)+"%" }
@@ -3341,8 +3315,8 @@ async function fetchWeeklyMAs(){
   const cacheAge = S.market.weeklyMAsComputedAt ? Date.now() - new Date(S.market.weeklyMAsComputedAt).getTime() : Infinity;
   if(S.market.weeklyMAs && cacheAge < 24*3600*1000) return S.market.weeklyMAs; // cache ainda válido
 
-  const prices = await fetchMarketChart(1500); // [[timestamp, price], ...]
-  if(!prices || prices.length < 350) throw new Error("histórico insuficiente pras médias semanais");
+  const prices = await fetchMarketChart(1500); // [[timestamp, price], ...] — a fonte pode devolver menos que o pedido, sem key paga
+  if(!prices || prices.length < 60) throw new Error("histórico insuficiente até pra MA de 50 semanas");
 
   // reamostra diário -> semanal, pegando o último preço de cada bloco de 7 dias
   const weekly = [];
@@ -3352,7 +3326,7 @@ async function fetchWeeklyMAs(){
   }
 
   const sma = (arr, n) => {
-    if(arr.length < n) return null;
+    if(arr.length < n) return null; // essa MA específica fica "—" se não tiver semana suficiente, não derruba as outras
     const slice = arr.slice(-n);
     return slice.reduce((a,b)=>a+b,0) / slice.length;
   };
@@ -3360,7 +3334,8 @@ async function fetchWeeklyMAs(){
   const result = {
     ma200: sma(weekly, 200),
     ma100: sma(weekly, 100),
-    ma50: sma(weekly, 50)
+    ma50: sma(weekly, 50),
+    semanasDisponiveis: weekly.length
   };
   S.market.weeklyMAs = result;
   S.market.weeklyMAsComputedAt = new Date().toISOString();

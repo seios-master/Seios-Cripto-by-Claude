@@ -603,6 +603,18 @@
     <div id="memoryWrap"></div>
   </section>
 
+  <!-- § CASE ENGINE / META LEARNING -->
+  <section class="panel" id="panelCaseEngine">
+    <div class="panel-head">
+      <div>
+        <div class="panel-mark">§ Case Engine / Meta Learning (embrião)</div>
+        <h2 class="panel-title">Quem está acertando, motor por motor — com seu uso real</h2>
+      </div>
+      <div class="panel-desc">Mesma pergunta da Calibração (bullish vs. bearish), só que usando os dados que <em>você</em> acumulou usando o sistema, não 12 meses de histórico público.</div>
+    </div>
+    <div id="caseEngineWrap"></div>
+  </section>
+
 </div>
 
 <footer class="wrap">
@@ -749,7 +761,7 @@ const STORAGE_KEY = "seios_btc_v2";
 // fonte única da versão — usada no rodapé, no histórico e nos exports.
 // Muda toda vez que a fórmula de score/pesos muda, pra nunca misturar
 // decisões de regras diferentes como se fossem comparáveis.
-const BUILD_VERSION = "2026-08-06.40-weekly-ma-fallback";
+const BUILD_VERSION = "2026-08-06.42-case-engine";
 
 // indicador padrão — auto = tenta buscar sozinho; manual = você preenche
 function ind(label, source, note){
@@ -835,7 +847,7 @@ function defaultState(){
       }}
     },
     events: [], // {id, title, date, impact(-100..100)}
-    market: { price:null, change24h:null, volatility:null, prevOpenInterest:null, prevOICheckedAt:null, lastFetch:null, priceHistory:[], previousComposites:null, previousIndicatorValues:null, lastDeltas:null, lastAnomalies:null, weeklyMAs:null, weeklyMAsComputedAt:null },
+    market: { price:null, change24h:null, volatility:null, prevOpenInterest:null, prevOICheckedAt:null, lastFetch:null, priceHistory:[], previousComposites:null, previousIndicatorValues:null, lastDeltas:null, lastAnomalies:null, weeklyMAs:null, weeklyMAsComputedAt:null, weeklyMAsError:null },
     scenarios: [],
     premises: [],
     history: [],
@@ -1553,15 +1565,6 @@ async function refreshMarketData(){
   }
 
   await sleep(200);
-  { const line = logStep("consultando médias móveis de 200/100/50 semanas (só observação)");
-    try{
-      const mas = await fetchWeeklyMAs(); // cacheado por 24h — não pesa nas atualizações seguintes do dia
-      results.ok.push("médias semanais");
-      logDone(line, true, `${mas.semanasDisponiveis} semanas disponíveis`);
-    }catch(e){ results.fail.push("médias semanais"); logDone(line, false, e.message); }
-  }
-
-  await sleep(200);
   // histórico 90d → Tendência, Volatilidade, RSI, Média Móvel 50d
   { const line = logStep("consultando histórico de preço — tendência, RSI, média móvel (CoinGecko)");
     try{
@@ -1895,6 +1898,7 @@ function autoLogHistory(){
     marketScore: ms.score,
     action: d.action,
     leaderTitle: d.leader ? d.leader.title : null,
+    composites: ms.composites, // snapshot de cada motor nesse instante — é isso que falta pro Case Engine aprender quem acertou
     resultado: "",
     auto: true,
     version: BUILD_VERSION
@@ -3290,9 +3294,9 @@ function renderState(){
       </div>
       ${renderPowerLawDial()}
     </div>
+    ${renderWeeklyMADials()}
     <div class="dials-grid">${motorDials}</div>
     ${horizonHTML}
-    ${renderWeeklyMADials()}
     ${changesHTML}
   `;
 }
@@ -3347,36 +3351,19 @@ function renderHorizonPanel(ms){
 // cache por 24h, não busca de novo a cada atualização
 async function fetchWeeklyMAs(){
   const cacheAge = S.market.weeklyMAsComputedAt ? Date.now() - new Date(S.market.weeklyMAsComputedAt).getTime() : Infinity;
-  if(S.market.weeklyMAs && cacheAge < 24*3600*1000) return S.market.weeklyMAs; // cache ainda válido
+  if(S.market.weeklyMAs && cacheAge < 24*3600*1000) return S.market.weeklyMAs; // cache ainda válido — relógio fixo, não busca de novo toda hora
 
-  // tenta um período grande primeiro (sobra pra MA200); se falhar (proxy não
-  // aguenta resposta grande), cai pra um período menor — melhor mostrar
-  // MA50/MA100 do que nada, em vez de tudo-ou-nada
-  let prices;
-  try{
-    prices = await fetchMarketChart(1460); // ~4 anos, sobra pra MA200
-  }catch(e){
-    prices = await fetchMarketChart(400); // ~57 semanas, cobre MA50 e quase MA100
-  }
-  if(!prices || prices.length < 10) throw new Error("histórico praticamente vazio — fonte não devolveu dado");
+  // Binance já entrega o candle SEMANAL pronto — sem CORS, sem proxy, sem
+  // precisar reamostrar nada. limit=1000 semanas ~= 19 anos, sobra muito
+  // pra MA de 200 semanas
+  const res = await smartFetch("https://api.binance.com/api/v3/klines?symbol=BTCUSDT&interval=1w&limit=1000");
+  if(!res.ok) throw new Error("binance klines falhou (" + res.status + ")");
+  const data = await res.json();
+  if(!Array.isArray(data) || data.length < 10) throw new Error("binance devolveu histórico curto demais");
 
-  // reamostra diário -> semanal, agrupando pelo CALENDÁRIO (número da semana
-  // desde a época), não pela posição na lista — funciona não importa se a
-  // fonte devolveu ponto por dia, por semana, ou espaçamento irregular
-  const weekMs = 7*24*3600*1000;
-  const weekly = [];
-  let currentWeekKey = null, lastPriceInWeek = null;
-  for(const [ts, price] of prices){
-    const weekKey = Math.floor(ts / weekMs);
-    if(weekKey !== currentWeekKey){
-      if(currentWeekKey !== null) weekly.push(lastPriceInWeek);
-      currentWeekKey = weekKey;
-    }
-    lastPriceInWeek = price;
-  }
-  if(lastPriceInWeek !== null) weekly.push(lastPriceInWeek);
-
-  if(weekly.length < 10) throw new Error(`só ${weekly.length} semanas reconstruídas — fonte devolveu histórico curto demais`);
+  // cada candle: [tempo abertura, open, high, low, close, volume, ...] — usa o fechamento (índice 4)
+  const weekly = data.map(k => parseFloat(k[4])).filter(v => !Number.isNaN(v));
+  if(weekly.length < 10) throw new Error("candles sem preço utilizável");
 
   const sma = (arr, n) => {
     if(arr.length < n) return null; // essa MA específica fica "—" se não tiver semana suficiente, não derruba as outras
@@ -3445,12 +3432,31 @@ function renderPowerLawDetail(){
 function renderWeeklyMADials(){
   const mas = S.market.weeklyMAs;
   const price = S.market.price;
-  if(!mas || !price) return "";
   const items = [
     { key: "ma200", label: "MA 200 semanas" },
     { key: "ma100", label: "MA 100 semanas" },
     { key: "ma50", label: "MA 50 semanas" }
   ];
+
+  const header = `
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;">
+      <div style="font-family:var(--font-mono);font-size:10px;color:var(--text-faint);text-transform:uppercase;letter-spacing:.06em;">
+        § Médias móveis semanais (Binance) — relógio fixo, não pontua no score
+      </div>
+      <button onclick="window.btnRefreshWeeklyMAs && window.btnRefreshWeeklyMAs()" id="btnRefreshWeeklyMAs" style="background:none;border:1px solid var(--line-soft);color:var(--text-faint);border-radius:4px;padding:3px 8px;font-family:var(--font-mono);font-size:10px;cursor:pointer;">↻ atualizar</button>
+    </div>
+  `;
+
+  if(!mas || !price){
+    const msg = S.market.weeklyMAsError ? `✗ ${S.market.weeklyMAsError}` : "ainda não buscado nessa sessão";
+    return `
+      <div style="margin-top:14px;">
+        ${header}
+        <div style="font-family:var(--font-mono);font-size:11px;color:var(--text-faint);">${msg}</div>
+      </div>
+    `;
+  }
+
   const dials = items.map(it=>{
     const val = mas[it.key];
     if(val === null || val === undefined) return dialWidget(it.label, null, COLOR.faint, "sem dado suficiente", 88, 7, 15, null);
@@ -3459,11 +3465,10 @@ function renderWeeklyMADials(){
     const tooltip = `${it.label} — só observação, nunca entra no score.\nMédia: $${val.toLocaleString("en-US",{maximumFractionDigits:0})}\nPreço atual está ${pctDiff>=0?"+":""}${pctDiff.toFixed(1)}% em relação a essa média.`;
     return dialWidget(it.label, pct, COLOR.gold, `${pctDiff>=0?"+":""}${pctDiff.toFixed(0)}% vs. média · não pontua`, 88, 7, 15, Math.round(pctDiff), tooltip);
   }).join("");
+
   return `
-    <div style="margin-top:18px;padding-top:16px;border-top:1px solid var(--line-soft);">
-      <div style="font-family:var(--font-mono);font-size:10px;color:var(--text-faint);text-transform:uppercase;letter-spacing:.06em;margin-bottom:12px;">
-        § Médias móveis semanais — dado isolado, só pra observar, nunca pontua no score
-      </div>
+    <div style="margin-top:14px;">
+      ${header}
       <div style="display:flex;gap:20px;flex-wrap:wrap;justify-content:center;">${dials}</div>
     </div>
   `;
@@ -3669,6 +3674,42 @@ function parseResultadoPct(resultado){
   return m ? Number(m[1]) : null;
 }
 
+// CASE ENGINE / META LEARNING — mesma pergunta da Calibração por motor
+// ("quando esse motor disse bullish, o que aconteceu depois"), só que usando
+// USO REAL seu, não 12 meses de dado público. Só entram registros que já
+// resolveram resultado (7+ dias) E que têm o snapshot de motores salvo —
+// registros de antes dessa versão não têm esse snapshot, ficam de fora.
+const CASE_ENGINE_MIN_SAMPLE = 5; // amostra mínima pra mostrar um veredito, não é achismo de olhar 2 casos
+
+function computeCaseEngine(){
+  const usable = S.history.filter(h => h.composites && parseResultadoPct(h.resultado) !== null);
+  const motorKeys = Object.keys(S.motors);
+
+  const rows = motorKeys.map(key=>{
+    const pairs = usable
+      .map(h => ({ composite: h.composites[key], pct: parseResultadoPct(h.resultado) }))
+      .filter(p => p.composite !== null && p.composite !== undefined);
+
+    const bullish = pairs.filter(p => p.composite >= 15);
+    const bearish = pairs.filter(p => p.composite <= -15);
+    const avg = xs => xs.length ? xs.reduce((a,x)=>a+x.pct,0)/xs.length : null;
+    const avgBull = avg(bullish), avgBear = avg(bearish);
+
+    let leitura = "amostra insuficiente";
+    if(bullish.length >= CASE_ENGINE_MIN_SAMPLE && bearish.length >= CASE_ENGINE_MIN_SAMPLE){
+      leitura = avgBull > avgBear ? "coerente" : "invertida";
+    }
+
+    return {
+      key, label: S.motors[key].label, weight: S.motors[key].weight,
+      nBull: bullish.length, nBear: bearish.length,
+      avgBull, avgBear, leitura
+    };
+  });
+
+  return { totalUsable: usable.length, totalHistory: S.history.length, rows };
+}
+
 function computePersonalTrackRecord(){
   const groups = {};
   S.history.forEach(h=>{
@@ -3723,6 +3764,47 @@ function renderMemoryPanel(){
   `;
 }
 
+function renderCaseEnginePanel(){
+  const wrap = document.getElementById("caseEngineWrap");
+  if(!wrap) return;
+
+  const ce = computeCaseEngine();
+
+  if(ce.totalUsable === 0){
+    const msg = ce.totalHistory === 0
+      ? "Ainda sem histórico nenhum — começa a se preencher sozinho na próxima atualização."
+      : `${ce.totalHistory} registro(s) no histórico, mas nenhum com resultado resolvido (7+ dias) E snapshot de motores salvo. Registros de antes dessa atualização não têm o snapshot — só os novos, daqui pra frente, contam aqui. Volte em algumas semanas.`;
+    wrap.innerHTML = `<div class="empty-state">${msg}</div>`;
+    return;
+  }
+
+  const withVerdict = ce.rows.filter(r => r.leitura !== "amostra insuficiente");
+
+  wrap.innerHTML = `
+    <table class="hist">
+      <thead><tr><th>Motor</th><th>Peso hoje</th><th>Dias "bullish" seus (score ≥15)</th><th>Dias "bearish" seus (score ≤-15)</th><th>Leitura</th></tr></thead>
+      <tbody>
+        ${ce.rows.map(r=>`
+          <tr>
+            <td>${r.label}</td>
+            <td>${(r.weight*100).toFixed(0)}%</td>
+            <td>${r.avgBull !== null ? (r.avgBull>=0?"+":"")+r.avgBull.toFixed(1)+"% ("+r.nBull+"x)" : (r.nBull+"x — poucos")}</td>
+            <td>${r.avgBear !== null ? (r.avgBear>=0?"+":"")+r.avgBear.toFixed(1)+"% ("+r.nBear+"x)" : (r.nBear+"x — poucos")}</td>
+            <td style="color:${r.leitura==='coerente'?'var(--teal)':r.leitura==='invertida'?'var(--brick)':'var(--text-faint)'};">
+              ${r.leitura==='coerente'?'✓ coerente':r.leitura==='invertida'?'⚠ invertida':'amostra insuficiente'}
+            </td>
+          </tr>
+        `).join("")}
+      </tbody>
+    </table>
+    <p style="font-family:var(--font-mono);font-size:10.5px;color:var(--text-faint);margin-top:10px;">
+      ${ce.totalUsable} registro(s) utilizável(is) (resolvido + com snapshot de motor) de ${ce.totalHistory} no histórico total.
+      Precisa de pelo menos ${CASE_ENGINE_MIN_SAMPLE} casos bullish E ${CASE_ENGINE_MIN_SAMPLE} bearish pra um motor ganhar veredito — com pouco uso, quase tudo aqui em cima vai aparecer "amostra insuficiente" por um bom tempo, e isso é esperado, não é erro.
+      ${withVerdict.length > 0 ? `${withVerdict.length} motor(es) já com veredito formado.` : "Nenhum motor com veredito formado ainda — siga usando o sistema normalmente."}
+    </p>
+  `;
+}
+
 function renderHistory(){
   const wrap = document.getElementById("historyWrap");
   if(!S.history.length){
@@ -3763,6 +3845,7 @@ function renderAll(){
   renderDecision();
   renderHistory();
   renderMemoryPanel();
+  renderCaseEnginePanel();
   renderBackupWarning();
   renderArchiveStatus();
   renderCalibrationTimestamp();
@@ -3938,6 +4021,24 @@ document.getElementById("btnSaveFredKey").addEventListener("click", ()=>{
 });
 renderFredKeyStatus();
 renderCgKeyStatus();
+
+// médias semanais — 100% manual, nunca dispara sozinha (mesma regra do
+// resto do app: nenhuma chamada de rede acontece sem você clicar em algo)
+window.btnRefreshWeeklyMAs = async function(){
+  const btn = document.getElementById("btnRefreshWeeklyMAs");
+  if(btn){ btn.textContent = "buscando..."; btn.disabled = true; }
+  try{
+    S.market.weeklyMAsComputedAt = null; // força ignorar o cache de 24h nesse clique manual
+    await fetchWeeklyMAs();
+    S.market.weeklyMAsError = null;
+    saveState();
+  }catch(e){
+    S.market.weeklyMAsError = e.message;
+    saveState();
+  }
+  renderAll();
+};
+
 document.getElementById("btnSaveCgKey").addEventListener("click", ()=>{
   const input = document.getElementById("cgApiKeyInput");
   S.apiKeys.coingecko = input.value.trim();
@@ -3992,6 +4093,7 @@ document.getElementById("btnLogDecision").addEventListener("click", (e)=>{
       marketScore: ms.score,
       action: d.action,
       leaderTitle: d.leader ? d.leader.title : null,
+      composites: ms.composites,
       resultado: "",
       version: BUILD_VERSION
     });

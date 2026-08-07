@@ -769,7 +769,7 @@ const STORAGE_KEY = "seios_btc_v2";
 // fonte única da versão — usada no rodapé, no histórico e nos exports.
 // Muda toda vez que a fórmula de score/pesos muda, pra nunca misturar
 // decisões de regras diferentes como se fossem comparáveis.
-const BUILD_VERSION = "2026-08-07.46-audit-fixes";
+const BUILD_VERSION = "2026-08-07.48-backfill-lider";
 
 // indicador padrão — auto = tenta buscar sozinho; manual = você preenche
 function ind(label, source, note){
@@ -3355,8 +3355,41 @@ function generateAutoScenario(){
 
   generateRivalScenario(ms, type, probability, confidence, confirmTriggers, invalidateTriggers, dateLabel, now);
 
+  backfillLiderNoUltimoRegistro();
+
   saveState();
   renderAll();
+}
+
+/* O registro do dia é gravado DENTRO da atualização de mercado (autoLogHistory),
+   que roda antes de você clicar em "gerar cenário automático". Resultado: a
+   coluna "cenário líder" do registro saía com o cenário da véspera, sempre um
+   ciclo atrasada — o preço, o score, a ação e o snapshot dos motores estavam
+   certos, só aquela coluna é que se referia a outro momento.
+
+   Aqui, logo depois de (re)gerar o cenário, o registro mais recente é corrigido.
+   Três travas pra isso não virar reescrita de história:
+   · só o último registro, nunca a série inteira;
+   · só se ele for da mesma sessão (mesma janela de 6h do cooldown de log);
+   · nunca um registro já resolvido — resultado fechado não se mexe.
+   A correção fica carimbada em leaderBackfilledAt, pra ser auditável depois. */
+function backfillLiderNoUltimoRegistro(){
+  const ultimo = S.history[S.history.length - 1];
+  if(!ultimo) return null;
+  if(ultimo.resultado) return null; // já resolveu: passado fechado, não se reescreve
+
+  const idadeMs = Date.now() - new Date(ultimo.date).getTime();
+  if(!(idadeMs >= 0 && idadeMs < LOG_COOLDOWN_MS)) return null; // não é desta sessão
+
+  const d = computeDecision();
+  const novoLider = d.leader ? d.leader.title : null;
+  if(ultimo.leaderTitle === novoLider && ultimo.action === d.action) return null;
+
+  const antes = { leaderTitle: ultimo.leaderTitle, action: ultimo.action };
+  ultimo.leaderTitle = novoLider;
+  ultimo.action = d.action; // a ação pode mudar junto (premissa invalidada do líder rebaixa a leitura)
+  ultimo.leaderBackfilledAt = new Date().toISOString();
+  return { antes, depois: { leaderTitle: novoLider, action: d.action } };
 }
 
 // gera (ou atualiza) o cenário rival — sempre o oposto do dominante, reaproveitando
@@ -3674,7 +3707,10 @@ function gaugeSVG(pct, color, size, stroke){
   </svg>`;
 }
 
-function dialWidget(label, pct, color, sublabel, size, stroke, fontSize, displayValue, tooltip){
+// centerSub = segunda linha DENTRO do anel, em fonte pequena. Serve pra relógios
+// em que o número grande é uma medida relativa (%) e o que a pessoa realmente
+// quer ler é o valor absoluto — um preço, por exemplo.
+function dialWidget(label, pct, color, sublabel, size, stroke, fontSize, displayValue, tooltip, centerSub){
   size = size || 90; stroke = stroke || 8; fontSize = fontSize || 15;
   const shown = displayValue !== undefined ? displayValue : (pct===null ? null : Math.round(pct));
   // "title" nativo quase não funciona em touch no iOS — usamos um atributo
@@ -3685,7 +3721,12 @@ function dialWidget(label, pct, color, sublabel, size, stroke, fontSize, display
     <div class="dial-widget"${dataAttr} style="cursor:${tooltip?"pointer":"default"};">
       <div class="dial-ring" style="width:${size}px;height:${size}px;">
         ${gaugeSVG(pct===null ? 0 : pct, pct===null ? COLOR.faint : color, size, stroke)}
-        <div class="dial-center" style="font-size:${fontSize}px;">${shown === null ? "—" : (shown>0 ? "+"+shown : shown)}</div>
+        <div class="dial-center" style="font-size:${fontSize}px;">
+          <div style="display:flex;flex-direction:column;align-items:center;line-height:1.05;">
+            <span>${shown === null ? "—" : (shown>0 ? "+"+shown : shown)}</span>
+            ${centerSub ? `<span style="font-size:${Math.max(8, Math.round(fontSize*0.6))}px;font-weight:400;color:var(--text-dim);margin-top:2px;letter-spacing:-.02em;">${esc(centerSub)}</span>` : ""}
+          </div>
+        </div>
       </div>
       <div class="dial-label">${label}</div>
       ${sublabel ? `<div class="dial-sublabel">${sublabel}</div>` : ""}
@@ -3900,8 +3941,10 @@ function renderPowerLawDial(){
   // (+12) — duas métricas diferentes no mesmo widget, o que dava a impressão
   // de folga onde não havia. A distância pro piso e pra linha central foi pro
   // subtítulo, junto e explícita.
-  const sub = `${bandPct.toFixed(0)}% do canal · ${pl.pctToTrend>=0?"+":""}${pl.pctToTrend.toFixed(0)}% vs. central · não pontua`;
-  return dialWidget("Power Law", bandPct, color, sub, 140, 12, 22, Math.round(bandPct), tooltip);
+  // mesma lógica dos relógios de média: "% do canal" é medida relativa; o que
+  // dá pra comparar com o preço de agora é a linha central em dólar
+  const sub = `${bandPct.toFixed(0)}% do canal · BTC ${Math.abs(pl.pctToTrend).toFixed(0)}% ${pl.pctToTrend>=0?"acima":"abaixo"} · não pontua`;
+  return dialWidget("Power Law", bandPct, color, sub, 140, 12, 22, Math.round(bandPct), tooltip, fmt(pl.trend));
 }
 
 function renderPowerLawDetail(){
@@ -3959,19 +4002,40 @@ function renderWeeklyMADials(){
     `;
   }
 
+  // O NÍVEL EM DÓLAR é o que interessa num relógio de observação: dá pra
+  // comparar direto com o preço de agora. O "+2 / -27" sozinho é uma medida
+  // relativa que não diz onde a linha está. Então o valor da média entra
+  // dentro do anel, em fonte pequena, embaixo do percentual.
+  const fmtUSD = v => "$" + Math.round(v).toLocaleString("en-US");
+
   const dials = items.map(it=>{
     const val = mas[it.key];
-    if(val === null || val === undefined) return dialWidget(it.label, null, COLOR.faint, "sem dado suficiente", 88, 7, 15, null);
+    if(val === null || val === undefined) return dialWidget(it.label, null, COLOR.faint, "sem dado suficiente", 96, 7, 15, null);
     const pctDiff = ((price - val) / val) * 100;
     const pct = clamp(50 + pctDiff, 0, 100); // 50% = preço exatamente na média
-    const tooltip = `${it.label} — só observação, nunca entra no score.\nMédia: $${val.toLocaleString("en-US",{maximumFractionDigits:0})}\nPreço atual está ${pctDiff>=0?"+":""}${pctDiff.toFixed(1)}% em relação a essa média.${mas.semanasDisponiveis ? `\nBase: ${mas.semanasDisponiveis} semanas de histórico BTCUSDT na Binance.` : ""}`;
-    return dialWidget(it.label, pct, COLOR.gold, `${pctDiff>=0?"+":""}${pctDiff.toFixed(0)}% vs. média · não pontua`, 88, 7, 15, Math.round(pctDiff), tooltip);
+    const acimaAbaixo = pctDiff >= 0 ? "acima" : "abaixo";
+    const tooltip = `${it.label} — só observação, nunca entra no score.\nA média está em ${fmtUSD(val)}.\nO BTC está em ${fmtUSD(price)}, ou seja ${Math.abs(pctDiff).toFixed(1)}% ${acimaAbaixo} dessa linha.\nDiferença: ${pctDiff>=0?"+":"-"}${fmtUSD(Math.abs(price - val)).slice(1)} dólares.${mas.semanasDisponiveis ? `\nBase: ${mas.semanasDisponiveis} semanas de histórico BTCUSDT na Binance.` : ""}`;
+    return dialWidget(
+      it.label, pct, COLOR.gold,
+      `BTC ${Math.abs(pctDiff).toFixed(0)}% ${acimaAbaixo} · não pontua`,
+      96, 7, 15, Math.round(pctDiff), tooltip,
+      fmtUSD(val) // ← nível da média, em dólar, dentro do anel
+    );
   }).join("");
+
+  // referência de leitura: sem o preço atual à vista, o nível de cada média
+  // não tem contra o que ser comparado
+  const rodape = `
+    <div style="font-family:var(--font-mono);font-size:10.5px;color:var(--text-faint);text-align:center;margin-top:10px;">
+      BTC agora: <span style="color:var(--text);">${fmtUSD(price)}</span> · o número dentro de cada relógio é onde a média está, em dólar
+    </div>
+  `;
 
   return `
     <div style="margin-top:14px;">
       ${header}
       <div style="display:flex;gap:20px;flex-wrap:wrap;justify-content:center;">${dials}</div>
+      ${rodape}
     </div>
   `;
 }
@@ -4384,7 +4448,7 @@ function renderHistory(){
       <td>${h.marketScore.toFixed(0)}</td>
       <td>${esc(h.action)}</td>
 
-      <td>${esc(h.leaderTitle || "—")}</td>
+      <td>${esc(h.leaderTitle || "—")}${h.leaderBackfilledAt ? ' <span style="color:var(--text-faint);font-size:9px;" title="cenário líder corrigido na mesma sessão, após você gerar o cenário">· ajustado</span>' : ""}</td>
       <td><input type="text" value="${esc(h.resultado || "")}" placeholder="resolve sozinho em 7 dias…" data-id="${h.id}"></td>
     </tr>
   `).join("");

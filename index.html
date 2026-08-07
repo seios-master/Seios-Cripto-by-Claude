@@ -592,7 +592,7 @@ const STORAGE_KEY = "seios_btc_v2";
 // fonte única da versão — usada no rodapé, no histórico e nos exports.
 // Muda toda vez que a fórmula de score/pesos muda, pra nunca misturar
 // decisões de regras diferentes como se fossem comparáveis.
-const BUILD_VERSION = "2026-08-06.22-powerlaw-dial";
+const BUILD_VERSION = "2026-08-06.23-mirrored";
 
 // indicador padrão — auto = tenta buscar sozinho; manual = você preenche
 function ind(label, source, note){
@@ -2539,7 +2539,7 @@ function computeDecision(){
 
   // fatores de maior peso (contribuição = composite × peso do motor)
   const topFactors = Object.entries(S.motors)
-    .map(([key,motor])=>({ key, label:motor.label, contribution: (ms.composites[key]||0)*motor.weight, filled: ms.composites[key]!==null }))
+    .map(([key,motor])=>({ key, label:motor.label, composite: ms.composites[key], contribution: (ms.composites[key]||0)*motor.weight, filled: ms.composites[key]!==null }))
     .filter(f=>f.filled)
     .sort((a,b)=>Math.abs(b.contribution)-Math.abs(a.contribution))
     .slice(0,3);
@@ -2891,11 +2891,11 @@ function renderHorizonPanel(ms){
   return `
     <div style="margin-top:18px;padding-top:16px;border-top:1px solid var(--line-soft);">
       <div style="font-family:var(--font-mono);font-size:10px;color:var(--text-faint);text-transform:uppercase;letter-spacing:.06em;margin-bottom:12px;">
-        § Temporalidade — o mesmo dado, separado por prazo, mais a referência de longuíssimo prazo à esquerda (escala de anos, calibrado pro ritmo do BTC)
+        § Temporalidade — o mesmo dado, separado por prazo, mais a referência de longuíssimo prazo à direita, espelhando o relógio de score (escala de anos, calibrado pro ritmo do BTC)
       </div>
-      <div style="display:flex;gap:24px;align-items:flex-start;flex-wrap:wrap;">
-        <div>${renderPowerLawDial()}${renderPowerLawDetail()}</div>
+      <div style="display:flex;gap:24px;align-items:flex-start;flex-wrap:wrap;justify-content:space-between;">
         <div class="dials-grid" style="grid-template-columns:repeat(3,1fr);flex:1;min-width:260px;">${dials}</div>
+        <div>${renderPowerLawDial()}${renderPowerLawDetail()}</div>
       </div>
       ${interpretation ? `<div style="margin-top:12px;font-size:12.5px;color:var(--text-dim);">${interpretation}</div>` : ""}
     </div>
@@ -3115,7 +3115,10 @@ function renderDecision(){
   ul.innerHTML = d.reasoning.map(r=>`<li>${r}</li>`).join("");
   const chips = document.getElementById("topFactors");
   chips.innerHTML = d.topFactors.length
-    ? d.topFactors.map(f=>`<span class="factor-chip" style="color:${motorScoreColor(f.contribution*10)};border-color:currentColor;">${f.label}</span>`).join("")
+    ? d.topFactors.map(f=>{
+        const pct = f.composite===null ? null : clamp((f.composite+100)/2, 0, 100);
+        return dialWidget(f.label, pct, motorScoreColor(f.composite), null, 72, 7, 14, f.composite===null?null:Math.round(f.composite));
+      }).join("")
     : `<span class="factor-chip" style="color:var(--text-faint);">sem dados suficientes ainda</span>`;
 }
 

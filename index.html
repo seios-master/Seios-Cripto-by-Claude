@@ -490,7 +490,15 @@
             <button class="small" id="btnSaveCqKey">Salvar</button>
             <span id="cqKeyStatus" style="font-family:var(--font-mono);font-size:10.5px;color:var(--text-faint);"></span>
           </div>
-          <div style="font-size:10.5px;color:var(--text-faint);margin-top:6px;">Nenhuma chave sai deste navegador (localStorage). Nunca são enviadas pra mim nem pra ninguém além da própria fonte de dado.</div>
+          <div style="margin-top:12px;padding:10px 12px;border:1px solid var(--gold);background:var(--gold-soft);">
+            <label style="display:flex;gap:8px;align-items:flex-start;cursor:pointer;font-size:11px;color:var(--text-dim);">
+              <input type="checkbox" id="chkProxyComChave" style="margin-top:2px;flex-shrink:0;">
+              <span><strong style="color:var(--gold);">Permitir proxy CORS em chamadas que levam chave de API.</strong>
+              O FRED não aceita chamada direta do navegador — a única forma de ler Macro (28% do peso) é passar a URL, <em>com a chave dentro</em>, por um intermediário público (allorigins.win / corsproxy.io). Quem opera esse intermediário consegue ler a chave. Desligado, as chamadas com chave só vão direto: CoinGecko Pro continua funcionando, FRED e CryptoQuant provavelmente falham.</span>
+            </label>
+            <div id="proxyChaveAviso" style="font-family:var(--font-mono);font-size:10px;color:var(--text-faint);margin-top:8px;"></div>
+          </div>
+          <div style="font-size:10.5px;color:var(--text-faint);margin-top:8px;">As chaves ficam no localStorage deste navegador e <strong>não entram no arquivo de export</strong> — um backup nunca carrega chave. Nunca são enviadas pra mim. Além da própria fonte de dado, o único outro destino possível é o proxy acima, e só se você ligar.</div>
         </div>
         <div id="motorsContainer"></div>
       </div>
@@ -761,7 +769,7 @@ const STORAGE_KEY = "seios_btc_v2";
 // fonte única da versão — usada no rodapé, no histórico e nos exports.
 // Muda toda vez que a fórmula de score/pesos muda, pra nunca misturar
 // decisões de regras diferentes como se fossem comparáveis.
-const BUILD_VERSION = "2026-08-06.42-case-engine";
+const BUILD_VERSION = "2026-08-07.45-auditoria-completa";
 
 // indicador padrão — auto = tenta buscar sozinho; manual = você preenche
 function ind(label, source, note){
@@ -787,6 +795,12 @@ function defaultState(){
     lastExportAt: null,
     lastCalibratedAt: null,
     autoRefreshEnabled: false,
+    // o FRED não manda cabeçalho CORS, então a única forma de ler macro
+    // (28% do peso) direto do navegador é passando por um proxy público —
+    // e a URL do FRED leva a chave junto. Desligado por padrão: você decide.
+    permitirProxyComChave: false,
+    proxyUsadoComChave: false,
+    arquivamentoFalhou: false,
     motors: {
       macro:         { label:"Macro",                       weight:.28, indicators:{
         juros:     ind("Juros — Fed Funds Rate (FRED, se conectado)", "auto"),
@@ -936,8 +950,12 @@ function openArchiveDB(){
 
 // arquiva um lote de registros — sempre "fire and forget", nunca bloqueia
 // nem trava a interface, e nunca lança erro pra fora
+// devolve true só quando a gravação foi CONFIRMADA. Quem chama precisa
+// esperar por isso antes de descartar qualquer coisa da memória — antes o
+// arquivamento era "fire and forget" e o corte acontecia de qualquer jeito,
+// então navegador com IndexedDB bloqueado = registro perdido em silêncio.
 async function archiveHistoryEntries(entries){
-  if(!entries || !entries.length) return;
+  if(!entries || !entries.length) return true;
   try{
     const db = await openArchiveDB();
     await new Promise((resolve, reject)=>{
@@ -948,8 +966,10 @@ async function archiveHistoryEntries(entries){
       tx.onerror = ()=> reject(tx.error);
     });
     db.close();
+    return true;
   }catch(e){
-    console.warn("Não consegui arquivar no IndexedDB (não crítico):", e);
+    console.warn("Não consegui arquivar no IndexedDB:", e);
+    return false;
   }
 }
 
@@ -1020,31 +1040,49 @@ const CORS_PROXIES = [
   url => "https://corsproxy.io/?" + encodeURIComponent(url)
 ];
 
-async function smartFetchOnce(url){
+async function smartFetchOnce(url, opts){
+  const permiteProxy = !opts || opts.allowProxy !== false;
   try{
     const res = await fetch(url);
     if(res.ok) return res;
     throw new Error("status " + res.status);
   }catch(directErr){
+    if(!permiteProxy){
+      // URL com chave de API e proxy não autorizado — falha aqui de propósito,
+      // em vez de entregar a credencial pra um intermediário de terceiro
+      throw new Error("bloqueado: essa chamada leva sua chave de API e o proxy CORS não está autorizado (ligue a opção nas configurações se aceitar o risco)");
+    }
     for(const buildProxyUrl of CORS_PROXIES){
       try{
         const res = await fetch(buildProxyUrl(url));
-        if(res.ok) return res;
+        if(res.ok){
+          if(urlTemSegredo(url)) S.proxyUsadoComChave = true; // pra avisar na tela que aconteceu de verdade
+          return res;
+        }
       }catch(proxyErr){ /* tenta o próximo proxy da lista */ }
     }
     throw directErr;
   }
 }
 
+// detecta se a URL carrega credencial na query string — se carregar, o proxy
+// público só entra em cena com autorização explícita do usuário
+function urlTemSegredo(url){
+  return /[?&](api_key|x_cg_pro_api_key|apikey|token)=/i.test(url);
+}
+
 // tenta direto, depois os dois proxies CORS em sequência; se tudo falhar
 // (comum sob rajada de chamadas seguidas, não é a fonte "quebrada"), espera
 // e tenta a sequência inteira mais uma vez antes de desistir de verdade
 async function smartFetch(url){
+  // chamadas com chave só passam por proxy se você tiver ligado a opção;
+  // chamadas sem chave (preço, funding, hash rate...) seguem como sempre
+  const opts = urlTemSegredo(url) ? { allowProxy: !!S.permitirProxyComChave } : undefined;
   try{
-    return await smartFetchOnce(url);
+    return await smartFetchOnce(url, opts);
   }catch(firstErr){
     await sleep(1000);
-    return await smartFetchOnce(url);
+    return await smartFetchOnce(url, opts);
   }
 }
 
@@ -1294,7 +1332,23 @@ async function fetchFredSeries(seriesId, apiKey, limit){
 
 function clamp(v,min,max){ return Math.max(min, Math.min(max, v)); }
 
-// RSI de Wilder (14 períodos) a partir de uma série [[ts,price],...]
+// escapa texto antes de ir pro innerHTML. Tudo que o usuário digita (título de
+// cenário, descrição de premissa, nome de evento, resultado) e tudo que vem de
+// um backup importado passa por aqui. Sem isso, um .json de backup vindo de
+// terceiro consegue executar script na mesma origem onde ficam as chaves de API.
+function esc(v){
+  if(v === null || v === undefined) return "";
+  return String(v)
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
+}
+
+// RSI de 14 períodos com média SIMPLES de ganhos/perdas (não é a suavização
+// de Wilder). Mesma fórmula usada no backtest (rsiAtIndex), então live e teste
+// histórico medem exatamente a mesma coisa — que é o que importa aqui.
 function computeRSI(prices, period){
   period = period || 14;
   if(!prices || prices.length < period+1) return null;
@@ -1372,10 +1426,15 @@ function logFinal(text, logId){
   log.scrollTop = log.scrollHeight;
 }
 
+let refreshEmAndamento = false; // guarda de reentrância — a auto-atualização de
+// 30min podia disparar por cima de uma rodada ainda em curso (o botão fica
+// desabilitado, mas isso não impede a chamada programática)
+
 async function refreshMarketData(){
+  if(refreshEmAndamento) return;
+  refreshEmAndamento = true;
   const btn = document.getElementById("btnRefresh");
-  btn.disabled = true;
-  btn.textContent = "atualizando…";
+  if(btn){ btn.disabled = true; btn.textContent = "atualizando…"; }
   logClear();
   const results = { ok:[], fail:[] };
   const tec = S.motors.tecnico.indicators;
@@ -1391,8 +1450,10 @@ async function refreshMarketData(){
     });
   });
 
+  try{
+
   // FRED adiantado — roda primeiro, antes das outras ~15 chamadas, pra pegar
-  // o proxy de CORS "fresco". Macro (32% do peso) é o motor mais importante,
+  // o proxy de CORS "fresco". Macro (28% do peso) é o motor mais importante,
   // por isso tem prioridade quando o proxy gratuito começa a engasgar sob uso.
   if(S.apiKeys.fred){
     await sleep(300);
@@ -1639,16 +1700,38 @@ async function refreshMarketData(){
     try{
       const oi = await fetchOpenInterest();
       const prev = S.market.prevOpenInterest;
-      if(prev){
+      const prevEm = S.market.prevOICheckedAt ? new Date(S.market.prevOICheckedAt).getTime() : null;
+      const horas = prevEm ? (Date.now() - prevEm) / 3600000 : null;
+
+      if(prev && horas !== null && horas >= 0.25 && horas <= 168){
+        // normaliza por hora e reprojeta pra uma janela fixa de 24h. Sem isso,
+        // o mesmo indicador media coisas diferentes conforme o intervalo entre
+        // atualizações (30 min ou 5 dias) — e o peso no score mudava junto.
         const pct = ((oi - prev) / prev) * 100;
-        setAuto("derivativos","openInterest", clamp(pct * 10, -100, 100), `OI ${pct>=0?"+":""}${pct.toFixed(2)}% desde a última leitura`);
-        logDone(line, true, `${pct>=0?"+":""}${pct.toFixed(2)}%`);
+        const pct24h = pct * (24 / horas);
+        const janela = horas < 1 ? `${Math.round(horas*60)}min` : `${horas.toFixed(1)}h`;
+        setAuto("derivativos","openInterest", clamp(pct24h * 10, -100, 100),
+          `OI ${pct>=0?"+":""}${pct.toFixed(2)}% em ${janela} (equivale a ${pct24h>=0?"+":""}${pct24h.toFixed(2)}%/24h)`);
+        logDone(line, true, `${pct24h>=0?"+":""}${pct24h.toFixed(2)}%/24h`);
+      } else if(prev && horas !== null && horas > 168){
+        // mais de 7 dias sem leitura: o delta não descreve mais o momento atual
+        setAuto("derivativos","openInterest", null, `leitura anterior tem ${Math.round(horas/24)} dias — velha demais pra comparar, recomeçando a contagem`);
+        logDone(line, true, "referência expirada — recomeçando");
+      } else if(prev && horas !== null && horas < 0.25){
+        // menos de 15 min: variação é ruído de microestrutura, amplificada 96x
+        // pela projeção. Mantém a leitura anterior em vez de inventar sinal.
+        logDone(line, true, "intervalo curto demais — leitura anterior mantida");
       } else {
         setAuto("derivativos","openInterest", null, "primeira leitura registrada — compare na próxima atualização");
         logDone(line, true, "primeira leitura");
       }
-      S.market.prevOpenInterest = oi;
-      S.market.prevOICheckedAt = new Date().toISOString();
+
+      // só move a referência quando ela foi de fato consumida (ou expirou);
+      // num intervalo curto demais, mantém a âncora antiga pra próxima rodada
+      if(!(prev && horas !== null && horas < 0.25)){
+        S.market.prevOpenInterest = oi;
+        S.market.prevOICheckedAt = new Date().toISOString();
+      }
       results.ok.push("open interest");
     }catch(e){ setFailed("derivativos","openInterest"); results.fail.push("open interest"); logDone(line, false, e.message); }
   }
@@ -1808,6 +1891,29 @@ async function refreshMarketData(){
   }
 
 
+  await sleep(200);
+  // médias móveis semanais — relógio fixo, não pontua no score, mas agora
+  // entra na atualização geral em vez de depender só do botão local. O cache
+  // de 24h dentro de fetchWeeklyMAs evita rebuscar 1000 candles a cada
+  // atualização de 30min — quando está em cache, a linha abaixo só confirma
+  { const line = logStep("consultando médias móveis semanais — 200/100/50 (Binance)");
+    try{
+      const idade = S.market.weeklyMAsComputedAt ? Date.now() - new Date(S.market.weeklyMAsComputedAt).getTime() : Infinity;
+      const veioDoCache = !!(S.market.weeklyMAs && idade < 24*3600*1000);
+      const mas = await fetchWeeklyMAs();
+      S.market.weeklyMAsError = null;
+      results.ok.push("médias semanais");
+      const fmt = v => v === null || v === undefined ? "—" : "$" + Math.round(v).toLocaleString("en-US");
+      logDone(line, true, veioDoCache
+        ? `em cache (<24h) — 200s ${fmt(mas.ma200)}`
+        : `200s ${fmt(mas.ma200)} · 100s ${fmt(mas.ma100)} · 50s ${fmt(mas.ma50)}`);
+    }catch(e){
+      S.market.weeklyMAsError = e.message;
+      results.fail.push("médias semanais");
+      logDone(line, false, e.message);
+    }
+  }
+
   S.market.lastFetch = new Date().toISOString();
   S.market.lastFetchVersion = BUILD_VERSION;
 
@@ -1852,8 +1958,16 @@ async function refreshMarketData(){
   // enquanto você não limpar o histórico exportado por fora
   if(S.history.length > 500){
     const excedente = S.history.slice(0, S.history.length - 500);
-    archiveHistoryEntries(excedente); // vai pro "porão" (IndexedDB), não é mais perdido
-    S.history = S.history.slice(-500);
+    const arquivou = await archiveHistoryEntries(excedente);
+    if(arquivou){
+      S.history = S.history.slice(-500); // só descarta da memória depois de confirmado no "porão"
+      S.arquivamentoFalhou = false;
+    } else {
+      // não conseguiu arquivar: mantém tudo em memória e avisa. Melhor um
+      // localStorage grande do que histórico apagado sem ninguém perceber.
+      S.arquivamentoFalhou = true;
+      console.warn("Arquivamento falhou — mantendo", S.history.length, "registros em memória pra não perder nada.");
+    }
   }
   S.scenarios.forEach(sc=>{ if(sc.revisions && sc.revisions.length > 20) sc.revisions = sc.revisions.slice(-20); });
 
@@ -1862,9 +1976,8 @@ async function refreshMarketData(){
   saveState();
   renderAll();
 
-  btn.disabled = false;
-  btn.textContent = "↻ Atualizar dados de mercado";
   logFinal(`concluído — ${results.ok.length} ok, ${results.fail.length} falharam`);
+  if(typeof renderProxyChaveAviso === "function") renderProxyChaveAviso(); // atualiza o aviso se o proxy foi usado com chave nesta rodada
 
   if(results.ok.length === 0 && results.fail.length > 0){
     showNetworkWarning();
@@ -1873,6 +1986,17 @@ async function refreshMarketData(){
   }
   if(results.fail.length){
     console.warn("Falharam (provavelmente rede/CORS, preencha manualmente se persistir):", results.fail);
+  }
+
+  }catch(erroInesperado){
+    // cada fetch já tem seu próprio catch — isso aqui pega falha no
+    // fechamento da rodada (deltas, registro, render). Antes, um erro aqui
+    // deixava o botão preso em "atualizando…" pra sempre, sem nenhum sinal.
+    console.error("Erro inesperado na atualização:", erroInesperado);
+    logFinal(`interrompido — ${erroInesperado.message}`);
+  }finally{
+    refreshEmAndamento = false;
+    if(btn){ btn.disabled = false; btn.textContent = "↻ Atualizar dados de mercado"; }
   }
 }
 
@@ -1905,6 +2029,12 @@ function autoLogHistory(){
   });
 }
 
+// resolve o resultado usando o preço de AGORA contra o do registro. O número
+// de dias fica gravado em h.resultadoDias: como a resolução só acontece quando
+// você abre o app, um registro pode fechar em 7 dias ou em 40, e um retorno de
+// 40 dias não é comparável com um de 7. O Case Engine usa esse campo pra só
+// contar as janelas realmente parecidas — antes ele misturava tudo na mesma
+// média como se fossem a mesma medida.
 function autoResolveOutcomes(){
   if(!S.market.price) return;
   S.history.forEach(h=>{
@@ -1915,6 +2045,7 @@ function autoResolveOutcomes(){
     const pct = ((S.market.price - h.price) / h.price) * 100;
     const days = Math.round(ageMs / (24*3600*1000));
     h.resultado = `${pct>=0?"+":""}${pct.toFixed(1)}% em ${days}d (auto)`;
+    h.resultadoDias = days;
   });
 }
 
@@ -1975,8 +2106,18 @@ function scoreLabel(score){
   return "Neutro";
 }
 
-// peso de cada indicador = peso do motor dividido pelo nº de indicadores
-// dele — preserva o peso total do motor, só reparte entre seus prazos
+// O peso do motor é repartido entre os indicadores EFETIVAMENTE PREENCHIDOS
+// dele, não entre todos os que existem no cadastro. Isso é o que faz o painel
+// de prazos usar exatamente a mesma régua do score geral.
+//
+// Antes o divisor era o total de indicadores cadastrados: Institucional tem 4
+// indicadores mas só o prêmio Coinbase é automático, então entrava nos
+// relógios com 3,75% em vez dos seus 15% — enquanto no score geral entrava com
+// os 15% cheios. Os dois painéis mediam coisas diferentes e divergiam sozinhos,
+// bem no momento em que o app pede pro usuário confiar nos prazos separados.
+//
+// Com o divisor certo, vale a identidade: a média dos três relógios, ponderada
+// pelos pesos que cada um acumulou, reproduz o score geral.
 function computeHorizonScores(){
   const groups = { curto: {sum:0, w:0}, medio: {sum:0, w:0}, longo: {sum:0, w:0} };
 
@@ -1990,15 +2131,16 @@ function computeHorizonScores(){
       }
       return;
     }
-    const indKeys = Object.keys(motor.indicators);
-    if(!indKeys.length) return;
-    const perIndWeight = motor.weight / indKeys.length;
-    indKeys.forEach(ik=>{
+    // só os indicadores com valor E com horizonte classificado dividem o peso
+    const usaveis = Object.keys(motor.indicators).filter(ik=>{
       const ind = motor.indicators[ik];
-      if(ind.value === null || ind.value === undefined) return;
+      return ind.value !== null && ind.value !== undefined && INDICATOR_HORIZON[`${motorKey}.${ik}`];
+    });
+    if(!usaveis.length) return; // motor sem dado não entra em relógio nenhum
+    const perIndWeight = motor.weight / usaveis.length;
+    usaveis.forEach(ik=>{
       const h = INDICATOR_HORIZON[`${motorKey}.${ik}`];
-      if(!h) return; // segurança: indicador sem classificação não entra em nenhum relógio
-      groups[h].sum += ind.value * perIndWeight;
+      groups[h].sum += motor.indicators[ik].value * perIndWeight;
       groups[h].w += perIndWeight;
     });
   });
@@ -2514,7 +2656,7 @@ async function runScoreBacktest(){
 
     const calcLine = logStep(`calibrando — testando os cortes dia a dia (${closes.length} dias)`, "calibrationLog");
 
-    const motorKeys = ["macro","institucional","onchain","derivativos","tecnico","sentimento"];
+    const motorKeys = ["macro","institucional","onchain","derivativos","tecnico","sentimento","ativosGlobais"];
     const motorBuckets = {};
     motorKeys.forEach(k=> motorBuckets[k] = { bull: [], bear: [] });
 
@@ -2584,7 +2726,17 @@ async function runScoreBacktest(){
         regimeRaw.sp500.push({ v: macroMaps.sp500Raw[date], fwd: ((closes[i+forwardDays]-closes[i])/closes[i])*100 });
       }
 
-      const composites = { macro, institucional, onchain, derivativos, tecnico, sentimento, geopolitico:null, eventos:null };
+      // Ativos Globais — as séries de petróleo/euro/S&P já eram buscadas pra
+      // tabela de regime, mas o motor (8% do peso) ficava fora do teste. Usa
+      // exatamente as mesmas fórmulas do ao vivo, pra medir a mesma coisa.
+      const agVals = [];
+      if(macroMaps.petroleoRaw && macroMaps.petroleoRaw[date] !== undefined) agVals.push(clamp(-macroMaps.petroleoRaw[date]*3, -100, 100));
+      if(macroMaps.euroRaw && macroMaps.euroRaw[date] !== undefined) agVals.push(clamp(macroMaps.euroRaw[date]*8, -100, 100));
+      if(macroMaps.sp500Raw && macroMaps.sp500Raw[date] !== undefined) agVals.push(clamp(macroMaps.sp500Raw[date]*6, -100, 100));
+      const ativosGlobais = agVals.length ? avg(agVals) : null;
+      if(ativosGlobais !== null) sourcesUsed.add("Ativos Globais (FRED)");
+
+      const composites = { macro, institucional, onchain, derivativos, tecnico, sentimento, ativosGlobais, geopolitico:null, eventos:null };
       const { score, completeness } = aggregateScore(composites);
       const divergence = computeDivergence(composites);
       const action = bucketAction(score, completeness, divergence);
@@ -2753,8 +2905,9 @@ async function runScoreBacktest(){
       })()}
       <p style="font-family:var(--font-mono);font-size:10.5px;color:var(--text-faint);margin-top:10px;">
         Fontes usadas neste teste: ${Array.from(sourcesUsed).join(", ") || "nenhuma (verifique conexão)"}.
-        Macro e On-chain só entram se você tiver conectado FRED/CryptoQuant — sem isso, o teste roda só com Técnico, Sentimento e Derivativos (funding), e o resultado é menos representativo do sistema completo.
-        Institucional, Geopolítico e Eventos nunca entram aqui (sem fonte histórica gratuita).
+        Macro, Ativos Globais e On-chain só entram se você tiver conectado FRED/CryptoQuant — sem isso, o teste roda só com Técnico, Sentimento e Derivativos (funding), e o resultado é menos representativo do sistema completo.
+        Geopolítico e Eventos nunca entram aqui (sem fonte histórica gratuita), e Institucional entra só pelo prêmio Coinbase.
+        Como nem todo motor tem fonte histórica, o peso total coberto por este teste é menor que o do sistema ao vivo — os cortes de recomendação são os mesmos, mas aplicados sobre uma base mais estreita.
         Retorno medido 30 dias após cada dia classificado. Passado recente, não garantia de futuro.
       </p>
     `;
@@ -2782,10 +2935,22 @@ function scenarioWeight(sc){
   return (sc.probability/100) * (CONF_WEIGHT[sc.confidence] || .5);
 }
 
+// o cenário LÍDER é o dominante — o rival está na tela como contraponto
+// obrigatório ("e se eu estiver errado"), então nunca pode ser eleito líder.
+// Antes ele podia: em mercado neutro a probabilidade do base ficava abaixo de
+// 50% e o rival, com o complemento, ganhava a eleição — e como o rival não tem
+// premissa vinculada, a proteção de "premissa invalidada rebaixa a leitura"
+// deixava de funcionar junto.
 function leaderScenario(){
-  const active = S.scenarios.filter(s => s.status === "ativa" || s.status === "confirmada");
+  const active = S.scenarios.filter(s => (s.status === "ativa" || s.status === "confirmada") && !s.rival);
   if(!active.length) return null;
   return active.reduce((best, s) => scenarioWeight(s) > scenarioWeight(best) ? s : best, active[0]);
+}
+
+// o rival do cenário dominante, quando existe — mostrado ao lado da leitura
+// pra deixar explícito qual é a tese contrária e com que peso
+function rivalScenario(){
+  return S.scenarios.find(s => s.rival && (s.status === "ativa" || s.status === "confirmada")) || null;
 }
 
 function scenarioHasInvalidatedPremise(sc){
@@ -2841,15 +3006,23 @@ function generateAutoScenario(){
 
   // probabilidade cresce com a força do score NA DIREÇÃO do tipo do próprio
   // cenário — score muito negativo deve dar probabilidade ALTA pro cenário
-  // bear, não baixa (bug corrigido: antes usava a mesma fórmula pros dois tipos)
+  // bear, não baixa. E no caso neutro a lógica é outra: quanto mais perto de
+  // zero o score, MAIS provável é que a leitura neutra se sustente. A fórmula
+  // antiga (55 − |score|) devolvia menos de 50% pra quase toda a faixa neutra,
+  // o que fazia o rival herdar a maioria e virar líder num mercado sem direção.
   let probability;
-  if(type === "bull") probability = clamp(Math.round(50 + ms.score/2), 10, 90);
-  else if(type === "bear") probability = clamp(Math.round(50 - ms.score/2), 10, 90);
-  else probability = clamp(Math.round(55 - Math.abs(ms.score)), 35, 65);
+  if(type === "bull") probability = clamp(Math.round(50 + ms.score/2), 50, 90);
+  else if(type === "bear") probability = clamp(Math.round(50 - ms.score/2), 50, 90);
+  else probability = clamp(Math.round(65 - Math.abs(ms.score)), 50, 65);
   const confidence = ms.completeness >= 0.7 ? "alta" : (ms.completeness >= 0.4 ? "media" : "baixa");
 
   const description = `Gerado automaticamente a partir do estado de mercado: score ${ms.score.toFixed(0)} (escala -100 a +100), confiança dos dados ${(ms.completeness*100).toFixed(0)}%. Baseado apenas nos motores com dado real preenchido — edite livremente se quiser incluir sua própria leitura.`;
-  const premiseDescription = `Motores automáticos (${filledMotors.join(", ") || "nenhum preenchido ainda"}) sustentam a leitura de mercado "${ms.label}" em ${dateLabel}.`;
+  // carimbo com HORA: a premissa é um retrato do instante da geração e não se
+  // atualiza sozinha. Com só a data, um salto de indicador no meio do dia fazia
+  // a premissa parecer contradizer os relógios da tela (ex.: Geopolítico -51 no
+  // texto contra +39 no relógio) sem nenhuma pista de que eram momentos diferentes.
+  const horaLabel = new Date().toLocaleTimeString("pt-BR", {hour:"2-digit", minute:"2-digit"});
+  const premiseDescription = `Motores automáticos (${filledMotors.join(", ") || "nenhum preenchido ainda"}) sustentam a leitura de mercado "${ms.label}" — retrato de ${dateLabel} às ${horaLabel}, não recalculado desde então.`;
 
   // procura um cenário automático já existente e ainda ativo — atualiza em vez de duplicar
   let existing = S.scenarios.find(s => s.auto && s.status === "ativa");
@@ -2910,7 +3083,7 @@ function generateRivalScenario(ms, mainType, mainProbability, mainConfidence, ma
   else if(mainType === "bull") rivalType = "bear";
   else rivalType = ms.score >= 0 ? "bear" : "bull";
 
-  const rivalProbability = clamp(100 - mainProbability, 10, 90);
+  const rivalProbability = clamp(100 - mainProbability, 10, 50);
   const rivalTitle = `Cenário rival — ${rivalType === "bull" ? "Bull" : "Bear"} (${dateLabel})`;
   const rivalDescription = `Contraponto obrigatório ao cenário dominante. Representa o que precisaria se confirmar pra essa leitura se inverter — usa os mesmos gatilhos do cenário principal, só que trocados de lado. Não é uma previsão paralela, é o "e se eu estiver errado" formalizado.`;
 
@@ -3013,6 +3186,10 @@ function computeDecision(){
   let leaderFlag = false;
   if(leader){
     reasoning.push(`Cenário líder: "${leader.title}" (${leader.type}, ${leader.probability}% prob., confiança ${leader.confidence})`);
+    const rival = rivalScenario();
+    if(rival){
+      reasoning.push(`Contraponto ativo: "${rival.title}" (${rival.type}, ${rival.probability}% prob.) — é a tese que precisaria se confirmar pra leitura acima se inverter.`);
+    }
     if(scenarioHasInvalidatedPremise(leader)){
       leaderFlag = true;
       reasoning.push(`⚠ Uma premissa-chave do cenário líder está invalidada — leitura rebaixada até revisão.`);
@@ -3144,7 +3321,7 @@ function renderEventLogHTML(){
     const stale = new Date(ev.date).getTime() < cutoff;
     return `
       <div class="event-row" style="${stale ? "opacity:.5;" : ""}">
-        <div><div class="ev-title">${ev.title}</div><div class="ev-date">${new Date(ev.date).toLocaleDateString("pt-BR")}${stale ? " · fora da janela de 14d" : ""}</div></div>
+        <div><div class="ev-title">${esc(ev.title)}</div><div class="ev-date">${new Date(ev.date).toLocaleDateString("pt-BR")}${stale ? " · fora da janela de 14d" : ""}</div></div>
         <span style="font-family:var(--font-mono);font-size:12px;color:${motorScoreColor(ev.impact)};">${ev.impact>0?"+":""}${ev.impact}</span>
         <button class="small danger" data-del-event="${ev.id}">✕</button>
       </div>`;
@@ -3412,8 +3589,14 @@ function renderPowerLawDial(){
   // é o que preenche o arco do relógio, mais intuitivo que só "% sobre o piso"
   const bandPct = clamp(((S.market.price - pl.floor) / (pl.ceiling - pl.floor)) * 100, 0, 100);
   const color = pl.pctToFloor >= 15 ? COLOR.teal : (pl.pctToFloor >= 0 ? COLOR.gold : COLOR.brick);
-  const tooltip = `Power Law (Santostasi) — referência de anos, NÃO pontua no score.\nPiso ${fmt(pl.floor)} · Central ${fmt(pl.trend)} · Teto ${fmt(pl.ceiling)}\nPreço atual: ${pl.pctToFloor>=0?"+":""}${pl.pctToFloor.toFixed(1)}% sobre o piso · ${pl.pctToTrend>=0?"+":""}${pl.pctToTrend.toFixed(1)}% sobre a linha central`;
-  return dialWidget("Power Law", bandPct, color, `${pl.pctToFloor>=0?"+":""}${pl.pctToFloor.toFixed(0)}% sobre o piso · não pontua`, 140, 12, 22, Math.round(pl.pctToFloor), tooltip);
+  const tooltip = `Power Law (Santostasi) — referência de anos, NÃO pontua no score.\nPiso ${fmt(pl.floor)} · Central ${fmt(pl.trend)} · Teto ${fmt(pl.ceiling)}\nO número no relógio é a POSIÇÃO no canal: 0% = em cima do piso, 100% = em cima do teto.\nPreço atual: ${pl.pctToFloor>=0?"+":""}${pl.pctToFloor.toFixed(1)}% acima do piso · ${pl.pctToTrend>=0?"+":""}${pl.pctToTrend.toFixed(1)}% em relação à linha central`;
+  // o número exibido agora é o MESMO que o arco desenha (posição no canal).
+  // Antes o arco mostrava a posição (~2%) e o centro mostrava "% sobre o piso"
+  // (+12) — duas métricas diferentes no mesmo widget, o que dava a impressão
+  // de folga onde não havia. A distância pro piso e pra linha central foi pro
+  // subtítulo, junto e explícita.
+  const sub = `${bandPct.toFixed(0)}% do canal · ${pl.pctToTrend>=0?"+":""}${pl.pctToTrend.toFixed(0)}% vs. central · não pontua`;
+  return dialWidget("Power Law", bandPct, color, sub, 140, 12, 22, Math.round(bandPct), tooltip);
 }
 
 function renderPowerLawDetail(){
@@ -3438,17 +3621,31 @@ function renderWeeklyMADials(){
     { key: "ma50", label: "MA 50 semanas" }
   ];
 
+  // carimbo de quando essas médias foram calculadas — o painel é cacheado por
+  // 24h de propósito, então sem o carimbo dá a impressão de dado velho
+  let carimbo = "";
+  if(S.market.weeklyMAsComputedAt){
+    const d = new Date(S.market.weeklyMAsComputedAt);
+    const horas = Math.floor((Date.now() - d.getTime()) / 3600000);
+    carimbo = ` · calculado ${d.toLocaleString("pt-BR")}${horas >= 1 ? ` (${horas}h atrás)` : ""}`;
+  }
+
   const header = `
-    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;gap:12px;">
       <div style="font-family:var(--font-mono);font-size:10px;color:var(--text-faint);text-transform:uppercase;letter-spacing:.06em;">
-        § Médias móveis semanais (Binance) — relógio fixo, não pontua no score
+        § Médias móveis semanais (Binance) — relógio fixo, não pontua no score${carimbo}
       </div>
-      <button onclick="window.btnRefreshWeeklyMAs && window.btnRefreshWeeklyMAs()" id="btnRefreshWeeklyMAs" style="background:none;border:1px solid var(--line-soft);color:var(--text-faint);border-radius:4px;padding:3px 8px;font-family:var(--font-mono);font-size:10px;cursor:pointer;">↻ atualizar</button>
+      <button onclick="window.btnRefreshWeeklyMAs && window.btnRefreshWeeklyMAs()" id="btnRefreshWeeklyMAs" style="background:none;border:1px solid var(--line-soft);color:var(--text-faint);border-radius:4px;padding:3px 8px;font-family:var(--font-mono);font-size:10px;cursor:pointer;white-space:nowrap;">↻ atualizar</button>
     </div>
   `;
 
   if(!mas || !price){
-    const msg = S.market.weeklyMAsError ? `✗ ${S.market.weeklyMAsError}` : "ainda não buscado nessa sessão";
+    // erro, falta de preço e "nunca buscado" são três coisas diferentes —
+    // antes os três caíam na mesma frase e escondiam a causa real
+    let msg;
+    if(S.market.weeklyMAsError) msg = `<span style="color:${COLOR.brick};">✗ falhou: ${S.market.weeklyMAsError}</span> — clique em ↻ atualizar pra tentar de novo`;
+    else if(!mas) msg = "ainda não calculado — entra junto com “Atualizar dados de mercado” ou clique em ↻ atualizar";
+    else msg = "médias calculadas, mas falta o preço atual — atualize os dados de mercado";
     return `
       <div style="margin-top:14px;">
         ${header}
@@ -3462,7 +3659,7 @@ function renderWeeklyMADials(){
     if(val === null || val === undefined) return dialWidget(it.label, null, COLOR.faint, "sem dado suficiente", 88, 7, 15, null);
     const pctDiff = ((price - val) / val) * 100;
     const pct = clamp(50 + pctDiff, 0, 100); // 50% = preço exatamente na média
-    const tooltip = `${it.label} — só observação, nunca entra no score.\nMédia: $${val.toLocaleString("en-US",{maximumFractionDigits:0})}\nPreço atual está ${pctDiff>=0?"+":""}${pctDiff.toFixed(1)}% em relação a essa média.`;
+    const tooltip = `${it.label} — só observação, nunca entra no score.\nMédia: $${val.toLocaleString("en-US",{maximumFractionDigits:0})}\nPreço atual está ${pctDiff>=0?"+":""}${pctDiff.toFixed(1)}% em relação a essa média.${mas.semanasDisponiveis ? `\nBase: ${mas.semanasDisponiveis} semanas de histórico BTCUSDT na Binance.` : ""}`;
     return dialWidget(it.label, pct, COLOR.gold, `${pctDiff>=0?"+":""}${pctDiff.toFixed(0)}% vs. média · não pontua`, 88, 7, 15, Math.round(pctDiff), tooltip);
   }).join("");
 
@@ -3517,32 +3714,32 @@ function renderScenarios(){
     card.innerHTML = `
       <div class="card-top">
         <div>
-          <div class="card-title">${sc.title}${leader && leader.id === sc.id ? " ★" : ""}</div>
+          <div class="card-title">${esc(sc.title)}${leader && leader.id === sc.id ? " ★" : ""}</div>
           <div class="card-badges">
-            <span class="stamp ty-${sc.type}">${sc.type}</span>
-            <span class="stamp st-${sc.status}">${sc.status}</span>
+            <span class="stamp ty-${esc(sc.type)}">${esc(sc.type)}</span>
+            <span class="stamp st-${esc(sc.status)}">${esc(sc.status)}</span>
           </div>
-          <div class="card-meta">horizonte: ${sc.horizon || "—"} · confiança: ${sc.confidence} · atualizado ${new Date(sc.updatedAt).toLocaleDateString("pt-BR")}</div>
+          <div class="card-meta">horizonte: ${esc(sc.horizon || "—")} · confiança: ${esc(sc.confidence)} · atualizado ${new Date(sc.updatedAt).toLocaleDateString("pt-BR")}</div>
         </div>
         <div style="text-align:right;">
           <div class="prob-track"><div class="prob-fill" style="width:${sc.probability}%;"></div></div>
           <div class="card-meta">${sc.probability}% probabilidade</div>
         </div>
       </div>
-      <div class="card-body">${sc.description || ""}</div>
+      <div class="card-body">${esc(sc.description || "")}</div>
       <div class="card-cols">
         <div class="card-col">
           <h4>Gatilhos de confirmação</h4>
-          <ul>${(sc.confirmTriggers||[]).map(t=>`<li>${t}</li>`).join("") || "<li>—</li>"}</ul>
+          <ul>${(sc.confirmTriggers||[]).map(t=>`<li>${esc(t)}</li>`).join("") || "<li>—</li>"}</ul>
         </div>
         <div class="card-col">
           <h4>Gatilhos de invalidação</h4>
-          <ul>${(sc.invalidateTriggers||[]).map(t=>`<li>${t}</li>`).join("") || "<li>—</li>"}</ul>
+          <ul>${(sc.invalidateTriggers||[]).map(t=>`<li>${esc(t)}</li>`).join("") || "<li>—</li>"}</ul>
         </div>
       </div>
       <div class="card-col" style="margin-top:10px;">
         <h4>Premissas vinculadas (${linkedPremises.length})</h4>
-        <ul>${linkedPremises.map(p=>`<li>${p.id} — ${p.description} <span class="stamp st-${p.status}" style="transform:none;padding:1px 5px;font-size:8.5px;">${p.status}</span></li>`).join("") || "<li>nenhuma ainda</li>"}</ul>
+        <ul>${linkedPremises.map(p=>`<li>${esc(p.id)} — ${esc(p.description)} <span class="stamp st-${esc(p.status)}" style="transform:none;padding:1px 5px;font-size:8.5px;">${esc(p.status)}</span></li>`).join("") || "<li>nenhuma ainda</li>"}</ul>
       </div>
       <div class="card-foot">
         <div>
@@ -3591,12 +3788,12 @@ function renderPremises(){
     row.className = "premise-row";
     const linkedTitles = p.scenarioIds.map(sid => (S.scenarios.find(s=>s.id===sid)||{}).title).filter(Boolean);
     row.innerHTML = `
-      <span class="premise-id">${p.id}</span>
+      <span class="premise-id">${esc(p.id)}</span>
       <div>
-        <div class="premise-desc">${p.description}</div>
+        <div class="premise-desc">${esc(p.description)}</div>
         <div class="premise-link">cenários: ${linkedTitles.join(", ") || "nenhum"} · evidências a favor: ${(p.evidenceFor||[]).length} · contrárias: ${(p.evidenceAgainst||[]).length}</div>
       </div>
-      <span class="stamp st-${p.status}">${p.status}</span>
+      <span class="stamp st-${esc(p.status)}">${esc(p.status)}</span>
       <div class="premise-actions">
         <button class="small" data-act="confirmar" data-id="${p.id}">Confirmar</button>
         <button class="small" data-act="enfraquecer" data-id="${p.id}">Enfraquecer</button>
@@ -3642,7 +3839,8 @@ function renderDecision(){
   const d = computeDecision();
   document.getElementById("decisionAction").textContent = d.action;
   const ul = document.getElementById("decisionReasoning");
-  ul.innerHTML = d.reasoning.map(r=>`<li>${r}</li>`).join("");
+  // o rastro pode conter título de cenário digitado pelo usuário — escapa
+  ul.innerHTML = d.reasoning.map(r=>`<li>${esc(r)}</li>`).join("");
   const chips = document.getElementById("topFactors");
   chips.innerHTML = d.topFactors.length
     ? d.topFactors.map(f=>{
@@ -3680,9 +3878,29 @@ function parseResultadoPct(resultado){
 // resolveram resultado (7+ dias) E que têm o snapshot de motores salvo —
 // registros de antes dessa versão não têm esse snapshot, ficam de fora.
 const CASE_ENGINE_MIN_SAMPLE = 5; // amostra mínima pra mostrar um veredito, não é achismo de olhar 2 casos
+// janela de retorno aceita no Case Engine. Um registro resolvido em 7 dias e
+// outro em 40 medem coisas diferentes; misturar os dois na mesma média produz
+// um veredito que não significa nada. Só entram os que fecharam perto do
+// horizonte pretendido — os demais continuam visíveis no histórico, apenas
+// não contam pra estatística.
+const CASE_ENGINE_JANELA_MIN = 7;
+const CASE_ENGINE_JANELA_MAX = 12;
+
+// extrai o nº de dias do registro (campo novo; nos antigos, lê do próprio texto)
+function resultadoDiasDe(h){
+  if(typeof h.resultadoDias === "number") return h.resultadoDias;
+  const m = String(h.resultado || "").match(/em\s+(\d+)\s*d/);
+  return m ? Number(m[1]) : null;
+}
 
 function computeCaseEngine(){
-  const usable = S.history.filter(h => h.composites && parseResultadoPct(h.resultado) !== null);
+  const resolvidos = S.history.filter(h => h.composites && parseResultadoPct(h.resultado) !== null);
+  // só as janelas comparáveis entram na conta
+  const usable = resolvidos.filter(h => {
+    const d = resultadoDiasDe(h);
+    return d !== null && d >= CASE_ENGINE_JANELA_MIN && d <= CASE_ENGINE_JANELA_MAX;
+  });
+  const foraDaJanela = resolvidos.length - usable.length;
   const motorKeys = Object.keys(S.motors);
 
   const rows = motorKeys.map(key=>{
@@ -3707,7 +3925,7 @@ function computeCaseEngine(){
     };
   });
 
-  return { totalUsable: usable.length, totalHistory: S.history.length, rows };
+  return { totalUsable: usable.length, totalHistory: S.history.length, foraDaJanela, rows };
 }
 
 function computePersonalTrackRecord(){
@@ -3773,7 +3991,7 @@ function renderCaseEnginePanel(){
   if(ce.totalUsable === 0){
     const msg = ce.totalHistory === 0
       ? "Ainda sem histórico nenhum — começa a se preencher sozinho na próxima atualização."
-      : `${ce.totalHistory} registro(s) no histórico, mas nenhum com resultado resolvido (7+ dias) E snapshot de motores salvo. Registros de antes dessa atualização não têm o snapshot — só os novos, daqui pra frente, contam aqui. Volte em algumas semanas.`;
+      : `${ce.totalHistory} registro(s) no histórico, mas nenhum utilizável ainda: precisa ter resultado resolvido numa janela de ${CASE_ENGINE_JANELA_MIN}–${CASE_ENGINE_JANELA_MAX} dias E snapshot de motores salvo.${ce.foraDaJanela ? ` ${ce.foraDaJanela} registro(s) até resolveram, mas fora dessa janela (você abriu o app tarde demais) — continuam no histórico, só não entram na estatística.` : ""} Registros de antes dessa atualização não têm o snapshot — só os novos, daqui pra frente, contam aqui.`;
     wrap.innerHTML = `<div class="empty-state">${msg}</div>`;
     return;
   }
@@ -3798,7 +4016,7 @@ function renderCaseEnginePanel(){
       </tbody>
     </table>
     <p style="font-family:var(--font-mono);font-size:10.5px;color:var(--text-faint);margin-top:10px;">
-      ${ce.totalUsable} registro(s) utilizável(is) (resolvido + com snapshot de motor) de ${ce.totalHistory} no histórico total.
+      ${ce.totalUsable} registro(s) utilizável(is) de ${ce.totalHistory} no histórico total — resolvidos numa janela de ${CASE_ENGINE_JANELA_MIN}–${CASE_ENGINE_JANELA_MAX} dias e com snapshot de motor.${ce.foraDaJanela ? ` Outros ${ce.foraDaJanela} resolveram fora dessa janela e ficaram de fora: retorno de 40 dias não se compara com um de 7.` : ""}
       Precisa de pelo menos ${CASE_ENGINE_MIN_SAMPLE} casos bullish E ${CASE_ENGINE_MIN_SAMPLE} bearish pra um motor ganhar veredito — com pouco uso, quase tudo aqui em cima vai aparecer "amostra insuficiente" por um bom tempo, e isso é esperado, não é erro.
       ${withVerdict.length > 0 ? `${withVerdict.length} motor(es) já com veredito formado.` : "Nenhum motor com veredito formado ainda — siga usando o sistema normalmente."}
     </p>
@@ -3816,10 +4034,10 @@ function renderHistory(){
       <td>${new Date(h.date).toLocaleString("pt-BR")}${h.auto ? ' <span style="color:var(--text-faint);font-size:9.5px;">auto</span>' : ""}${h.version ? ` <span style="color:var(--text-faint);font-size:9px;" title="versão do sistema">· ${h.version}</span>` : ""}</td>
       <td>${h.price ? "$"+h.price.toLocaleString("en-US",{maximumFractionDigits:0}) : "—"}</td>
       <td>${h.marketScore.toFixed(0)}</td>
-      <td>${h.action}</td>
+      <td>${esc(h.action)}</td>
 
-      <td>${h.leaderTitle || "—"}</td>
-      <td><input type="text" value="${h.resultado || ""}" placeholder="resolve sozinho em 7 dias…" data-id="${h.id}"></td>
+      <td>${esc(h.leaderTitle || "—")}</td>
+      <td><input type="text" value="${esc(h.resultado || "")}" placeholder="resolve sozinho em 7 dias…" data-id="${h.id}"></td>
     </tr>
   `).join("");
   wrap.innerHTML = `
@@ -3872,7 +4090,7 @@ function premiseCheckboxes(selectedIds){
   if(!S.premises.length) return `<p style="font-size:12px;color:var(--text-faint);">Cadastre premissas primeiro para poder vinculá-las.</p>`;
   return S.premises.map(p=>`
     <label style="display:flex;align-items:center;gap:6px;font-family:var(--font-body);text-transform:none;letter-spacing:0;font-size:12.5px;margin-bottom:4px;">
-      <input type="checkbox" value="${p.id}" ${selectedIds.includes(p.id)?"checked":""}> ${p.id} — ${p.description}
+      <input type="checkbox" value="${esc(p.id)}" ${selectedIds.includes(p.id)?"checked":""}> ${esc(p.id)} — ${esc(p.description)}
     </label>
   `).join("");
 }
@@ -3983,7 +4201,7 @@ function scenarioCheckboxes(){
   if(!S.scenarios.length) return `<p style="font-size:12px;color:var(--text-faint);">Nenhum cenário cadastrado ainda.</p>`;
   return S.scenarios.map(s=>`
     <label style="display:flex;align-items:center;gap:6px;font-family:var(--font-body);text-transform:none;letter-spacing:0;font-size:12.5px;margin-bottom:4px;">
-      <input type="checkbox" value="${s.id}"> ${s.title}
+      <input type="checkbox" value="${esc(s.id)}"> ${esc(s.title)}
     </label>
   `).join("");
 }
@@ -4000,6 +4218,13 @@ function renderCqKeyStatus(){
 function renderFredKeyStatus(){
   const status = document.getElementById("fredKeyStatus");
   if(!status) return;
+  if(S.apiKeys.fred && !S.permitirProxyComChave){
+    // o FRED só responde via proxy; sem o consentimento ligado, a chave salva
+    // não adianta nada — melhor dizer isso aqui do que deixar Macro falhar calado
+    status.textContent = "✓ chave salva — mas o FRED precisa do proxy (marque a caixa abaixo)";
+    status.style.color = "var(--gold)";
+    return;
+  }
   status.textContent = S.apiKeys.fred ? "✓ chave salva" : "sem chave — motor Macro fica manual";
   status.style.color = S.apiKeys.fred ? "var(--teal)" : "var(--text-faint)";
 }
@@ -4059,6 +4284,33 @@ document.getElementById("btnSaveCqKey").addEventListener("click", ()=>{
 });
 renderCqKeyStatus();
 
+// consentimento explícito pro proxy CORS em chamadas que levam chave
+const chkProxyComChave = document.getElementById("chkProxyComChave");
+function renderProxyChaveAviso(){
+  const el = document.getElementById("proxyChaveAviso");
+  if(!el) return;
+  if(!S.permitirProxyComChave){
+    el.textContent = "Desligado — nenhuma chave passa por intermediário.";
+    el.style.color = "var(--text-faint)";
+  } else if(S.proxyUsadoComChave){
+    el.textContent = "⚠ Ligado — e já houve pelo menos uma chamada com chave que de fato passou pelo proxy nesta instalação.";
+    el.style.color = "var(--gold)";
+  } else {
+    el.textContent = "Ligado — até agora nenhuma chamada com chave precisou do proxy.";
+    el.style.color = "var(--text-dim)";
+  }
+}
+if(chkProxyComChave){
+  chkProxyComChave.checked = !!S.permitirProxyComChave;
+  chkProxyComChave.addEventListener("change", ()=>{
+    S.permitirProxyComChave = chkProxyComChave.checked;
+    saveState();
+    renderProxyChaveAviso();
+    renderFredKeyStatus(); // o aviso "precisa do proxy" some/aparece junto
+  });
+}
+renderProxyChaveAviso();
+
 document.getElementById("btnRefresh").addEventListener("click", refreshMarketData);
 
 document.getElementById("btnAutoScenario").addEventListener("click", generateAutoScenario);
@@ -4086,6 +4338,17 @@ document.getElementById("btnLogDecision").addEventListener("click", (e)=>{
       setTimeout(()=>{ btn.textContent = originalText; }, 3000);
       return;
     }
+
+    // sem dado novo, registrar de novo não cria informação — cria cópia. E
+    // cada cópia depois resolve com o mesmo resultado e é contada outra vez
+    // pelo Case Engine, inflando a amostra com um caso só repetido N vezes.
+    const ultimo = S.history[S.history.length - 1];
+    if(ultimo && ultimo.price === S.market.price && Math.abs((ultimo.marketScore ?? 0) - ms.score) < 0.5){
+      btn.textContent = "= nada mudou desde o último registro — nenhum duplicado criado";
+      setTimeout(()=>{ btn.textContent = originalText; }, 3500);
+      return;
+    }
+
     S.history.push({
       id: newId("LOG"),
       date: new Date().toISOString(),
@@ -4126,12 +4389,20 @@ document.getElementById("btnExport").addEventListener("click", ()=>{
   S.lastExportAt = new Date().toISOString();
   saveState();
   renderBackupWarning();
-  const blob = new Blob([JSON.stringify(S, null, 2)], {type:"application/json"});
+  // as chaves de API NUNCA saem no arquivo. Um export é feito pra ser copiado,
+  // mandado por e-mail, guardado no Drive ou commitado sem pensar — e uma
+  // chave da CryptoQuant vale dinheiro de verdade. Elas ficam só no
+  // localStorage deste navegador; ao restaurar, você recola.
+  const paraExportar = Object.assign({}, S, {
+    apiKeys: { cryptoquant:"", fred:"", coingecko:"" },
+    _chavesRemovidas: true
+  });
+  const blob = new Blob([JSON.stringify(paraExportar, null, 2)], {type:"application/json"});
   triggerDownloadWithFallback(blob, `seios-btc-export-${new Date().toISOString().slice(0,10)}.json`);
 });
 
 document.getElementById("btnExportCsv").addEventListener("click", async ()=>{
-  const esc = (v)=> `"${String(v??"").replace(/"/g,'""')}"`;
+  const csvEsc = (v)=> `"${String(v??"").replace(/"/g,'""')}"`;
   const header = ["data","preco_usd","score","recomendacao","cenario_lider","resultado_observado","auto","versao_do_sistema"];
   const archived = await getAllArchivedEntries(); // inclui o que já foi pro "porão"
   const todos = [...archived, ...S.history];
@@ -4144,8 +4415,8 @@ document.getElementById("btnExportCsv").addEventListener("click", async ()=>{
     h.resultado ?? "",
     h.auto ? "sim" : "não",
     h.version ?? "anterior ao rastreio de versão"
-  ].map(esc).join(","));
-  const csv = "\uFEFF" + [header.map(esc).join(","), ...rows].join("\r\n"); // BOM pro Excel ler acentos certo
+  ].map(csvEsc).join(","));
+  const csv = "\uFEFF" + [header.map(csvEsc).join(","), ...rows].join("\r\n"); // BOM pro Excel ler acentos certo
   const blob = new Blob([csv], {type:"text/csv;charset=utf-8"});
   triggerDownloadWithFallback(blob, `seios-btc-historico-${new Date().toISOString().slice(0,10)}.csv`);
 });
@@ -4164,7 +4435,7 @@ document.getElementById("importFileInput").addEventListener("change", (e)=>{
     try{
       parsed = JSON.parse(evt.target.result);
     }catch(err){
-      if(preview) preview.innerHTML = `<div style="margin-top:10px;padding:10px 14px;border:1px solid var(--brick);background:var(--brick-soft);font-family:var(--font-mono);font-size:11.5px;color:var(--brick);">Não consegui ler esse arquivo como JSON válido: ${err.message}</div>`;
+      if(preview) preview.innerHTML = `<div style="margin-top:10px;padding:10px 14px;border:1px solid var(--brick);background:var(--brick-soft);font-family:var(--font-mono);font-size:11.5px;color:var(--brick);">Não consegui ler esse arquivo como JSON válido: ${esc(err.message)}</div>`;
       document.getElementById("importFileInput").value = "";
       return;
     }
@@ -4188,11 +4459,16 @@ document.getElementById("importFileInput").addEventListener("change", (e)=>{
         </div>
       `;
       document.getElementById("btnConfirmImport").addEventListener("click", ()=>{
+        // as chaves atuais deste navegador são preservadas — um backup nunca
+        // traz chave (o export limpa) e, se um arquivo de terceiro trouxer
+        // alguma, ela é descartada em vez de sobrescrever a sua
+        const chavesAtuais = Object.assign({}, S.apiKeys);
+        parsed.apiKeys = chavesAtuais;
         localStorage.setItem(STORAGE_KEY, JSON.stringify(parsed));
         S = loadState();
         saveState();
         renderAll();
-        preview.innerHTML = `<div style="margin-top:10px;padding:10px 14px;border:1px solid var(--teal);background:var(--teal-soft);font-family:var(--font-mono);font-size:11.5px;color:var(--teal);">✓ Backup restaurado com sucesso.</div>`;
+        preview.innerHTML = `<div style="margin-top:10px;padding:10px 14px;border:1px solid var(--teal);background:var(--teal-soft);font-family:var(--font-mono);font-size:11.5px;color:var(--teal);">✓ Backup restaurado com sucesso. Suas chaves de API deste navegador foram mantidas (backups não carregam chave).</div>`;
       });
       document.getElementById("btnCancelImport").addEventListener("click", ()=>{
         preview.innerHTML = "";
@@ -4209,6 +4485,14 @@ document.getElementById("importFileInput").addEventListener("change", (e)=>{
 function renderBackupWarning(){
   const el = document.getElementById("backupWarning");
   if(!el) return;
+
+  // arquivamento travado tem prioridade sobre o lembrete de backup: nada foi
+  // perdido, mas o localStorage vai crescer até estourar se ficar assim
+  if(S.arquivamentoFalhou){
+    el.innerHTML = `<div class="wrap"><div style="margin-top:12px;padding:10px 14px;border:1px solid var(--brick);background:var(--brick-soft);font-family:var(--font-mono);font-size:11.5px;color:var(--brick);">⚠ Não consegui mover o histórico antigo pro arquivo de longo prazo (IndexedDB bloqueado neste navegador). <strong>Nada foi perdido</strong> — os ${S.history.length} registros continuam aqui — mas exporte um backup (.json) e considere abrir o app num navegador normal, fora de visualizador embutido.</div></div>`;
+    return;
+  }
+
   const meaningfulData = S.history.length >= 5 || S.scenarios.length >= 2;
   if(!meaningfulData){ el.innerHTML = ""; return; }
 

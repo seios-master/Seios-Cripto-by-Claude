@@ -592,7 +592,7 @@ const STORAGE_KEY = "seios_btc_v2";
 // fonte única da versão — usada no rodapé, no histórico e nos exports.
 // Muda toda vez que a fórmula de score/pesos muda, pra nunca misturar
 // decisões de regras diferentes como se fossem comparáveis.
-const BUILD_VERSION = "2026-08-06.19-eventos";
+const BUILD_VERSION = "2026-08-06.20-versioning";
 
 // indicador padrão — auto = tenta buscar sozinho; manual = você preenche
 function ind(label, source, note){
@@ -1498,6 +1498,7 @@ async function refreshMarketData(){
 
 
   S.market.lastFetch = new Date().toISOString();
+  S.market.lastFetchVersion = BUILD_VERSION;
 
   // "o que mudou desde a última leitura" — compara score por motor com o
   // snapshot salvo na atualização anterior (não com o "antes" desta rodada,
@@ -2333,6 +2334,7 @@ async function runScoreBacktest(){
     `;
     logFinal("concluído — calibração pronta, veja a tabela abaixo", "calibrationLog");
     S.lastCalibratedAt = new Date().toISOString();
+    S.lastCalibratedVersion = BUILD_VERSION;
     saveState();
     renderCalibrationTimestamp();
   }catch(e){
@@ -2803,7 +2805,7 @@ function renderTicker(){
     dEl.className = "ticker-delta";
   }
   document.getElementById("lastUpdate").textContent = S.market.lastFetch
-    ? "atualizado " + new Date(S.market.lastFetch).toLocaleString("pt-BR")
+    ? "atualizado " + new Date(S.market.lastFetch).toLocaleString("pt-BR") + (S.market.lastFetchVersion ? " · " + S.market.lastFetchVersion : "")
     : "nunca atualizado";
 }
 
@@ -2811,7 +2813,7 @@ function renderCalibrationTimestamp(){
   const el = document.getElementById("calibrationTimestamp");
   if(!el) return;
   el.textContent = S.lastCalibratedAt
-    ? "última calibração em " + new Date(S.lastCalibratedAt).toLocaleString("pt-BR")
+    ? "última calibração em " + new Date(S.lastCalibratedAt).toLocaleString("pt-BR") + (S.lastCalibratedVersion ? " · " + S.lastCalibratedVersion : "")
     : "ainda não calibrado nesta sessão/dispositivo";
 }
 

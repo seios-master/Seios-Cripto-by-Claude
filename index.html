@@ -100,7 +100,7 @@
   /* ---------- live refresh log (estilo terminal) ---------- */
   #refreshLog, #calibrationLog{
     margin-top:14px;
-    padding:12px 14px;
+    padding:12px 44px 12px 14px;
     background:var(--bg-alt);
     border:1px solid var(--line-soft);
     font-family:var(--font-mono);
@@ -433,7 +433,8 @@
   </div>
   <div class="wrap" id="exportFallback"></div>
   <div id="backupWarning"></div>
-  <div class="wrap" id="refreshLogWrap" style="display:none;">
+  <div class="wrap" id="refreshLogWrap" style="display:none;position:relative;">
+    <button onclick="document.getElementById('refreshLogWrap').style.display='none';" style="position:absolute;top:8px;right:8px;background:none;border:1px solid var(--line-soft);color:var(--text-faint);border-radius:4px;width:26px;height:26px;font-size:14px;line-height:1;cursor:pointer;z-index:2;">✕</button>
     <div id="refreshLog"></div>
   </div>
 </header>
@@ -561,7 +562,8 @@
       <button class="primary" id="btnRunScoreBacktest">📊 Calibrar o Score Geral (testa os cortes 40/15/-15/-55)</button>
     </div>
     <div id="calibrationTimestamp" style="margin-top:10px;font-family:var(--font-mono);font-size:10.5px;color:var(--text-faint);"></div>
-    <div class="wrap" id="calibrationLogWrap" style="display:none;padding:0;">
+    <div class="wrap" id="calibrationLogWrap" style="display:none;padding:0;position:relative;">
+      <button onclick="document.getElementById('calibrationLogWrap').style.display='none';" style="position:absolute;top:8px;right:8px;background:none;border:1px solid var(--line-soft);color:var(--text-faint);border-radius:4px;width:26px;height:26px;font-size:14px;line-height:1;cursor:pointer;z-index:2;">✕</button>
       <div id="calibrationLog"></div>
     </div>
     <div id="backtestResults" style="margin-top:16px;"></div>
@@ -739,7 +741,7 @@ const STORAGE_KEY = "seios_btc_v2";
 // fonte única da versão — usada no rodapé, no histórico e nos exports.
 // Muda toda vez que a fórmula de score/pesos muda, pra nunca misturar
 // decisões de regras diferentes como se fossem comparáveis.
-const BUILD_VERSION = "2026-08-06.35-error-fixes";
+const BUILD_VERSION = "2026-08-06.36-ui-fixes";
 
 // indicador padrão — auto = tenta buscar sozinho; manual = você preenche
 function ind(label, source, note){
@@ -3904,21 +3906,36 @@ document.getElementById("btnNewPremise").addEventListener("click", ()=>{
   f.classList.contains("open") ? (f.classList.remove("open"), f.innerHTML="") : openPremiseForm();
 });
 
-document.getElementById("btnLogDecision").addEventListener("click", ()=>{
-  const d = computeDecision();
-  const ms = computeMarketState();
-  S.history.push({
-    id: newId("LOG"),
-    date: new Date().toISOString(),
-    price: S.market.price,
-    marketScore: ms.score,
-    action: d.action,
-    leaderTitle: d.leader ? d.leader.title : null,
-    resultado: "",
-    version: BUILD_VERSION
-  });
-  saveState();
-  renderHistory();
+document.getElementById("btnLogDecision").addEventListener("click", (e)=>{
+  const btn = e.target;
+  const originalText = btn.textContent;
+  try{
+    const d = computeDecision();
+    const ms = computeMarketState();
+    if(!S.market.price){
+      btn.textContent = "⚠ sem preço ainda — atualize os dados primeiro";
+      setTimeout(()=>{ btn.textContent = originalText; }, 3000);
+      return;
+    }
+    S.history.push({
+      id: newId("LOG"),
+      date: new Date().toISOString(),
+      price: S.market.price,
+      marketScore: ms.score,
+      action: d.action,
+      leaderTitle: d.leader ? d.leader.title : null,
+      resultado: "",
+      version: BUILD_VERSION
+    });
+    saveState();
+    renderHistory();
+    btn.textContent = "✓ registrado agora — veja no histórico embaixo";
+    setTimeout(()=>{ btn.textContent = originalText; }, 3000);
+  }catch(err){
+    btn.textContent = "✗ erro: " + err.message;
+    console.error("Erro ao forçar registro:", err);
+    setTimeout(()=>{ btn.textContent = originalText; }, 4000);
+  }
 });
 
 // dispara o download normal, mostra confirmação clara, e deixa um link

@@ -476,6 +476,14 @@
           </div>
           <div style="font-size:10.5px;color:var(--text-faint);margin-bottom:14px;">Pegue a sua grátis, em 30 segundos, em <strong>fredaccount.stlouisfed.org</strong> — só um e-mail, ativa na hora, sem cartão de crédito.</div>
 
+          <div style="font-family:var(--font-mono);font-size:10.5px;color:var(--teal);text-transform:uppercase;letter-spacing:.06em;margin-bottom:8px;border-top:1px solid var(--line-soft);padding-top:12px;">🔑 Integração CoinGecko Pro (opcional, plano Basic $35/mês) — preço/histórico mais confiáveis, ativa as médias de 200/100/50 semanas por completo</div>
+          <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:6px;">
+            <input type="password" id="cgApiKeyInput" placeholder="cole sua chave paga aqui" style="flex:1;min-width:220px;background:var(--panel);border:1px solid var(--line-soft);color:var(--text);padding:8px 10px;font-size:12.5px;border-radius:2px;">
+            <button class="small" id="btnSaveCgKey">Salvar</button>
+            <span id="cgKeyStatus" style="font-family:var(--font-mono);font-size:10.5px;color:var(--text-faint);"></span>
+          </div>
+          <div style="font-size:10.5px;color:var(--text-faint);margin-bottom:14px;">Sem essa chave, o sistema continua funcionando no plano grátis de sempre — essa integração só melhora a confiabilidade, não é obrigatória.</div>
+
           <div style="font-family:var(--font-mono);font-size:10.5px;color:var(--text-faint);text-transform:uppercase;letter-spacing:.06em;margin-bottom:8px;border-top:1px solid var(--line-soft);padding-top:12px;">🔑 Integração CryptoQuant (opcional, plano Professional ~$99–109/mês) — ativa MVRV e Exchange Netflow automáticos</div>
           <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;">
             <input type="password" id="cqApiKeyInput" placeholder="cole sua chave de API aqui" style="flex:1;min-width:220px;background:var(--panel);border:1px solid var(--line-soft);color:var(--text);padding:8px 10px;font-size:12.5px;border-radius:2px;">
@@ -741,7 +749,7 @@ const STORAGE_KEY = "seios_btc_v2";
 // fonte única da versão — usada no rodapé, no histórico e nos exports.
 // Muda toda vez que a fórmula de score/pesos muda, pra nunca misturar
 // decisões de regras diferentes como se fossem comparáveis.
-const BUILD_VERSION = "2026-08-06.37-dual-proxy";
+const BUILD_VERSION = "2026-08-06.39-weekly-ma-fix";
 
 // indicador padrão — auto = tenta buscar sozinho; manual = você preenche
 function ind(label, source, note){
@@ -763,7 +771,7 @@ function ind(label, source, note){
 // padrão vai se repetir se o regime mudar. Redistribuído proporcionalmente.
 function defaultState(){
   return {
-    apiKeys: { cryptoquant:"", fred:"" }, // ficam só no seu navegador, nunca são enviadas a mim
+    apiKeys: { cryptoquant:"", fred:"", coingecko:"" }, // ficam só no seu navegador, nunca são enviadas a mim
     lastExportAt: null,
     lastCalibratedAt: null,
     autoRefreshEnabled: false,
@@ -1028,15 +1036,28 @@ async function smartFetch(url){
   }
 }
 
+// se você colou uma chave paga do CoinGecko, usa o domínio pro (mais
+// confiável, sem os limites do plano grátis); sem chave, cai no domínio
+// público de sempre — nada quebra pra quem não assinou
+function coingeckoUrl(path, params){
+  const hasKey = !!(S.apiKeys.coingecko && S.apiKeys.coingecko.trim());
+  const base = hasKey ? "https://pro-api.coingecko.com/api/v3" : "https://api.coingecko.com/api/v3";
+  const query = new URLSearchParams(params);
+  if(hasKey) query.set("x_cg_pro_api_key", S.apiKeys.coingecko.trim());
+  return `${base}${path}?${query.toString()}`;
+}
+
 async function fetchPrice(){
-  const res = await smartFetch("https://api.coingecko.com/api/v3/simple/price?ids=bitcoin&vs_currencies=usd&include_24hr_change=true");
+  const url = coingeckoUrl("/simple/price", { ids:"bitcoin", vs_currencies:"usd", include_24hr_change:"true" });
+  const res = await smartFetch(url);
   if(!res.ok) throw new Error("coingecko simple/price falhou");
   const data = await res.json();
   return { price: data.bitcoin.usd, change24h: data.bitcoin.usd_24h_change };
 }
 
 async function fetchMarketChart(days){
-  const res = await smartFetch(`https://api.coingecko.com/api/v3/coins/bitcoin/market_chart?vs_currency=usd&days=${days}`);
+  const url = coingeckoUrl("/coins/bitcoin/market_chart", { vs_currency:"usd", days:String(days) });
+  const res = await smartFetch(url);
   if(!res.ok) throw new Error("coingecko market_chart falhou");
   const data = await res.json();
   return data.prices; // [[ts, price], ...]
@@ -3329,14 +3350,25 @@ async function fetchWeeklyMAs(){
   if(S.market.weeklyMAs && cacheAge < 24*3600*1000) return S.market.weeklyMAs; // cache ainda válido
 
   const prices = await fetchMarketChart("max"); // pede o máximo disponível — CoinGecko honra "max" mesmo sem chave, mais confiável que pedir um número fixo de dias
-  if(!prices || prices.length < 60) throw new Error("histórico insuficiente até pra MA de 50 semanas");
+  if(!prices || prices.length < 10) throw new Error("histórico praticamente vazio — fonte não devolveu dado");
 
-  // reamostra diário -> semanal, pegando o último preço de cada bloco de 7 dias
+  // reamostra diário -> semanal, agrupando pelo CALENDÁRIO (número da semana
+  // desde a época), não pela posição na lista — funciona não importa se a
+  // fonte devolveu ponto por dia, por semana, ou espaçamento irregular
+  const weekMs = 7*24*3600*1000;
   const weekly = [];
-  for(let i=0; i<prices.length; i+=7){
-    const block = prices.slice(i, i+7);
-    if(block.length) weekly.push(block[block.length-1][1]);
+  let currentWeekKey = null, lastPriceInWeek = null;
+  for(const [ts, price] of prices){
+    const weekKey = Math.floor(ts / weekMs);
+    if(weekKey !== currentWeekKey){
+      if(currentWeekKey !== null) weekly.push(lastPriceInWeek);
+      currentWeekKey = weekKey;
+    }
+    lastPriceInWeek = price;
   }
+  if(lastPriceInWeek !== null) weekly.push(lastPriceInWeek);
+
+  if(weekly.length < 10) throw new Error(`só ${weekly.length} semanas reconstruídas — fonte devolveu histórico curto demais`);
 
   const sma = (arr, n) => {
     if(arr.length < n) return null; // essa MA específica fica "—" se não tiver semana suficiente, não derruba as outras
@@ -3880,6 +3912,13 @@ function renderFredKeyStatus(){
   status.textContent = S.apiKeys.fred ? "✓ chave salva" : "sem chave — motor Macro fica manual";
   status.style.color = S.apiKeys.fred ? "var(--teal)" : "var(--text-faint)";
 }
+
+function renderCgKeyStatus(){
+  const status = document.getElementById("cgKeyStatus");
+  if(!status) return;
+  status.textContent = S.apiKeys.coingecko ? "✓ chave paga salva — usando plano Pro" : "sem chave — usando plano grátis";
+  status.style.color = S.apiKeys.coingecko ? "var(--teal)" : "var(--text-faint)";
+}
 document.getElementById("btnSaveFredKey").addEventListener("click", ()=>{
   const input = document.getElementById("fredApiKeyInput");
   S.apiKeys.fred = input.value.trim();
@@ -3890,6 +3929,16 @@ document.getElementById("btnSaveFredKey").addEventListener("click", ()=>{
   if(S.apiKeys.fred) refreshMarketData().catch(()=>{});
 });
 renderFredKeyStatus();
+renderCgKeyStatus();
+document.getElementById("btnSaveCgKey").addEventListener("click", ()=>{
+  const input = document.getElementById("cgApiKeyInput");
+  S.apiKeys.coingecko = input.value.trim();
+  saveState();
+  renderCgKeyStatus();
+  input.value = "";
+  input.placeholder = S.apiKeys.coingecko ? "chave salva (oculta)" : "cole sua chave paga aqui";
+  if(S.apiKeys.coingecko) refreshMarketData().catch(()=>{});
+});
 document.getElementById("btnSaveCqKey").addEventListener("click", ()=>{
   const input = document.getElementById("cqApiKeyInput");
   S.apiKeys.cryptoquant = input.value.trim();

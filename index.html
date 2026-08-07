@@ -497,17 +497,12 @@
     </div>
   </div>
   <div class="wrap controls-row">
-    <button class="primary" id="btnRefresh">↻ Atualizar dados de mercado</button>
-    <button class="ghost" id="btnExport">⇩ Exportar dados (.json)</button>
-    <button class="ghost" id="btnExportCsv">⇩ Exportar histórico (.csv — abre no Excel)</button>
-    <button class="ghost" id="btnImport">⇧ Importar dados (.json — restaura um backup)</button>
+    <button class="primary" id="btnRefresh" title="Busca todas as fontes e recalcula o estado de mercado">↻ Atualizar dados</button>
+    <button class="ghost" id="btnExport" title="Backup completo em .json — restaurável pelo botão Importar">⇩ Backup (.json)</button>
+    <button class="ghost" id="btnExportCsv" title="Histórico de decisões em .csv, abre no Excel">⇩ Histórico (.csv)</button>
+    <button class="ghost" id="btnImport" title="Restaura um backup .json — substitui os dados atuais">⇧ Restaurar</button>
     <input type="file" id="importFileInput" accept="application/json,.json" style="display:none;">
     <div id="importPreview" style="flex-basis:100%;"></div>
-    <button class="ghost danger" id="btnReset">Zerar tudo</button>
-    <label style="display:flex;align-items:center;gap:6px;font-family:var(--font-mono);font-size:11px;color:var(--text-faint);margin-left:4px;">
-      <input type="checkbox" id="chkAutoRefresh" style="width:14px;height:14px;">
-      atualizar sozinho a cada 30min (só com o app aberto na tela)
-    </label>
   </div>
   <div class="wrap" id="exportFallback"></div>
   <div id="backupWarning"></div>
@@ -597,6 +592,19 @@
       <div class="panel-desc">Chaves de acesso e preenchimento manual de indicador. Mexer aqui muda o score.</div>
     </div>
     <div id="relAjustesWrap"></div>
+
+    <!-- Ação destrutiva mora aqui, longe da barra de uso diário. Ela existe pra
+         um caso só: recomeçar do zero depois de testes, ou se o estado corromper.
+         Apaga localStorage E o arquivo de longo prazo. -->
+    <div style="margin-top:22px;padding:14px 16px;border:1px solid var(--brick);background:var(--brick-soft);">
+      <div style="font-family:var(--font-mono);font-size:12px;color:var(--brick);margin-bottom:4px;">Recomeçar do zero</div>
+      <div style="font-size:12px;color:var(--text-dim);margin-bottom:10px;max-width:64ch;">
+        Apaga histórico, cenários, premissas e o arquivo de longo prazo deste navegador. As chaves de API também vão junto.
+        Serve pra descartar dados de teste ou recuperar um estado corrompido — no uso normal, você nunca precisa disto.
+        <strong>Exporte um backup antes.</strong>
+      </div>
+      <button class="ghost danger" id="btnReset">Zerar tudo</button>
+    </div>
   </section>
 
   <div class="rel-title">Relatórios — abra o que quiser, feche depois</div>
@@ -937,7 +945,7 @@ const STORAGE_KEY = "seios_btc_v2";
 // fonte única da versão — usada no rodapé, no histórico e nos exports.
 // Muda toda vez que a fórmula de score/pesos muda, pra nunca misturar
 // decisões de regras diferentes como se fossem comparáveis.
-const BUILD_VERSION = "2026-08-07.52-preco-ao-vivo";
+const BUILD_VERSION = "2026-08-07.53-barra-limpa";
 
 // indicador padrão — auto = tenta buscar sozinho; manual = você preenche
 function ind(label, source, note){
@@ -962,7 +970,6 @@ function defaultState(){
     apiKeys: { cryptoquant:"", fred:"", coingecko:"" }, // ficam só no seu navegador, nunca são enviadas a mim
     lastExportAt: null,
     lastCalibratedAt: null,
-    autoRefreshEnabled: false,
     // o FRED não manda cabeçalho CORS, então a única forma de ler macro
     // (28% do peso) direto do navegador é passando por um proxy público —
     // e a URL do FRED leva a chave junto. Desligado por padrão: você decide.
@@ -3641,6 +3648,7 @@ function generateAutoScenario(){
   // aceita também um automático já "confirmada" — antes só procurava "ativa",
   // então um confirmado ficava órfão e um novo nascia ao lado, os dois vivos
   let existing = S.scenarios.find(s => s.auto && !s.rival && (s.status === "ativa" || s.status === "confirmada"));
+  const existiaAntes = !!existing;
 
   if(existing){
     /* MUDANÇA MATERIAL REBAIXA O STATUS.
@@ -3719,6 +3727,21 @@ function generateAutoScenario(){
 
   saveState();
   renderAll();
+
+  /* FEEDBACK VISÍVEL. Desde a v46 este botão ATUALIZA o cenário existente em
+     vez de criar um novo. Consequência: se a leitura não mudou, o cartão fica
+     praticamente idêntico depois do clique — e o botão parece quebrado, mesmo
+     tendo funcionado. Agora ele diz o que fez. */
+  {
+    const btn = document.getElementById("btnAutoScenario");
+    if(btn){
+      const original = btn.dataset.rotulo || btn.textContent;
+      btn.dataset.rotulo = original;
+      const hora = new Date().toLocaleTimeString("pt-BR", {hour:"2-digit", minute:"2-digit", second:"2-digit"});
+      btn.textContent = `✓ ${existiaAntes ? "Cenário atualizado" : "Cenário criado"} às ${hora}`;
+      setTimeout(()=>{ if(btn.isConnected) btn.textContent = btn.dataset.rotulo; }, 4000);
+    }
+  }
 }
 
 /* O registro do dia é gravado DENTRO da atualização de mercado (autoLogHistory),
@@ -5607,37 +5630,13 @@ document.getElementById("buildVersionFooter").textContent = BUILD_VERSION;
 // atualização de dados
 recarregarEspelhoDoArquivo().then(qtd=>{ if(qtd && qtd.length) renderAll(); });
 
-/* --- auto-atualização opcional — só roda enquanto a aba está visível e em
-   primeiro plano. Assim que você sai do app ou bloqueia a tela, o iOS pausa
-   isso sozinho (não tem como driblar isso sem virar app nativo). --- */
-let autoRefreshTimer = null;
-function stopAutoRefresh(){
-  if(autoRefreshTimer){ clearInterval(autoRefreshTimer); autoRefreshTimer = null; }
-}
-function startAutoRefresh(){
-  stopAutoRefresh();
-  autoRefreshTimer = setInterval(()=>{
-    if(document.visibilityState === "visible"){
-      refreshMarketData().catch(()=>{});
-    }
-  }, 30*60*1000);
-}
-const chkAutoRefresh = document.getElementById("chkAutoRefresh");
-if(chkAutoRefresh){
-  chkAutoRefresh.checked = !!S.autoRefreshEnabled;
-  if(S.autoRefreshEnabled) startAutoRefresh();
-  chkAutoRefresh.addEventListener("change", ()=>{
-    S.autoRefreshEnabled = chkAutoRefresh.checked;
-    saveState();
-    if(chkAutoRefresh.checked) startAutoRefresh(); else stopAutoRefresh();
-  });
-}
-// se voltar de segundo plano com a opção ligada, garante que o timer existe
-document.addEventListener("visibilitychange", ()=>{
-  if(document.visibilityState === "visible" && S.autoRefreshEnabled && !autoRefreshTimer){
-    startAutoRefresh();
-  }
-});
+/* A atualização automática de 30 em 30 minutos foi REMOVIDA.
+   Ela contradizia o próprio funcionamento do sistema: o registro de decisão
+   tem trava de 6h, então a auto-atualização gravava até 4 registros por dia —
+   quatro fotos do mesmo regime, que inflam a amostra do Case Engine sem
+   acrescentar experiência nenhuma. E só rodava com a aba aberta em primeiro
+   plano, o que na prática quase nunca acontece. Um clique por dia, no mesmo
+   horário, produz um histórico melhor do que qualquer automação parcial. */
 
 // popup de informação adicional dos relógios — abre no toque, funciona
 // igual em touch (iPad) ou mouse, já que "title" nativo não confia em touch

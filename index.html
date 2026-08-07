@@ -455,6 +455,21 @@
   .rel-title{font-family:var(--font-mono);font-size:11px;letter-spacing:.14em;text-transform:uppercase;
     color:var(--text-faint);margin:26px 0 10px;padding-top:18px;border-top:1px solid var(--line);}
   .panel[hidden]{display:none;}
+
+  /* faixa de preço ao vivo — largura cheia, altura mínima. É o pulso do
+     instrumento: precisa estar sempre à vista, sem roubar a hierarquia do
+     veredito logo acima. */
+  .live-strip{display:flex;align-items:center;gap:18px;margin-top:10px;padding:10px 18px;
+    border:1px solid var(--line-soft);background:#050B07;}
+  .live-left{display:flex;align-items:baseline;gap:12px;flex-shrink:0;}
+  .live-dot{font-family:var(--font-mono);font-size:13px;color:var(--teal);}
+  .live-price{font-family:var(--font-mono);font-size:26px;font-weight:700;letter-spacing:-.01em;}
+  .live-cap{font-family:var(--font-mono);font-size:10.5px;color:var(--text-faint);letter-spacing:.06em;}
+  .live-chart{flex:1;height:40px;min-width:120px;display:block;}
+  @media(max-width:860px){
+    .live-strip{flex-wrap:wrap;gap:8px;}
+    .live-chart{width:100%;flex-basis:100%;}
+  }
   @media(max-width:640px){
     .brand-title{font-size:24px;}
     .ticker{text-align:left;}
@@ -502,20 +517,22 @@
   </div>
 </header>
 
-<div class="wrap" id="liveTickWrap" style="margin-top:18px;display:none;">
-  <div style="border:1px solid var(--line);background:#050B07;padding:14px 18px;box-shadow:0 0 20px rgba(51,255,110,.06), inset 0 0 24px rgba(0,0,0,.4);">
-    <div style="display:flex;justify-content:space-between;align-items:center;">
-      <div style="font-family:var(--font-mono);font-size:11px;letter-spacing:.06em;" id="liveStatus">○ conectando...</div>
-      <div style="font-family:var(--font-mono);font-size:10px;color:var(--line);">BINANCE WS · BTCUSDT · TICK A TICK</div>
-    </div>
-    <div style="font-family:var(--font-mono);font-size:32px;font-weight:700;margin-top:6px;" id="livePrice">$ ----.--</div>
-    <svg id="liveChart" width="100%" height="60" viewBox="0 0 600 60" preserveAspectRatio="none" style="margin-top:6px;display:block;"></svg>
-    <div style="font-family:var(--font-mono);font-size:9.5px;color:var(--text-faint);margin-top:4px;">preço em tempo real, direto da bolsa — só enquanto essa aba estiver aberta e em primeiro plano</div>
-  </div>
-</div>
-
 <div class="wrap">
   <div class="hero" id="heroWrap"></div>
+
+  <!-- Faixa ao vivo: fica FORA do #heroWrap porque renderHero() reescreve o
+       innerHTML dele a cada atualização, e isso apagaria o gráfico tick a tick
+       no meio do desenho. Aqui ela sobrevive a qualquer render. -->
+  <div class="live-strip" id="liveTickWrap">
+    <div class="live-left">
+      <span class="live-dot" id="liveStatus">○</span>
+      <span class="live-price" id="livePrice">$ ----.--</span>
+      <span class="live-cap">ao vivo · Binance · tick a tick</span>
+      <span class="live-cap" id="liveGap"></span>
+    </div>
+    <svg id="liveChart" class="live-chart" viewBox="0 0 600 40" preserveAspectRatio="none"></svg>
+  </div>
+
   <div class="prazo-bar" id="prazoBar"></div>
 </div>
 
@@ -813,16 +830,16 @@
     if(ws && ws.readyState <= 1) return;        // já conectado ou conectando
     const statusEl = document.getElementById("liveStatus");
     if(!statusEl) return; // painel não existe nessa tela, não faz nada
-    statusEl.textContent = "○ conectando...";
+    statusEl.innerHTML = '<span style="color:var(--text-faint);" title="conectando">○</span>';
     try{
       ws = new WebSocket("wss://stream.binance.com:9443/ws/btcusdt@trade");
     }catch(e){
-      statusEl.innerHTML = '<span style="color:var(--brick);">○ indisponível neste navegador</span>';
+      statusEl.innerHTML = '<span style="color:var(--brick);" title="WebSocket indisponível neste navegador">○</span>';
       return;
     }
 
     ws.onopen = () => {
-      statusEl.innerHTML = '<span style="color:var(--teal);">● AO VIVO</span>';
+      statusEl.innerHTML = '<span style="color:var(--teal);" title="ao vivo">●</span>';
     };
 
     ws.onmessage = (event) => {
@@ -841,6 +858,18 @@
         priceEl.textContent = "$ " + price.toLocaleString("en-US",{minimumFractionDigits:2,maximumFractionDigits:2});
         priceEl.style.color = up ? "var(--teal)" : "var(--brick)";
       }
+      // distância entre o preço ao vivo e o da última atualização: se abriu
+      // demais, o veredito acima está olhando um mercado que já mudou
+      const gapEl = document.getElementById("liveGap");
+      if(gapEl && S.market && S.market.price){
+        const gap = ((price - S.market.price) / S.market.price) * 100;
+        if(Math.abs(gap) >= 1){
+          gapEl.textContent = `${gap>=0?"+":""}${gap.toFixed(1)}% desde a última atualização — vale atualizar`;
+          gapEl.style.color = "var(--gold)";
+        } else {
+          gapEl.textContent = "";
+        }
+      }
       drawChart();
     };
 
@@ -850,10 +879,10 @@
       // conectava e o timer pendente conectava de novo — dois sockets abertos,
       // um deles órfão consumindo dado e bateria em silêncio.
       if(fechadoDePropusito){
-        if(statusEl) statusEl.innerHTML = '<span style="color:var(--text-faint);">○ pausado (aba em segundo plano)</span>';
+        if(statusEl) statusEl.innerHTML = '<span style="color:var(--text-faint);" title="pausado — aba em segundo plano">○</span>';
         return;
       }
-      if(statusEl) statusEl.innerHTML = '<span style="color:var(--brick);">○ reconectando...</span>';
+      if(statusEl) statusEl.innerHTML = '<span style="color:var(--brick);" title="reconectando">○</span>';
       agendarReconexao();
     };
     ws.onerror = () => { try{ ws.close(); }catch(e){} };
@@ -871,7 +900,7 @@
   function drawChart(){
     const svg = document.getElementById("liveChart");
     if(!svg || liveBuffer.length < 2) return;
-    const w = 600, h = 60;
+    const w = 600, h = 40; // casa com o viewBox da faixa fina
     const min = Math.min(...liveBuffer), max = Math.max(...liveBuffer);
     const range = (max - min) || 1;
     const pts = liveBuffer.map((p,i)=>{
@@ -908,7 +937,7 @@ const STORAGE_KEY = "seios_btc_v2";
 // fonte única da versão — usada no rodapé, no histórico e nos exports.
 // Muda toda vez que a fórmula de score/pesos muda, pra nunca misturar
 // decisões de regras diferentes como se fossem comparáveis.
-const BUILD_VERSION = "2026-08-07.51-painel-relogios";
+const BUILD_VERSION = "2026-08-07.52-preco-ao-vivo";
 
 // indicador padrão — auto = tenta buscar sozinho; manual = você preenche
 function ind(label, source, note){
@@ -5551,12 +5580,10 @@ document.getElementById("buildVersionFooter").textContent = BUILD_VERSION;
   }
 
   const barra = document.getElementById("relBar");
-  const tick = document.getElementById("liveTickWrap");
 
   function fecharTodos(){
     document.querySelectorAll("#relBar .rel-btn").forEach(b=>b.classList.remove("on"));
     document.querySelectorAll("section.rel-panel").forEach(sec=>{ sec.hidden = true; });
-    if(tick) tick.style.display = "none";
   }
 
   if(barra){

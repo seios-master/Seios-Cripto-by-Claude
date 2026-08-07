@@ -512,7 +512,7 @@
         <div class="panel-mark">§ Scenario Engine</div>
         <h2 class="panel-title">Cenários</h2>
       </div>
-      <div class="panel-desc">Nenhum cenário é certeza. Clique em "Gerar automático" — sem digitar nada — ou crie o seu manualmente.</div>
+      <div class="panel-desc">Nenhum cenário é certeza. A convicção é heurística, derivada do score — não é probabilidade empírica medida em casos passados. Clique em "Gerar automático" — sem digitar nada — ou crie o seu manualmente.</div>
     </div>
     <div class="card-list" id="scenarioList"></div>
     <div style="margin-top:14px;display:flex;gap:8px;flex-wrap:wrap;">
@@ -769,7 +769,7 @@ const STORAGE_KEY = "seios_btc_v2";
 // fonte única da versão — usada no rodapé, no histórico e nos exports.
 // Muda toda vez que a fórmula de score/pesos muda, pra nunca misturar
 // decisões de regras diferentes como se fossem comparáveis.
-const BUILD_VERSION = "2026-08-07.45-auditoria-completa";
+const BUILD_VERSION = "2026-08-07.46-audit-fixes";
 
 // indicador padrão — auto = tenta buscar sozinho; manual = você preenche
 function ind(label, source, note){
@@ -817,7 +817,7 @@ function defaultState(){
       }},
       onchain:       { label:"On-chain",                     weight:.15, indicators:{
         mvrv:      ind("MVRV (CoinMetrics grátis; CryptoQuant refina, se conectado)", "auto"),
-        nupl:      ind("NUPL (derivado matematicamente do MVRV)", "auto"),
+        nupl:      ind("NUPL (derivado do MVRV — só referência, não pontua)", "auto"),
         sopr:      ind("SOPR", "manual"),
         exchangeFlow: ind("Exchange netflow — z-score 30d (CryptoQuant, se conectado)", "auto"),
         activeAddresses: ind("Endereços ativos — tendência 90d (CoinMetrics)", "auto"),
@@ -987,6 +987,26 @@ async function countArchivedEntries(){
   }catch(e){ return 0; }
 }
 
+// apaga o arquivo de longo prazo — usado pelo "Zerar tudo", que antes só
+// limpava o localStorage e deixava o porão intacto: depois de 500 registros,
+// "zerar tudo" não zerava tudo
+async function clearArchive(){
+  try{
+    const db = await openArchiveDB();
+    await new Promise((resolve, reject)=>{
+      const tx = db.transaction(ARCHIVE_STORE, "readwrite");
+      tx.objectStore(ARCHIVE_STORE).clear();
+      tx.oncomplete = resolve;
+      tx.onerror = ()=> reject(tx.error);
+    });
+    db.close();
+    return true;
+  }catch(e){
+    console.warn("Não consegui limpar o arquivo de longo prazo:", e);
+    return false;
+  }
+}
+
 async function getAllArchivedEntries(){
   try{
     const db = await openArchiveDB();
@@ -1113,6 +1133,51 @@ async function fetchMarketChart(days){
   return data.prices; // [[ts, price], ...]
 }
 
+/* --- GRANULARIDADE: o CoinGecko decide sozinho o intervalo pela janela pedida.
+   De 2 a 90 dias ele devolve pontos HORÁRIOS; acima de 90 dias, diários. O
+   parâmetro `interval=daily` existe, mas só vale em plano pago.
+
+   Isso era um erro sério e silencioso: pedindo 90 dias e fatiando os últimos
+   30 pontos, o sistema chamava de "tendência 30 dias" o que eram ~30 HORAS.
+   RSI(14) virava 14 horas, "MM50" virava ~2 dias, e a volatilidade "30d" era o
+   desvio de 30 retornos horários — que fica na casa de 0,3%, então o rótulo
+   "volatilidade baixa" era praticamente constante, independente do mercado.
+   Pior: o backtest pede 365 dias e recebe DIÁRIO, ou seja, calibrava um
+   Técnico diário e comparava com um Técnico horário rodando ao vivo. Os dois
+   nunca mediram a mesma coisa.
+
+   Duas defesas aqui, não uma. Primeiro pedimos uma janela que garante retorno
+   diário. Depois reamostramos o que veio pra fechamento diário de qualquer
+   jeito — se a API mudar de comportamento, ou o plano do usuário mudar a
+   resposta, a reamostragem continua entregando dia. --- */
+function toDailyCloses(prices){
+  if(!prices || !prices.length) return [];
+  const porDia = new Map();
+  prices.forEach(ponto=>{
+    if(!ponto || ponto.length < 2) return;
+    const ts = ponto[0], preco = ponto[1];
+    if(!Number.isFinite(preco) || !Number.isFinite(ts)) return;
+    const dia = new Date(ts).toISOString().slice(0,10);
+    const anterior = porDia.get(dia);
+    if(!anterior || ts > anterior[0]) porDia.set(dia, [ts, preco]); // último ponto do dia = fechamento
+  });
+  return Array.from(porDia.values()).sort((a,b)=>a[0]-b[0]);
+}
+
+// quantos pontos por dia a fonte realmente entregou — serve pra registrar no
+// log o que veio, em vez de confiar que veio o que foi pedido
+function pontosPorDia(prices){
+  if(!prices || prices.length < 2) return null;
+  const dias = (prices[prices.length-1][0] - prices[0][0]) / (24*3600*1000);
+  return dias > 0 ? prices.length / dias : null;
+}
+
+// busca já devolvendo fechamento diário garantido
+async function fetchDailyCloses(days){
+  const brutos = await fetchMarketChart(days || 365);
+  return { diarios: toDailyCloses(brutos), brutos, densidade: pontosPorDia(brutos) };
+}
+
 async function fetchFearGreed(){
   const res = await smartFetch("https://api.alternative.me/fng/?limit=1");
   if(!res.ok) throw new Error("alternative.me falhou");
@@ -1133,6 +1198,42 @@ async function fetchOpenInterest(){
   if(!res.ok) throw new Error("binance OI falhou");
   const data = await res.json();
   return Number(data.openInterest);
+}
+
+/* SÉRIE HISTÓRICA DE OPEN INTEREST — a Binance publica isso de graça, e usar a
+   série resolve de vez um problema que a normalização anterior só disfarçava.
+
+   O jeito antigo comparava o OI de agora com a leitura da sessão anterior e
+   projetava linearmente pra 24h. Com atualização de 30 em 30 minutos, isso
+   multiplica o movimento por 48: uma oscilação intrahora de 0,21% já saturava
+   o indicador em 100. Ou seja, media ruído de microestrutura e chamava de
+   tendência de posicionamento.
+
+   Agora medimos Δ24h REAL, direto da série de candles de 1h — sem projetar
+   nada, sem depender de quando você abriu o app. */
+async function fetchOpenInterestSeries(){
+  const url = "https://fapi.binance.com/futures/data/openInterestHist?symbol=BTCUSDT&period=1h&limit=48";
+  const res = await smartFetch(url);
+  if(!res.ok) throw new Error("binance OI histórico falhou (" + res.status + ")");
+  const data = await res.json();
+  if(!Array.isArray(data) || data.length < 6) throw new Error("série de OI curta demais");
+  return data
+    .map(d=>({ t: Number(d.timestamp), oi: Number(d.sumOpenInterest) }))
+    .filter(d=>Number.isFinite(d.t) && Number.isFinite(d.oi) && d.oi > 0)
+    .sort((a,b)=>a.t-b.t);
+}
+
+// variação real entre o ponto mais recente e o de N horas atrás
+function variacaoOI(serie, horas){
+  if(!serie || serie.length < 2) return null;
+  const atual = serie[serie.length-1];
+  const alvo = atual.t - horas*3600000;
+  let ref = null;
+  for(let i=0;i<serie.length;i++){ if(serie[i].t <= alvo) ref = serie[i]; else break; }
+  if(!ref) ref = serie[0]; // série mais curta que a janela: usa o começo dela
+  const horasReais = (atual.t - ref.t) / 3600000;
+  if(horasReais < horas*0.5) return null; // cobertura insuficiente, não inventa
+  return { pct: ((atual.oi - ref.oi) / ref.oi) * 100, horasReais };
 }
 
 // hash rate — dado público direto da rede Bitcoin, via mempool.space (sem chave)
@@ -1378,10 +1479,70 @@ function setAuto(motorKey, indKey, value, note){
   if(!ind.locked){
     ind.value = value;
     ind.note = note;
+    ind.updatedAt = new Date().toISOString(); // carimbo por indicador — base de todo o controle de frescor
   }
 }
 function setFailed(motorKey, indKey){
   S.motors[motorKey].indicators[indKey].fetchFailed = true;
+}
+
+/* =====================================================================
+   § FRESCOR — dado velho não vale o mesmo que dado de agora
+   =====================================================================
+   Antes, quando uma fonte falhava, setFailed() só acendia uma luzinha: o valor
+   da consulta anterior continuava no motor e continuava pontuando com o mesmo
+   peso, por tempo indeterminado. Um DXY de cinco dias atrás valia igual a um
+   de cinco minutos atrás — e ainda somava na "confiança dos dados". A tela
+   transmitia mais precisão do que a matemática tinha.
+
+   A validade de cada indicador vem do horizonte que ele já declara em
+   INDICATOR_HORIZON: o que mede as próximas 48 horas apodrece rápido; o que
+   mede ciclo de meses aguenta bem mais tempo parado. Indicador preenchido à
+   mão não expira sozinho — é julgamento seu, não leitura de sensor. */
+const VALIDADE_HORAS = { curto: 12, medio: 72, longo: 336 }; // 12h · 3 dias · 14 dias
+
+function validadeDoIndicador(motorKey, indKey){
+  const h = INDICATOR_HORIZON[motorKey + "." + indKey] || INDICATOR_HORIZON[motorKey];
+  return VALIDADE_HORAS[h] || VALIDADE_HORAS.medio;
+}
+
+// idadeHoras null = sem carimbo (estado salvo por versão anterior). Nesse caso
+// nada expira — só informa que a idade é desconhecida, sem inventar validade.
+function frescorDoIndicador(motorKey, indKey){
+  const motor = S.motors[motorKey];
+  const ind = motor && motor.indicators[indKey];
+  if(!ind || ind.value === null || ind.value === undefined) return { temValor:false, expirado:false, idadeHoras:null };
+  if(ind.source === "manual" || ind.locked) return { temValor:true, expirado:false, idadeHoras:null, manual:true };
+
+  const carimbo = ind.updatedAt || S.market.lastFetch; // estados antigos caem no último fetch geral
+  if(!carimbo) return { temValor:true, expirado:false, idadeHoras:null };
+
+  const idadeHoras = (Date.now() - new Date(carimbo).getTime()) / 3600000;
+  const limite = validadeDoIndicador(motorKey, indKey);
+  return { temValor:true, expirado: idadeHoras > limite, idadeHoras, limite };
+}
+
+// o valor que efetivamente pontua: null quando venceu
+function valorVigente(motorKey, indKey){
+  const motor = S.motors[motorKey];
+  const ind = motor && motor.indicators[indKey];
+  if(!ind || ind.value === null || ind.value === undefined) return null;
+  return frescorDoIndicador(motorKey, indKey).expirado ? null : ind.value;
+}
+
+// os que têm valor mas venceram — alimentam os avisos da tela
+function indicadoresExpirados(){
+  const out = [];
+  Object.entries(S.motors).forEach(function(par){
+    const mk = par[0], motor = par[1];
+    Object.keys(motor.indicators).forEach(function(ik){
+      const f = frescorDoIndicador(mk, ik);
+      if(f.temValor && f.expirado){
+        out.push({ motor: motor.label, label: motor.indicators[ik].label, horas: f.idadeHoras, limite: f.limite });
+      }
+    });
+  });
+  return out;
 }
 
 /* --- log ao vivo estilo terminal — "consultando X... feito" --- */
@@ -1627,15 +1788,18 @@ async function refreshMarketData(){
 
   await sleep(200);
   // histórico 90d → Tendência, Volatilidade, RSI, Média Móvel 50d
-  { const line = logStep("consultando histórico de preço — tendência, RSI, média móvel (CoinGecko)");
+  { const line = logStep("consultando histórico de preço — tendência, RSI, média móvel (CoinGecko, diário)");
     try{
-      const prices = await fetchMarketChart(90);
-      if(prices && prices.length > 50){
-        const last30 = prices.slice(-30);
+      // 365 dias: faixa em que o CoinGecko devolve DIÁRIO. Antes pedia 90, que
+      // devolve horário, e tudo aqui media horas se achando dias.
+      const { diarios, densidade } = await fetchDailyCloses(365);
+      const prices = diarios;
+      if(prices && prices.length > 60){
+        const last30 = prices.slice(-30); // agora são 30 dias de verdade
         const first30 = last30[0][1];
         const lastPrice = last30[last30.length-1][1];
         const pct30 = ((lastPrice - first30) / first30) * 100;
-        setAuto("tecnico","tendencia", clamp(pct30 * 4, -100, 100), `variação 30d: ${pct30.toFixed(1)}%`);
+        setAuto("tecnico","tendencia", clamp(pct30 * 4, -100, 100), `variação 30d: ${pct30.toFixed(1)}% (30 fechamentos diários)`);
 
         const rets = [];
         for(let i=1;i<last30.length;i++){
@@ -1643,24 +1807,33 @@ async function refreshMarketData(){
         }
         const mean = rets.reduce((a,b)=>a+b,0) / rets.length;
         const variance = rets.reduce((a,b)=>a + Math.pow(b-mean,2), 0) / rets.length;
+        // desvio-padrão dos retornos DIÁRIOS — é essa a escala pra qual os
+        // cortes de volatilityLabel() foram feitos (>5% alta, >2,5% média).
+        // Sobre retorno horário nada passava de "baixa", nunca.
         S.market.volatility = Math.sqrt(variance);
+        S.market.volatilityBase = "retornos diários (30 fechamentos)";
 
-        const rsi = computeRSI(prices, 14);
+        const rsi = computeRSI(prices, 14); // 14 dias
         if(rsi !== null){
           // leitura CONTRÁRIA — evidência de calibração (205 dias, ago/2026):
           // RSI alto historicamente antecedeu queda, não continuação
-          setAuto("tecnico","rsi", clamp(-(rsi-50)*2, -100, 100), `RSI(14): ${rsi.toFixed(0)} (leitura contrária: alto = risco de reversão)`);
+          setAuto("tecnico","rsi", clamp(-(rsi-50)*2, -100, 100), `RSI(14) diário: ${rsi.toFixed(0)} (leitura contrária: alto = risco de reversão)`);
         }
 
-        const sma50 = computeSMA(prices, 50);
+        const sma50 = computeSMA(prices, 50); // 50 dias
         if(sma50 !== null){
           const pctFromSma = ((lastPrice - sma50) / sma50) * 100;
-          setAuto("tecnico","mediaMovel", clamp(pctFromSma * 8, -100, 100), `preço ${pctFromSma>=0?"+":""}${pctFromSma.toFixed(1)}% vs. MM50`);
+          setAuto("tecnico","mediaMovel", clamp(pctFromSma * 8, -100, 100), `preço ${pctFromSma>=0?"+":""}${pctFromSma.toFixed(1)}% vs. MM50 diária`);
         }
         results.ok.push("tendência/volatilidade/rsi/mm50");
-        logDone(line, true, `RSI ${rsi!==null?rsi.toFixed(0):"—"}`);
+        // se a fonte devolver intradiário, a reamostragem cobre — e o log
+        // mostra que ela foi necessária, em vez de esconder
+        const nota = densidade && densidade > 1.5
+          ? `RSI ${rsi!==null?rsi.toFixed(0):"—"} · fonte veio intradiária (${densidade.toFixed(1)} pts/dia), reamostrada pra ${prices.length} dias`
+          : `RSI ${rsi!==null?rsi.toFixed(0):"—"} · ${prices.length} fechamentos diários`;
+        logDone(line, true, nota);
       } else {
-        logDone(line, false, "histórico insuficiente retornado");
+        logDone(line, false, `histórico diário insuficiente (${prices ? prices.length : 0} dias, precisa de 60+)`);
       }
     }catch(e){
       ["tendencia","rsi","mediaMovel"].forEach(k=>setFailed("tecnico",k));
@@ -1696,43 +1869,24 @@ async function refreshMarketData(){
 
   await sleep(200);
   // open interest — comparado ao valor anterior salvo localmente (proxy de tendência)
-  { const line = logStep("consultando open interest (Binance)");
+  { const line = logStep("consultando open interest — variação 24h real (Binance)");
     try{
-      const oi = await fetchOpenInterest();
-      const prev = S.market.prevOpenInterest;
-      const prevEm = S.market.prevOICheckedAt ? new Date(S.market.prevOICheckedAt).getTime() : null;
-      const horas = prevEm ? (Date.now() - prevEm) / 3600000 : null;
-
-      if(prev && horas !== null && horas >= 0.25 && horas <= 168){
-        // normaliza por hora e reprojeta pra uma janela fixa de 24h. Sem isso,
-        // o mesmo indicador media coisas diferentes conforme o intervalo entre
-        // atualizações (30 min ou 5 dias) — e o peso no score mudava junto.
-        const pct = ((oi - prev) / prev) * 100;
-        const pct24h = pct * (24 / horas);
-        const janela = horas < 1 ? `${Math.round(horas*60)}min` : `${horas.toFixed(1)}h`;
-        setAuto("derivativos","openInterest", clamp(pct24h * 10, -100, 100),
-          `OI ${pct>=0?"+":""}${pct.toFixed(2)}% em ${janela} (equivale a ${pct24h>=0?"+":""}${pct24h.toFixed(2)}%/24h)`);
-        logDone(line, true, `${pct24h>=0?"+":""}${pct24h.toFixed(2)}%/24h`);
-      } else if(prev && horas !== null && horas > 168){
-        // mais de 7 dias sem leitura: o delta não descreve mais o momento atual
-        setAuto("derivativos","openInterest", null, `leitura anterior tem ${Math.round(horas/24)} dias — velha demais pra comparar, recomeçando a contagem`);
-        logDone(line, true, "referência expirada — recomeçando");
-      } else if(prev && horas !== null && horas < 0.25){
-        // menos de 15 min: variação é ruído de microestrutura, amplificada 96x
-        // pela projeção. Mantém a leitura anterior em vez de inventar sinal.
-        logDone(line, true, "intervalo curto demais — leitura anterior mantida");
+      const serie = await fetchOpenInterestSeries();
+      const d24 = variacaoOI(serie, 24);
+      const d4  = variacaoOI(serie, 4);
+      if(d24){
+        // sem projeção: é a variação que de fato aconteceu em ~24h
+        setAuto("derivativos","openInterest", clamp(d24.pct * 10, -100, 100),
+          `OI ${d24.pct>=0?"+":""}${d24.pct.toFixed(2)}% em ${d24.horasReais.toFixed(0)}h${d4 ? ` · ${d4.pct>=0?"+":""}${d4.pct.toFixed(2)}% em 4h` : ""}`);
+        results.ok.push("open interest");
+        logDone(line, true, `${d24.pct>=0?"+":""}${d24.pct.toFixed(2)}% em 24h`);
       } else {
-        setAuto("derivativos","openInterest", null, "primeira leitura registrada — compare na próxima atualização");
-        logDone(line, true, "primeira leitura");
+        setAuto("derivativos","openInterest", null, "série de OI ainda sem 24h de cobertura");
+        logDone(line, true, "cobertura insuficiente");
       }
-
-      // só move a referência quando ela foi de fato consumida (ou expirou);
-      // num intervalo curto demais, mantém a âncora antiga pra próxima rodada
-      if(!(prev && horas !== null && horas < 0.25)){
-        S.market.prevOpenInterest = oi;
-        S.market.prevOICheckedAt = new Date().toISOString();
-      }
-      results.ok.push("open interest");
+      // guardadas só pra referência na tela; não são mais base de cálculo
+      S.market.prevOpenInterest = serie[serie.length-1].oi;
+      S.market.prevOICheckedAt = new Date().toISOString();
     }catch(e){ setFailed("derivativos","openInterest"); results.fail.push("open interest"); logDone(line, false, e.message); }
   }
 
@@ -1757,10 +1911,17 @@ async function refreshMarketData(){
       if(Number.isFinite(latest.mvrv)){
         setAuto("onchain","mvrv", clamp((2-latest.mvrv)*40, -100, 100), `MVRV ${latest.mvrv.toFixed(2)} (CoinMetrics)`);
         results.ok.push("mvrv (coinmetrics)");
-        // NUPL = 1 − 1/MVRV — identidade matemática padrão, não é fonte nova
+        // NUPL = 1 − 1/MVRV é IDENTIDADE MATEMÁTICA, não fonte nova. Os dois
+        // scores têm correlação ~0,86 na faixa útil de MVRV, então deixá-los
+        // votar separado dava dois votos à mesma informação dentro da média do
+        // On-chain (double counting). Continua exibido, porque é leitura útil
+        // e tem escala própria — mas com value null, fora da conta.
         const nupl = 1 - (1/latest.mvrv);
-        setAuto("onchain","nupl", clamp(-nupl*120, -100, 100), `NUPL ${nupl.toFixed(2)} (derivado do MVRV)`);
-        results.ok.push("nupl (derivado)");
+        const ndMvrv = S.motors.onchain.indicators.nupl;
+        ndMvrv.value = null;
+        ndMvrv.fetchFailed = false;
+        ndMvrv.updatedAt = new Date().toISOString();
+        ndMvrv.note = `NUPL ${nupl.toFixed(2)} — derivado do MVRV por identidade (1 − 1/MVRV). Exibido como referência; não pontua, pra não contar o MVRV duas vezes.`;
         extra = `MVRV ${latest.mvrv.toFixed(2)}`;
       }
       const past = rows.find(r=>Number.isFinite(r.addr)) && rows[Math.max(0, rows.length-91)];
@@ -1962,6 +2123,7 @@ async function refreshMarketData(){
     if(arquivou){
       S.history = S.history.slice(-500); // só descarta da memória depois de confirmado no "porão"
       S.arquivamentoFalhou = false;
+      await recarregarEspelhoDoArquivo(); // aprendizado passa a enxergar o que foi arquivado
     } else {
       // não conseguiu arquivar: mantém tudo em memória e avisa. Melhor um
       // localStorage grande do que histórico apagado sem ninguém perceber.
@@ -2132,15 +2294,15 @@ function computeHorizonScores(){
       return;
     }
     // só os indicadores com valor E com horizonte classificado dividem o peso
+    // mesma regra de vigência do score geral — relógio não pontua com dado vencido
     const usaveis = Object.keys(motor.indicators).filter(ik=>{
-      const ind = motor.indicators[ik];
-      return ind.value !== null && ind.value !== undefined && INDICATOR_HORIZON[`${motorKey}.${ik}`];
+      return valorVigente(motorKey, ik) !== null && INDICATOR_HORIZON[`${motorKey}.${ik}`];
     });
-    if(!usaveis.length) return; // motor sem dado não entra em relógio nenhum
+    if(!usaveis.length) return; // motor sem dado vigente não entra em relógio nenhum
     const perIndWeight = motor.weight / usaveis.length;
     usaveis.forEach(ik=>{
       const h = INDICATOR_HORIZON[`${motorKey}.${ik}`];
-      groups[h].sum += motor.indicators[ik].value * perIndWeight;
+      groups[h].sum += valorVigente(motorKey, ik) * perIndWeight;
       groups[h].w += perIndWeight;
     });
   });
@@ -2160,16 +2322,41 @@ function motorComposite(motorKey){
     const cutoff = Date.now() - 14*24*3600*1000;
     const recent = S.events.filter(e => new Date(e.date).getTime() >= cutoff);
     const manualAvg = recent.length ? recent.reduce((a,e)=>a+e.impact,0)/recent.length : null;
-    const autoVal = motor.indicators.volumeSpike ? motor.indicators.volumeSpike.value : null;
+    const autoVal = motor.indicators.volumeSpike ? valorVigente("eventos","volumeSpike") : null;
     const vals = [manualAvg, autoVal].filter(v=>v!==null && v!==undefined && !Number.isNaN(v));
     if(!vals.length) return null;
     return vals.reduce((a,b)=>a+b,0) / vals.length;
   }
-  const vals = Object.values(motor.indicators)
-    .map(i=>i.value)
+  // valorVigente() devolve null pra dado vencido — indicador expirado sai da
+  // média em vez de continuar votando com a leitura da semana passada
+  const vals = Object.keys(motor.indicators)
+    .map(ik=>valorVigente(motorKey, ik))
     .filter(v=>v!==null && v!==undefined && !Number.isNaN(v));
   if(!vals.length) return null;
   return vals.reduce((a,b)=>a+b,0) / vals.length;
+}
+
+/* COBERTURA ≠ CONFIANÇA.
+   completeness responde "quanto do peso total tem algum dado", e basta UM
+   indicador vivo pra o motor inteiro contar. Institucional tem 4 indicadores;
+   com só o prêmio Coinbase preenchido, os 15% contavam inteiros e a tela
+   anunciava "confiança dos dados 100%". Isso é cobertura de motor, não
+   confiança — e as duas coisas passavam pelo mesmo número.
+
+   cobertura mede o que o nome diz: a fração dos indicadores realmente
+   preenchidos e vigentes, ponderada pelo peso do motor. É sempre ≤ completeness
+   e costuma ser bem menor. As duas passaram a ser exibidas lado a lado. */
+function computeCobertura(){
+  let coberto = 0, total = 0;
+  Object.entries(S.motors).forEach(function(par){
+    const mk = par[0], motor = par[1];
+    const chaves = Object.keys(motor.indicators);
+    if(!chaves.length) return;
+    const vivos = chaves.filter(ik => valorVigente(mk, ik) !== null).length;
+    coberto += motor.weight * (vivos / chaves.length);
+    total += motor.weight;
+  });
+  return total > 0 ? coberto / total : 0;
 }
 
 function computeMarketState(){
@@ -2187,11 +2374,20 @@ function computeMarketState(){
   const completeness = weightUsed; // 0..1, soma dos pesos preenchidos
 
   // divergência: quanto os motores preenchidos discordam entre si (desvio-padrão)
-  const filled = Object.values(composites).filter(v=>v!==null);
+  // divergência PONDERADA: Técnico (4%) discordar não é o mesmo que Macro (28%)
+  // discordar. Antes cada motor pesava igual aqui, num sistema que é ponderado
+  // em todo o resto — o número superestimava briga de motor pequeno.
   let divergence = 0;
-  if(filled.length > 1){
-    const mean = filled.reduce((a,b)=>a+b,0)/filled.length;
-    divergence = Math.sqrt(filled.reduce((a,b)=>a+Math.pow(b-mean,2),0)/filled.length);
+  {
+    const pares = Object.entries(composites)
+      .filter(([k,v])=>v!==null && S.motors[k])
+      .map(([k,v])=>({ v, w: S.motors[k].weight }));
+    const wTotal = pares.reduce((a,p)=>a+p.w, 0);
+    if(pares.length > 1 && wTotal > 0){
+      const mean = pares.reduce((a,p)=>a+p.v*p.w, 0) / wTotal;
+      const varianciaPonderada = pares.reduce((a,p)=>a+p.w*Math.pow(p.v-mean,2), 0) / wTotal;
+      divergence = Math.sqrt(varianciaPonderada);
+    }
   }
 
   let label = "Neutro";
@@ -2200,7 +2396,7 @@ function computeMarketState(){
   else if(score <= -40) label = "Bear forte";
   else if(score <= -15) label = "Bear";
 
-  return { score, completeness, label, composites, divergence };
+  return { score, completeness, label, composites, divergence, cobertura: computeCobertura() };
 }
 
 function volatilityLabel(){
@@ -2272,7 +2468,8 @@ async function runBacktest(){
   btn.textContent = "rodando…";
   out.innerHTML = `<div class="empty-state">Buscando 12 meses de preço real…</div>`;
   try{
-    const prices = await fetchMarketChart(365);
+    const precoBruto = await fetchMarketChart(365);
+    const prices = toDailyCloses(precoBruto); // garante 1 ponto por dia mesmo se a fonte mudar
     if(!prices || prices.length < 100){
       out.innerHTML = `<div class="empty-state">Histórico insuficiente retornado pela fonte. Tente novamente mais tarde.</div>`;
       return;
@@ -2345,15 +2542,28 @@ async function fetchHashrateHistorySeries(){
     .sort((a,b)=> a.date < b.date ? -1 : 1);
 }
 
+// último ponto da série com data <= dateStr. Devolve null se a série ainda
+// não tinha começado naquela data — melhor não pontuar do que espiar o futuro.
+function ultimoConhecidoAte(series, dateStr){
+  let achado = null;
+  for(let i=0;i<series.length;i++){
+    if(series[i].date <= dateStr) achado = series[i];
+    else break; // série vem ordenada por data
+  }
+  return achado;
+}
+
 function hashrateScoreAtDate(series, dateStr){
   if(!series.length) return null;
-  const curIdx = series.findIndex(p=>p.date >= dateStr);
-  const cur = curIdx === -1 ? series[series.length-1] : series[curIdx];
+  // ÚLTIMO ponto conhecido ATÉ a data — antes usava o primeiro ponto com
+  // date >= dateStr, que numa lacuna da série escolhia um ponto do FUTURO
+  const cur = ultimoConhecidoAte(series, dateStr);
+  if(!cur) return null;
   const target = new Date(dateStr); target.setDate(target.getDate()-90);
   const pastStr = target.toISOString().slice(0,10);
-  const pastIdx = series.findIndex(p=>p.date >= pastStr);
-  if(pastIdx === -1 || !series[pastIdx].value) return null;
-  const pct = ((cur.value - series[pastIdx].value) / series[pastIdx].value) * 100;
+  const past = ultimoConhecidoAte(series, pastStr);
+  if(!past || !past.value) return null;
+  const pct = ((cur.value - past.value) / past.value) * 100;
   return clamp(pct*6, -100, 100);
 }
 
@@ -2369,6 +2579,27 @@ function fillDailyRange(map, fromDate, toDate, value){
   for(let d = new Date(fromDate); d < toDate; d.setDate(d.getDate()+1)){
     map[d.toISOString().slice(0,10)] = value;
   }
+}
+
+/* LOOK-AHEAD: a data de uma observação do FRED é o período de REFERÊNCIA, não
+   a data em que o mercado ficou sabendo. O CPI de julho tem data 2026-07-01 e
+   só é divulgado por volta do dia 13 de agosto. Preenchendo a partir da data de
+   referência, o backtest entregava ao algoritmo um número que ninguém podia
+   conhecer — cerca de seis semanas antes. Isso deixa a variável artificialmente
+   "inteligente" e contamina qualquer conclusão sobre peso de motor.
+
+   Regra: nada existe no teste antes do instante em que um operador real
+   poderia saber. Defasagens abaixo são as típicas de divulgação do BLS/Fed. */
+const DEFASAGEM_PUBLICACAO_DIAS = {
+  CPIAUCSL: 45,  // CPI: ~13 dias após o fim do mês de referência
+  M2SL:     60,  // M2: ~4 semanas após o fim do mês, série mensal
+  padraoMensal: 45
+};
+
+function comDefasagem(dataReferencia, dias){
+  const d = new Date(dataReferencia);
+  d.setDate(d.getDate() + (dias || 0));
+  return d;
 }
 
 async function fetchMacroHistoryMaps(apiKey){
@@ -2415,9 +2646,11 @@ async function fetchMacroHistoryMaps(apiKey){
       const yoyNow = (obs[idx].value/obs[idx-12].value - 1)*100;
       const yoyPast = (obs[idx-3].value/obs[idx-15].value - 1)*100;
       const score = clamp(-(yoyNow-yoyPast)*25, -100, 100);
-      const to = idx+1 < obs.length ? new Date(obs[idx+1].date) : new Date();
-      fillDailyRange(maps.inflacao, new Date(obs[idx].date), to, score);
-      fillDailyRange(maps.inflacaoRaw, new Date(obs[idx].date), to, yoyNow);
+      // só passa a valer na data provável de DIVULGAÇÃO, não na de referência
+      const desde = comDefasagem(obs[idx].date, DEFASAGEM_PUBLICACAO_DIAS.CPIAUCSL);
+      const to = idx+1 < obs.length ? comDefasagem(obs[idx+1].date, DEFASAGEM_PUBLICACAO_DIAS.CPIAUCSL) : new Date();
+      fillDailyRange(maps.inflacao, desde, to, score);
+      fillDailyRange(maps.inflacaoRaw, desde, to, yoyNow);
     }
   }catch(e){}
 
@@ -2427,8 +2660,9 @@ async function fetchMacroHistoryMaps(apiKey){
     for(let idx=12; idx<obs.length; idx++){
       const yoy = (obs[idx].value/obs[idx-12].value - 1)*100;
       const score = clamp(yoy*15, -100, 100);
-      const to = idx+1 < obs.length ? new Date(obs[idx+1].date) : new Date();
-      fillDailyRange(maps.liquidez, new Date(obs[idx].date), to, score);
+      const desde = comDefasagem(obs[idx].date, DEFASAGEM_PUBLICACAO_DIAS.M2SL);
+      const to = idx+1 < obs.length ? comDefasagem(obs[idx+1].date, DEFASAGEM_PUBLICACAO_DIAS.M2SL) : new Date();
+      fillDailyRange(maps.liquidez, desde, to, score);
     }
   }catch(e){}
 
@@ -2503,13 +2737,15 @@ async function fetchCoinMetricsHistoryRows(){
 function trendScoreAtDate(series, dateStr, scaleFactor, lookbackDays){
   lookbackDays = lookbackDays || 90;
   if(!series.length) return null;
-  const curIdx = series.findIndex(p=>p.date >= dateStr);
-  const cur = curIdx === -1 ? series[series.length-1] : series[curIdx];
+  // ÚLTIMO ponto conhecido ATÉ a data — antes usava o primeiro ponto com
+  // date >= dateStr, que numa lacuna da série escolhia um ponto do FUTURO
+  const cur = ultimoConhecidoAte(series, dateStr);
+  if(!cur) return null;
   const target = new Date(dateStr); target.setDate(target.getDate()-lookbackDays);
   const pastStr = target.toISOString().slice(0,10);
-  const pastIdx = series.findIndex(p=>p.date >= pastStr);
-  if(pastIdx === -1 || !series[pastIdx].value) return null;
-  const pct = ((cur.value - series[pastIdx].value) / series[pastIdx].value) * 100;
+  const past = ultimoConhecidoAte(series, pastStr);
+  if(!past || !past.value) return null;
+  const pct = ((cur.value - past.value) / past.value) * 100;
   return clamp(pct*scaleFactor, -100, 100);
 }
 
@@ -2549,11 +2785,16 @@ function scoreWithoutMotor(composites, excludeKey){
   });
   return weightUsed>0 ? weightedSum/weightUsed : 0;
 }
+// mesma fórmula ponderada do ao vivo — se o backtest medisse divergência de um
+// jeito e o sistema de outro, o corte de "short vs. sair" testaria outra coisa
 function computeDivergence(composites){
-  const vals = Object.values(composites).filter(v=>v!==null && v!==undefined);
-  if(vals.length < 2) return 0;
-  const mean = avg(vals);
-  return Math.sqrt(avg(vals.map(v=>Math.pow(v-mean,2))));
+  const pares = Object.entries(composites)
+    .filter(([k,v])=>v!==null && v!==undefined && S.motors[k])
+    .map(([k,v])=>({ v, w: S.motors[k].weight }));
+  const wTotal = pares.reduce((a,p)=>a+p.w, 0);
+  if(pares.length < 2 || wTotal <= 0) return 0;
+  const mean = pares.reduce((a,p)=>a+p.v*p.w, 0) / wTotal;
+  return Math.sqrt(pares.reduce((a,p)=>a+p.w*Math.pow(p.v-mean,2), 0) / wTotal);
 }
 function bucketAction(score, completeness, divergence){
   if(completeness < 0.5) return "Aguardar confirmação (dados insuficientes)";
@@ -2574,7 +2815,8 @@ async function runScoreBacktest(){
 
   try{
     let line = logStep("consultando preço histórico — 365 dias (CoinGecko)", "calibrationLog");
-    const prices = await fetchMarketChart(365);
+    const precoBrutoCal = await fetchMarketChart(365);
+    const prices = toDailyCloses(precoBrutoCal); // mesma reamostragem do ao vivo
     if(!prices || prices.length < 120){
       logDone(line, false, "histórico insuficiente", "calibrationLog");
       out.innerHTML = `<div class="empty-state">Histórico insuficiente retornado pela fonte. Tente novamente mais tarde.</div>`;
@@ -2689,8 +2931,10 @@ async function runScoreBacktest(){
       if(onchainMaps.mvrv && onchainMaps.mvrv[date] !== undefined){
         onchainVals.push(onchainMaps.mvrv[date]); sourcesUsed.add("On-chain (MVRV, CryptoQuant)");
       } else if(cmMvrvByDate[date] !== undefined){
-        onchainVals.push(cmMvrvByDate[date]); onchainVals.push(cmNuplByDate[date]);
-        sourcesUsed.add("On-chain (MVRV+NUPL, CoinMetrics)");
+        // só o MVRV entra — o NUPL é derivado dele, entrar junto seria contar
+        // a mesma informação duas vezes (mesma regra do sistema ao vivo)
+        onchainVals.push(cmMvrvByDate[date]);
+        sourcesUsed.add("On-chain (MVRV, CoinMetrics)");
       }
       const onchain = onchainVals.length ? avg(onchainVals) : null;
 
@@ -2941,8 +3185,21 @@ function scenarioWeight(sc){
 // 50% e o rival, com o complemento, ganhava a eleição — e como o rival não tem
 // premissa vinculada, a proteção de "premissa invalidada rebaixa a leitura"
 // deixava de funcionar junto.
+// horizonte padrão dos cenários é 7–30 dias; depois disso um cenário
+// "confirmada" antigo não deveria continuar concorrendo à liderança com os
+// novos. Sem isso, depois de meses de uso a tela acumula teses vencidas
+// disputando o topo. 45 dias dá folga sobre o horizonte declarado.
+const CENARIO_VALIDADE_DIAS = 45;
+
+function cenarioVencido(sc){
+  const ref = sc.updatedAt || sc.createdAt;
+  if(!ref) return false;
+  return (Date.now() - new Date(ref).getTime()) / (24*3600*1000) > CENARIO_VALIDADE_DIAS;
+}
+
 function leaderScenario(){
-  const active = S.scenarios.filter(s => (s.status === "ativa" || s.status === "confirmada") && !s.rival);
+  const active = S.scenarios.filter(s =>
+    (s.status === "ativa" || s.status === "confirmada") && !s.rival && !cenarioVencido(s));
   if(!active.length) return null;
   return active.reduce((best, s) => scenarioWeight(s) > scenarioWeight(best) ? s : best, active[0]);
 }
@@ -2978,26 +3235,45 @@ function generateAutoScenario(){
   const tec = S.motors.tecnico.indicators;
   const der = S.motors.derivativos.indicators;
 
+  // TODO gatilho tem que respeitar a direção do cenário. Antes só o bloco do
+  // RSI era condicionado ao tipo: os de média móvel e funding eram fixos, então
+  // um cenário BEAR automático saía dizendo que "preço se mantém acima da MM50"
+  // CONFIRMA a queda e que cair abaixo da MM50 a INVALIDA — exatamente ao
+  // contrário. O mesmo com funding: "funding saudável" confirmava qualquer tese.
   const confirmTriggers = [];
   const invalidateTriggers = [];
+  const ehBear = type === "bear";
+
   if(tec.mediaMovel.value !== null){
-    confirmTriggers.push("Preço se mantém acima da Média Móvel 50d");
-    invalidateTriggers.push("Preço fecha abaixo da Média Móvel 50d");
+    if(ehBear){
+      confirmTriggers.push("Preço fecha e se mantém abaixo da Média Móvel 50d");
+      invalidateTriggers.push("Preço recupera e fecha acima da Média Móvel 50d");
+    } else {
+      confirmTriggers.push("Preço se mantém acima da Média Móvel 50d");
+      invalidateTriggers.push("Preço fecha abaixo da Média Móvel 50d");
+    }
   }
   if(tec.rsi.value !== null){
     // leitura contrária (evidência de calibração): RSI baixo favorece alta,
-    // RSI alto favorece queda — os gatilhos têm que respeitar isso, não o oposto
-    if(type === "bear"){
-      confirmTriggers.push("RSI(14) permanece acima de 60 (sobrecompra sustentando a queda)");
-      invalidateTriggers.push("RSI(14) cai abaixo de 35 (sobrevenda pode reverter a tese)");
+    // RSI alto favorece queda — os gatilhos respeitam isso, não o oposto
+    if(ehBear){
+      confirmTriggers.push("RSI(14) diário permanece acima de 60 (sobrecompra sustentando a queda)");
+      invalidateTriggers.push("RSI(14) diário cai abaixo de 35 (sobrevenda pode reverter a tese)");
     } else {
-      confirmTriggers.push("RSI(14) permanece abaixo de 40 (sobrevenda sustentando a alta)");
-      invalidateTriggers.push("RSI(14) sobe acima de 65 (sobrecompra pode reverter a tese)");
+      confirmTriggers.push("RSI(14) diário permanece abaixo de 40 (sobrevenda sustentando a alta)");
+      invalidateTriggers.push("RSI(14) diário sobe acima de 65 (sobrecompra pode reverter a tese)");
     }
   }
   if(der.funding.value !== null){
-    confirmTriggers.push("Funding rate permanece saudável (sem alavancagem excessiva)");
-    invalidateTriggers.push("Funding rate dispara, indicando sobre-alavancagem");
+    if(ehBear){
+      // num cenário de queda, funding esticado PRA BAIXO (shorts pagando) é o
+      // que sustenta a tese; funding voltando ao normal é sinal de que passou
+      confirmTriggers.push("Funding rate segue negativo ou comprimido (shorts no comando)");
+      invalidateTriggers.push("Funding rate normaliza para terreno positivo saudável");
+    } else {
+      confirmTriggers.push("Funding rate permanece saudável (sem alavancagem excessiva)");
+      invalidateTriggers.push("Funding rate dispara, indicando sobre-alavancagem");
+    }
   }
   if(!confirmTriggers.length){
     confirmTriggers.push("Score de mercado permanece na mesma faixa (" + ms.label + ")");
@@ -3014,9 +3290,16 @@ function generateAutoScenario(){
   if(type === "bull") probability = clamp(Math.round(50 + ms.score/2), 50, 90);
   else if(type === "bear") probability = clamp(Math.round(50 - ms.score/2), 50, 90);
   else probability = clamp(Math.round(65 - Math.abs(ms.score)), 50, 65);
-  const confidence = ms.completeness >= 0.7 ? "alta" : (ms.completeness >= 0.4 ? "media" : "baixa");
+  // A confiança olhava só completeness, que já era o número mais generoso do
+  // sistema — dava "alta" mesmo com motores brigando entre si e com metade dos
+  // indicadores vazios. O Decision Engine reconhecia divergência e o Scenario
+  // Engine não: duas camadas com definições diferentes da mesma palavra.
+  // Agora usa cobertura real E concordância entre motores.
+  let confidence = "baixa";
+  if(ms.cobertura >= 0.6 && ms.divergence < 35) confidence = "alta";
+  else if(ms.cobertura >= 0.35 && ms.divergence < 50) confidence = "media";
 
-  const description = `Gerado automaticamente a partir do estado de mercado: score ${ms.score.toFixed(0)} (escala -100 a +100), confiança dos dados ${(ms.completeness*100).toFixed(0)}%. Baseado apenas nos motores com dado real preenchido — edite livremente se quiser incluir sua própria leitura.`;
+  const description = `Gerado automaticamente a partir do estado de mercado: score ${ms.score.toFixed(0)} (escala -100 a +100), motores com algum dado ${(ms.completeness*100).toFixed(0)}% do peso, cobertura real dos indicadores ${(ms.cobertura*100).toFixed(0)}%. Baseado apenas nos motores com dado real e vigente — edite livremente se quiser incluir sua própria leitura.`;
   // carimbo com HORA: a premissa é um retrato do instante da geração e não se
   // atualiza sozinha. Com só a data, um salto de indicador no meio do dia fazia
   // a premissa parecer contradizer os relógios da tela (ex.: Geopolítico -51 no
@@ -3025,7 +3308,9 @@ function generateAutoScenario(){
   const premiseDescription = `Motores automáticos (${filledMotors.join(", ") || "nenhum preenchido ainda"}) sustentam a leitura de mercado "${ms.label}" — retrato de ${dateLabel} às ${horaLabel}, não recalculado desde então.`;
 
   // procura um cenário automático já existente e ainda ativo — atualiza em vez de duplicar
-  let existing = S.scenarios.find(s => s.auto && s.status === "ativa");
+  // aceita também um automático já "confirmada" — antes só procurava "ativa",
+  // então um confirmado ficava órfão e um novo nascia ao lado, os dois vivos
+  let existing = S.scenarios.find(s => s.auto && !s.rival && (s.status === "ativa" || s.status === "confirmada"));
 
   if(existing){
     existing.title = `Cenário automático — ${ms.label} (${dateLabel})`;
@@ -3121,7 +3406,16 @@ function computeDecision(){
     .map(([key,motor])=>({ key, label:motor.label, composite: ms.composites[key], weight: motor.weight }))
     .filter(m=>m.composite !== null);
 
-  reasoning.push(`Confiança dos dados: ${(ms.completeness*100).toFixed(0)}% do peso total preenchido · divergência entre motores: ${ms.divergence.toFixed(0)} · volatilidade 30d: ${volatilityLabel()}`);
+  reasoning.push(`Cobertura: ${(ms.cobertura*100).toFixed(0)}% dos indicadores preenchidos e vigentes · ${(ms.completeness*100).toFixed(0)}% do peso tem pelo menos um dado · divergência ponderada entre motores: ${ms.divergence.toFixed(0)} · volatilidade 30d (retornos diários): ${volatilityLabel()}`);
+
+  // dado vencido não some em silêncio — ele sai da conta e é declarado
+  {
+    const vencidos = indicadoresExpirados();
+    if(vencidos.length){
+      const amostra = vencidos.slice(0,3).map(v=>`${v.label} (${Math.round(v.horas)}h, limite ${v.limite}h)`).join(" · ");
+      reasoning.push(`⚠ ${vencidos.length} indicador(es) com dado vencido não estão pontuando: ${amostra}${vencidos.length>3?" …":""}. Atualize os dados de mercado pra recuperá-los.`);
+    }
+  }
 
   // temporalidade — a "Recomendação" abaixo é uma mistura de prazos, não um
   // prazo só. Isso deixa explícito quanto de cada horizonte está dentro dela.
@@ -3185,10 +3479,10 @@ function computeDecision(){
   const leader = leaderScenario();
   let leaderFlag = false;
   if(leader){
-    reasoning.push(`Cenário líder: "${leader.title}" (${leader.type}, ${leader.probability}% prob., confiança ${leader.confidence})`);
+    reasoning.push(`Cenário líder: "${leader.title}" (${leader.type}, convicção ${leader.probability}%, confiança ${leader.confidence})`);
     const rival = rivalScenario();
     if(rival){
-      reasoning.push(`Contraponto ativo: "${rival.title}" (${rival.type}, ${rival.probability}% prob.) — é a tese que precisaria se confirmar pra leitura acima se inverter.`);
+      reasoning.push(`Contraponto ativo: "${rival.title}" (${rival.type}, convicção ${rival.probability}%) — é a tese que precisaria se confirmar pra leitura acima se inverter.`);
     }
     if(scenarioHasInvalidatedPremise(leader)){
       leaderFlag = true;
@@ -3244,22 +3538,33 @@ function motorScoreColor(v){
 function renderIndicatorRow(motorKey, indKey, d){
   const isAuto = d.source === "auto";
   const showSlider = !isAuto || d.locked || d.fetchFailed;
+  const f = frescorDoIndicador(motorKey, indKey);
   let srcLabel = d.source;
   if(isAuto && d.locked) srcLabel = "manual (travado)";
   else if(isAuto && d.fetchFailed) srcLabel = "falhou — preencha";
-  const pct = d.value === null ? 50 : ((d.value + 100) / 200) * 100;
+  else if(f.expirado) srcLabel = "vencido — não pontua";
+  // valor vencido é desenhado apagado e no meio da barra: ele não está mais
+  // votando, e a barra não pode sugerir que está
+  const pct = (d.value === null || f.expirado) ? 50 : ((d.value + 100) / 200) * 100;
+  const idadeTxt = f.idadeHoras === null ? "" :
+    (f.idadeHoras < 1 ? ` · há ${Math.round(f.idadeHoras*60)}min`
+      : f.idadeHoras < 48 ? ` · há ${f.idadeHoras.toFixed(0)}h`
+      : ` · há ${Math.round(f.idadeHoras/24)}d`);
+  const valorTxt = d.value === null ? "—"
+    : (f.expirado ? `<span style="opacity:.5;text-decoration:line-through;">${d.value.toFixed(0)}</span> vencido (limite ${f.limite}h)`
+      : d.value.toFixed(0));
   return `
     <div class="indicator-row">
       <div>
         <div class="ind-top">
           <span class="ind-name">${d.label}</span>
-          <span class="ind-src ${isAuto && !d.locked && !d.fetchFailed ? "auto" : "manual"}">${srcLabel}</span>
+          <span class="ind-src ${isAuto && !d.locked && !d.fetchFailed && !f.expirado ? "auto" : "manual"}">${srcLabel}</span>
         </div>
         <div class="ind-bar-track">
           <div class="ind-bar-mid"></div>
           <div class="ind-bar-fill" style="width:${pct}%; background:${barColor(d.value)};"></div>
         </div>
-        <div class="ind-note">${d.value === null ? "—" : d.value.toFixed(0)}${d.note ? " · " + d.note : ""}</div>
+        <div class="ind-note">${valorTxt}${d.note ? " · " + esc(d.note) : ""}${idadeTxt}</div>
       </div>
       <div class="ind-edit-col">
         ${showSlider ? `<input type="range" min="-100" max="100" value="${d.value===null?0:d.value}" data-motor="${motorKey}" data-ind="${indKey}">` : ""}
@@ -3451,7 +3756,7 @@ function renderState(){
   const overallPct = clamp((ms.score+100)/2, 0, 100);
   const overallColor = ms.score > 10 ? COLOR.teal : (ms.score < -10 ? COLOR.brick : COLOR.gold);
   const overallDial = dialWidget(ms.label, overallPct, overallColor, "score geral (-100 a +100)", 140, 12, 22, Math.round(ms.score),
-    `Score geral — média ponderada de todos os motores preenchidos.\nConfiança dos dados: ${(ms.completeness*100).toFixed(0)}% · divergência entre motores: ${ms.divergence.toFixed(0)}`);
+    `Score geral — média ponderada dos motores com dado vigente.\nCobertura dos indicadores: ${(ms.cobertura*100).toFixed(0)}%\nPeso com pelo menos um dado: ${(ms.completeness*100).toFixed(0)}%\nDivergência ponderada entre motores: ${ms.divergence.toFixed(0)}`);
 
   const priceUp = S.market.priceHistory && S.market.priceHistory.length > 1
     ? S.market.priceHistory[S.market.priceHistory.length-1].price >= S.market.priceHistory[0].price
@@ -3467,7 +3772,7 @@ function renderState(){
         <div class="dash-price-value">${S.market.price ? "$"+S.market.price.toLocaleString("en-US",{maximumFractionDigits:0}) : "—"}</div>
         <div class="dash-price-delta" style="color:${priceUp?COLOR.teal:COLOR.brick};">${S.market.change24h!=null ? (S.market.change24h>=0?"+":"")+S.market.change24h.toFixed(2)+"% (24h)" : "—"}</div>
         <div class="dash-sparkline">${sparklineSVG(S.market.priceHistory)}</div>
-        <div class="dash-price-meta">${S.market.priceHistory ? S.market.priceHistory.length : 0} pontos registrados · confiança dos dados ${(ms.completeness*100).toFixed(0)}% · volatilidade ${volatilityLabel()}</div>
+        <div class="dash-price-meta">${S.market.priceHistory ? S.market.priceHistory.length : 0} pontos registrados · cobertura ${(ms.cobertura*100).toFixed(0)}% (peso com algum dado ${(ms.completeness*100).toFixed(0)}%) · volatilidade ${volatilityLabel()}</div>
       </div>
       ${renderPowerLawDial()}
     </div>
@@ -3723,7 +4028,7 @@ function renderScenarios(){
         </div>
         <div style="text-align:right;">
           <div class="prob-track"><div class="prob-fill" style="width:${sc.probability}%;"></div></div>
-          <div class="card-meta">${sc.probability}% probabilidade</div>
+          <div class="card-meta">convicção ${sc.probability}%</div>
         </div>
       </div>
       <div class="card-body">${esc(sc.description || "")}</div>
@@ -3893,8 +4198,41 @@ function resultadoDiasDe(h){
   return m ? Number(m[1]) : null;
 }
 
+/* =====================================================================
+   § HISTÓRICO UNIFICADO — o porão faz parte da memória
+   =====================================================================
+   O IndexedDB guardava tudo que passava de 500 registros, e isso funcionava.
+   Só que Case Engine, Memória e Track Record liam apenas S.history — o
+   histórico "quente". Resultado perverso: exatamente quando o sistema
+   acumulava experiência suficiente pra aprender, ele começava a ESQUECER os
+   casos mais antigos pra fins de aprendizado. O CSV já consolidava os dois; o
+   cérebro, não.
+
+   O IndexedDB é assíncrono e essas funções de cálculo são síncronas, então
+   mantemos um espelho em memória, recarregado no início e após cada
+   arquivamento. Enquanto ele não chega, vale o histórico quente — nunca
+   quebra, no pior caso fica temporariamente menor. */
+let ARQUIVO_ESPELHO = [];
+
+async function recarregarEspelhoDoArquivo(){
+  try{
+    ARQUIVO_ESPELHO = await getAllArchivedEntries();
+  }catch(e){
+    ARQUIVO_ESPELHO = [];
+  }
+  return ARQUIVO_ESPELHO;
+}
+
+// arquivo frio + quente, sem duplicar por id
+function getFullHistory(){
+  if(!ARQUIVO_ESPELHO.length) return S.history;
+  const vistos = new Set(S.history.map(h=>h.id));
+  const antigos = ARQUIVO_ESPELHO.filter(h=>h && !vistos.has(h.id));
+  return antigos.concat(S.history);
+}
+
 function computeCaseEngine(){
-  const resolvidos = S.history.filter(h => h.composites && parseResultadoPct(h.resultado) !== null);
+  const resolvidos = getFullHistory().filter(h => h.composites && parseResultadoPct(h.resultado) !== null);
   // só as janelas comparáveis entram na conta
   const usable = resolvidos.filter(h => {
     const d = resultadoDiasDe(h);
@@ -3925,23 +4263,33 @@ function computeCaseEngine(){
     };
   });
 
-  return { totalUsable: usable.length, totalHistory: S.history.length, foraDaJanela, rows };
+  return { totalUsable: usable.length, totalHistory: getFullHistory().length, foraDaJanela, rows };
 }
 
+// Mesma disciplina de janela do Case Engine. A tabela dizia "retorno médio 30d
+// depois", mas autoResolveOutcomes() resolve a partir de 7 dias — e podia
+// fechar em 7, 12 ou 40, conforme quando você abrisse o app. Então a média era
+// de janelas misturadas, anunciada como se fosse de 30 dias. Duas correções:
+// só entram janelas comparáveis, e o rótulo passou a dizer a verdade.
 function computePersonalTrackRecord(){
   const groups = {};
-  S.history.forEach(h=>{
+  let foraDaJanela = 0;
+  getFullHistory().forEach(h=>{
     const pct = parseResultadoPct(h.resultado);
-    if(pct === null) return; // ainda não resolveu (menos de 7 dias) — não entra na conta
+    if(pct === null) return; // ainda não resolveu
+    const dias = resultadoDiasDe(h);
+    if(dias === null || dias < CASE_ENGINE_JANELA_MIN || dias > CASE_ENGINE_JANELA_MAX){ foraDaJanela++; return; }
     const key = h.action || "—";
     (groups[key] = groups[key] || []).push(pct);
   });
-  return Object.entries(groups).map(([label, arr])=>({
+  const linhas = Object.entries(groups).map(([label, arr])=>({
     label,
     count: arr.length,
     avg: arr.reduce((a,b)=>a+b,0)/arr.length,
     winRate: (arr.filter(x=>x>0).length/arr.length)*100
   })).sort((a,b)=>b.count-a.count);
+  linhas.foraDaJanela = foraDaJanela;
+  return linhas;
 }
 
 function renderMemoryPanel(){
@@ -3962,7 +4310,7 @@ function renderMemoryPanel(){
   const stats = computePersonalTrackRecord();
   wrap.innerHTML = `
     <table class="hist">
-      <thead><tr><th>Quando o sistema recomendou</th><th>Quantas vezes (resolvidas)</th><th>Retorno médio 30d depois</th><th>% das vezes que subiu</th></tr></thead>
+      <thead><tr><th>Quando o sistema recomendou</th><th>Quantas vezes (resolvidas)</th><th>Retorno médio ${CASE_ENGINE_JANELA_MIN}–${CASE_ENGINE_JANELA_MAX}d depois</th><th>% das vezes que subiu</th></tr></thead>
       <tbody>
         ${stats.map(s=>`
           <tr>
@@ -4393,9 +4741,14 @@ document.getElementById("btnExport").addEventListener("click", ()=>{
   // mandado por e-mail, guardado no Drive ou commitado sem pensar — e uma
   // chave da CryptoQuant vale dinheiro de verdade. Elas ficam só no
   // localStorage deste navegador; ao restaurar, você recola.
+  // backup COMPLETO: depois de 500 registros o histórico antigo mora no
+  // IndexedDB e não está mais em S.history, então exportar só S deixava de ser
+  // backup de tudo justamente quando havia mais a perder
   const paraExportar = Object.assign({}, S, {
     apiKeys: { cryptoquant:"", fred:"", coingecko:"" },
-    _chavesRemovidas: true
+    _chavesRemovidas: true,
+    _arquivoFrio: ARQUIVO_ESPELHO,
+    _arquivoFrioCount: ARQUIVO_ESPELHO.length
   });
   const blob = new Blob([JSON.stringify(paraExportar, null, 2)], {type:"application/json"});
   triggerDownloadWithFallback(blob, `seios-btc-export-${new Date().toISOString().slice(0,10)}.json`);
@@ -4450,7 +4803,7 @@ document.getElementById("importFileInput").addEventListener("change", (e)=>{
     if(preview){
       preview.innerHTML = `
         <div style="margin-top:10px;padding:12px 14px;border:1px solid var(--gold);background:var(--gold-soft);font-family:var(--font-mono);font-size:11.5px;">
-          Esse backup tem ${parsed.history?.length||0} registro(s) de histórico, ${parsed.scenarios?.length||0} cenário(s), ${parsed.premises?.length||0} premissa(s).
+          Esse backup tem ${parsed.history?.length||0} registro(s) de histórico quente${parsed._arquivoFrioCount ? ` + ${parsed._arquivoFrioCount} arquivado(s)` : ""}, ${parsed.scenarios?.length||0} cenário(s), ${parsed.premises?.length||0} premissa(s).
           Importar vai <strong>substituir</strong> os dados atuais deste navegador.
           <div style="margin-top:10px;display:flex;gap:8px;">
             <button class="small" id="btnConfirmImport">✓ Sim, restaurar esse backup</button>
@@ -4464,9 +4817,19 @@ document.getElementById("importFileInput").addEventListener("change", (e)=>{
         // alguma, ela é descartada em vez de sobrescrever a sua
         const chavesAtuais = Object.assign({}, S.apiKeys);
         parsed.apiKeys = chavesAtuais;
+        // restaura também o arquivo de longo prazo, se o backup trouxer
+        const arquivoDoBackup = Array.isArray(parsed._arquivoFrio) ? parsed._arquivoFrio : null;
+        delete parsed._arquivoFrio;
+        delete parsed._arquivoFrioCount;
         localStorage.setItem(STORAGE_KEY, JSON.stringify(parsed));
         S = loadState();
         saveState();
+        if(arquivoDoBackup && arquivoDoBackup.length){
+          clearArchive()
+            .then(()=> archiveHistoryEntries(arquivoDoBackup))
+            .then(()=> recarregarEspelhoDoArquivo())
+            .then(()=> renderAll());
+        }
         renderAll();
         preview.innerHTML = `<div style="margin-top:10px;padding:10px 14px;border:1px solid var(--teal);background:var(--teal-soft);font-family:var(--font-mono);font-size:11.5px;color:var(--teal);">✓ Backup restaurado com sucesso. Suas chaves de API deste navegador foram mantidas (backups não carregam chave).</div>`;
       });
@@ -4518,6 +4881,10 @@ const btnReset = document.getElementById("btnReset");
 btnReset.addEventListener("click", ()=>{
   if(btnReset.dataset.armed === "1"){
     localStorage.removeItem(STORAGE_KEY);
+    // o arquivo frio também vai embora — senão "zerar tudo" deixava o
+    // histórico antigo vivo no IndexedDB, reaparecendo no Case Engine
+    clearArchive().then(()=>{ ARQUIVO_ESPELHO = []; renderAll(); });
+    ARQUIVO_ESPELHO = [];
     S = defaultState();
     renderAll();
     btnReset.dataset.armed = ""; btnReset.textContent = "Zerar tudo";
@@ -4536,6 +4903,11 @@ btnReset.addEventListener("click", ()=>{
 // pra não ficar batendo no limite de consultas do FRED só de abrir a página.
 renderAll();
 document.getElementById("buildVersionFooter").textContent = BUILD_VERSION;
+
+// carrega o arquivo de longo prazo pro espelho em memória e redesenha — sem
+// isso, Case Engine e Memória só enxergariam o histórico quente até a próxima
+// atualização de dados
+recarregarEspelhoDoArquivo().then(qtd=>{ if(qtd && qtd.length) renderAll(); });
 
 /* --- auto-atualização opcional — só roda enquanto a aba está visível e em
    primeiro plano. Assim que você sai do app ou bloqueia a tela, o iOS pausa

@@ -520,6 +520,8 @@
       <div class="decision-reasoning">
         <h4>Maior peso nesta leitura</h4>
         <div class="top-factors" id="topFactors"></div>
+        <h4 style="margin-top:14px;">Todos os motores</h4>
+        <div class="top-factors" id="allMotorsFactors"></div>
         <h4 style="margin-top:14px;">Rastro de explicação</h4>
         <ul id="decisionReasoning"></ul>
       </div>
@@ -592,7 +594,7 @@ const STORAGE_KEY = "seios_btc_v2";
 // fonte única da versão — usada no rodapé, no histórico e nos exports.
 // Muda toda vez que a fórmula de score/pesos muda, pra nunca misturar
 // decisões de regras diferentes como se fossem comparáveis.
-const BUILD_VERSION = "2026-08-06.23-mirrored";
+const BUILD_VERSION = "2026-08-06.24-tooltips";
 
 // indicador padrão — auto = tenta buscar sozinho; manual = você preenche
 function ind(label, source, note){
@@ -2518,12 +2520,9 @@ function computeDecision(){
   const ms = computeMarketState();
   const reasoning = [];
 
-  Object.entries(S.motors).forEach(([key,motor])=>{
-    const c = ms.composites[key];
-    if(c !== null){
-      reasoning.push(`${motor.label} (peso ${(motor.weight*100).toFixed(0)}%): ${c.toFixed(0)} pontos`);
-    }
-  });
+  const allMotors = Object.entries(S.motors)
+    .map(([key,motor])=>({ key, label:motor.label, composite: ms.composites[key], weight: motor.weight }))
+    .filter(m=>m.composite !== null);
 
   reasoning.push(`Confiança dos dados: ${(ms.completeness*100).toFixed(0)}% do peso total preenchido · divergência entre motores: ${ms.divergence.toFixed(0)} · volatilidade 30d: ${volatilityLabel()}`);
 
@@ -2572,7 +2571,7 @@ function computeDecision(){
 
   if(ms.completeness < 0.5){
     reasoning.push("Dados insuficientes (menos de 50% do peso total preenchido) para sustentar uma leitura confiável.");
-    return { action:"Aguardar confirmação", reasoning, leader:null, topFactors };
+    return { action:"Aguardar confirmação", reasoning, leader:null, topFactors, allMotors };
   }
 
   const leader = leaderScenario();
@@ -2610,7 +2609,7 @@ function computeDecision(){
     action = "Sair";
   }
 
-  return { action, reasoning, leader, topFactors };
+  return { action, reasoning, leader, topFactors, allMotors };
 }
 
 /* =====================================================================
@@ -2758,11 +2757,12 @@ function gaugeSVG(pct, color, size, stroke){
   </svg>`;
 }
 
-function dialWidget(label, pct, color, sublabel, size, stroke, fontSize, displayValue){
+function dialWidget(label, pct, color, sublabel, size, stroke, fontSize, displayValue, tooltip){
   size = size || 90; stroke = stroke || 8; fontSize = fontSize || 15;
   const shown = displayValue !== undefined ? displayValue : (pct===null ? null : Math.round(pct));
+  const titleAttr = tooltip ? ` title="${String(tooltip).replace(/"/g,'&quot;')}"` : "";
   return `
-    <div class="dial-widget">
+    <div class="dial-widget"${titleAttr} style="cursor:${tooltip?"help":"default"};">
       <div class="dial-ring" style="width:${size}px;height:${size}px;">
         ${gaugeSVG(pct===null ? 0 : pct, pct===null ? COLOR.faint : color, size, stroke)}
         <div class="dial-center" style="font-size:${fontSize}px;">${shown === null ? "—" : (shown>0 ? "+"+shown : shown)}</div>
@@ -2826,12 +2826,17 @@ function renderState(){
     const c = ms.composites[key];
     const pct = c === null ? null : clamp((c+100)/2, 0, 100);
     const color = c === null ? COLOR.faint : (c > 10 ? COLOR.teal : (c < -10 ? COLOR.brick : COLOR.gold));
-    return dialWidget(motor.label, pct, color, `peso ${(motor.weight*100).toFixed(0)}%`, 90, 8, 15, c===null?null:Math.round(c));
+    const indLines = Object.values(motor.indicators || {})
+      .filter(i=>i.value !== null && i.value !== undefined)
+      .map(i=>`${i.label}: ${i.value>=0?"+":""}${Math.round(i.value)}`);
+    const tooltip = `${motor.label} — peso ${(motor.weight*100).toFixed(0)}%${c!==null?` · leitura ${c.toFixed(0)}`:" · sem dados ainda"}${indLines.length?"\n"+indLines.join("\n"):""}`;
+    return dialWidget(motor.label, pct, color, `peso ${(motor.weight*100).toFixed(0)}%`, 90, 8, 15, c===null?null:Math.round(c), tooltip);
   }).join("");
 
   const overallPct = clamp((ms.score+100)/2, 0, 100);
   const overallColor = ms.score > 10 ? COLOR.teal : (ms.score < -10 ? COLOR.brick : COLOR.gold);
-  const overallDial = dialWidget(ms.label, overallPct, overallColor, "score geral (-100 a +100)", 140, 12, 22, Math.round(ms.score));
+  const overallDial = dialWidget(ms.label, overallPct, overallColor, "score geral (-100 a +100)", 140, 12, 22, Math.round(ms.score),
+    `Score geral — média ponderada de todos os motores preenchidos.\nConfiança dos dados: ${(ms.completeness*100).toFixed(0)}% · divergência entre motores: ${ms.divergence.toFixed(0)}`);
 
   const priceUp = S.market.priceHistory && S.market.priceHistory.length > 1
     ? S.market.priceHistory[S.market.priceHistory.length-1].price >= S.market.priceHistory[0].price
@@ -2849,6 +2854,7 @@ function renderState(){
         <div class="dash-sparkline">${sparklineSVG(S.market.priceHistory)}</div>
         <div class="dash-price-meta">${S.market.priceHistory ? S.market.priceHistory.length : 0} pontos registrados · confiança dos dados ${(ms.completeness*100).toFixed(0)}% · volatilidade ${volatilityLabel()}</div>
       </div>
+      ${renderPowerLawDial()}
     </div>
     <div class="dials-grid">${motorDials}</div>
     ${horizonHTML}
@@ -2867,7 +2873,8 @@ function renderHorizonPanel(ms){
     const info = HORIZON_LABELS[key];
     const g = h[key];
     const pct = g.score === null ? null : clamp((g.score+100)/2, 0, 100);
-    return dialWidget(info.title, pct, horizonColor(g.score), info.window, 100, 9, 17, g.score===null?null:Math.round(g.score));
+    return dialWidget(info.title, pct, horizonColor(g.score), info.window, 100, 9, 17, g.score===null?null:Math.round(g.score),
+      `${info.title} (${info.window}) — ${g.score===null?"sem dados suficientes ainda":g.label+" ("+g.score.toFixed(0)+" pontos)"}`);
   }).join("");
 
   // interpretação automática — combina os 3 sem inventar, só descreve o que os números já dizem
@@ -2891,12 +2898,9 @@ function renderHorizonPanel(ms){
   return `
     <div style="margin-top:18px;padding-top:16px;border-top:1px solid var(--line-soft);">
       <div style="font-family:var(--font-mono);font-size:10px;color:var(--text-faint);text-transform:uppercase;letter-spacing:.06em;margin-bottom:12px;">
-        § Temporalidade — o mesmo dado, separado por prazo, mais a referência de longuíssimo prazo à direita, espelhando o relógio de score (escala de anos, calibrado pro ritmo do BTC)
+        § Temporalidade — o mesmo dado, separado por prazo (calibrado pro ritmo do BTC, não do mercado tradicional)
       </div>
-      <div style="display:flex;gap:24px;align-items:flex-start;flex-wrap:wrap;justify-content:space-between;">
-        <div class="dials-grid" style="grid-template-columns:repeat(3,1fr);flex:1;min-width:260px;">${dials}</div>
-        <div>${renderPowerLawDial()}${renderPowerLawDetail()}</div>
-      </div>
+      <div class="dials-grid" style="grid-template-columns:repeat(3,1fr);">${dials}</div>
       ${interpretation ? `<div style="margin-top:12px;font-size:12.5px;color:var(--text-dim);">${interpretation}</div>` : ""}
     </div>
   `;
@@ -2923,14 +2927,17 @@ function computePowerLawReference(currentPrice){
 
 function renderPowerLawDial(){
   const pl = computePowerLawReference(S.market.price);
+  const fmt = (v)=> "$"+v.toLocaleString("en-US",{maximumFractionDigits:0});
   if(pl.pctToFloor === null){
-    return dialWidget("Power Law", null, COLOR.faint, "Santostasi · não pontua no score", 140, 12, 22, null);
+    return dialWidget("Power Law", null, COLOR.faint, "Santostasi · não pontua no score", 140, 12, 22, null,
+      "Referência de longuíssimo prazo (Santostasi) — precisa de preço atual pra calcular. Nunca entra no score.");
   }
   // posição do preço dentro do canal (0% = no piso, 100% = no teto) — isso
   // é o que preenche o arco do relógio, mais intuitivo que só "% sobre o piso"
   const bandPct = clamp(((S.market.price - pl.floor) / (pl.ceiling - pl.floor)) * 100, 0, 100);
   const color = pl.pctToFloor >= 15 ? COLOR.teal : (pl.pctToFloor >= 0 ? COLOR.gold : COLOR.brick);
-  return dialWidget("Power Law", bandPct, color, `${pl.pctToFloor>=0?"+":""}${pl.pctToFloor.toFixed(0)}% sobre o piso · não pontua`, 140, 12, 22, Math.round(pl.pctToFloor));
+  const tooltip = `Power Law (Santostasi) — referência de anos, NÃO pontua no score.\nPiso ${fmt(pl.floor)} · Central ${fmt(pl.trend)} · Teto ${fmt(pl.ceiling)}\nPreço atual: ${pl.pctToFloor>=0?"+":""}${pl.pctToFloor.toFixed(1)}% sobre o piso · ${pl.pctToTrend>=0?"+":""}${pl.pctToTrend.toFixed(1)}% sobre a linha central`;
+  return dialWidget("Power Law", bandPct, color, `${pl.pctToFloor>=0?"+":""}${pl.pctToFloor.toFixed(0)}% sobre o piso · não pontua`, 140, 12, 22, Math.round(pl.pctToFloor), tooltip);
 }
 
 function renderPowerLawDetail(){
@@ -3117,9 +3124,21 @@ function renderDecision(){
   chips.innerHTML = d.topFactors.length
     ? d.topFactors.map(f=>{
         const pct = f.composite===null ? null : clamp((f.composite+100)/2, 0, 100);
-        return dialWidget(f.label, pct, motorScoreColor(f.composite), null, 72, 7, 14, f.composite===null?null:Math.round(f.composite));
+        const tooltip = `${f.label} — peso ${(S.motors[f.key].weight*100).toFixed(0)}% · composite ${f.composite.toFixed(0)} · contribuição ponderada ${f.contribution!==undefined?f.contribution.toFixed(1):((f.composite*S.motors[f.key].weight)).toFixed(1)} pontos pro score geral`;
+        return dialWidget(f.label, pct, motorScoreColor(f.composite), null, 72, 7, 14, f.composite===null?null:Math.round(f.composite), tooltip);
       }).join("")
     : `<span class="factor-chip" style="color:var(--text-faint);">sem dados suficientes ainda</span>`;
+
+  const allEl = document.getElementById("allMotorsFactors");
+  if(allEl){
+    allEl.innerHTML = d.allMotors.length
+      ? d.allMotors.map(m=>{
+          const pct = clamp((m.composite+100)/2, 0, 100);
+          const tooltip = `${m.label} — peso ${(m.weight*100).toFixed(0)}% do score geral · leitura atual: ${m.composite.toFixed(0)} pontos (-100 a +100)`;
+          return dialWidget(m.label, pct, motorScoreColor(m.composite), `peso ${(m.weight*100).toFixed(0)}%`, 64, 6, 13, Math.round(m.composite), tooltip);
+        }).join("")
+      : `<span class="factor-chip" style="color:var(--text-faint);">sem dados suficientes ainda</span>`;
+  }
 }
 
 /* =====================================================================

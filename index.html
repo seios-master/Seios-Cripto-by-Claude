@@ -739,7 +739,7 @@ const STORAGE_KEY = "seios_btc_v2";
 // fonte única da versão — usada no rodapé, no histórico e nos exports.
 // Muda toda vez que a fórmula de score/pesos muda, pra nunca misturar
 // decisões de regras diferentes como se fossem comparáveis.
-const BUILD_VERSION = "2026-08-06.30-matrix-live";
+const BUILD_VERSION = "2026-08-06.31-gdelt-ratelimit-fix";
 
 // indicador padrão — auto = tenta buscar sozinho; manual = você preenche
 function ind(label, source, note){
@@ -1048,12 +1048,27 @@ async function fetchOpenInterest(){
    (eles mesmos configuram assim, pra permitir embutir em qualquer site).
    Pega o tom médio das notícias mundiais mencionando termos de conflito/
    crise nos últimos dias — negativo = noticiário mais tenso. --- */
+// GDELT, quando limita a taxa (1 consulta a cada 5s por IP), responde com
+// TEXTO simples, não JSON — sem isso, o erro aparecia genérico ("Load
+// failed" ou erro de parsing), sem dizer a causa real
+async function readGdeltJson(res){
+  const raw = await res.text();
+  if(/rate limit|too many requests|please wait/i.test(raw)){
+    throw new Error("GDELT: limite de taxa (1 consulta a cada 5s) — espera um pouco e tenta de novo");
+  }
+  try{
+    return JSON.parse(raw);
+  }catch(e){
+    throw new Error("GDELT: resposta não veio em JSON (provável limite de taxa)");
+  }
+}
+
 async function fetchGdeltTone(){
   const query = encodeURIComponent('(war OR conflict OR invasion OR sanctions OR "military strike" OR terrorism OR coup)');
   const url = `https://api.gdeltproject.org/api/v2/doc/doc?query=${query}&mode=timelinetone&format=json&timespan=3d`;
   const res = await smartFetch(url);
   if(!res.ok) throw new Error("GDELT falhou (" + res.status + ")");
-  const data = await res.json();
+  const data = await readGdeltJson(res);
   // parsing defensivo — a doc pública não detalha o schema exato de timelinetone,
   // então tenta os formatos mais prováveis em vez de travar num campo só
   const series = data.timeline && data.timeline[0];
@@ -1073,7 +1088,7 @@ async function fetchGdeltVolumeSpike(){
   const url = `https://api.gdeltproject.org/api/v2/doc/doc?query=${query}&mode=timelinevolraw&format=json&timespan=14d`;
   const res = await smartFetch(url);
   if(!res.ok) throw new Error("GDELT volume falhou (" + res.status + ")");
-  const data = await res.json();
+  const data = await readGdeltJson(res);
   const series = data.timeline && data.timeline[0];
   const points = series && (series.data || series.Data);
   if(!points || points.length < 4) throw new Error("GDELT volume sem dado suficiente");
@@ -1612,7 +1627,8 @@ async function refreshMarketData(){
     }catch(e){ setFailed("geopolitico","gdelt"); results.fail.push("gdelt"); logDone(line, false, e.message); }
   }
 
-  await sleep(200);
+  await sleep(5500); // GDELT limita a 1 consulta a cada 5s por IP — sem essa
+  // pausa, a segunda chamada quase sempre esbarra no limite da primeira
   { const line = logStep("consultando pico de volume de notícias de crise (GDELT)");
     try{
       const spike = await fetchGdeltVolumeSpike();

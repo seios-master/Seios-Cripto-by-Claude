@@ -476,7 +476,7 @@
           </div>
           <div style="font-size:10.5px;color:var(--text-faint);margin-bottom:14px;">Pegue a sua grátis, em 30 segundos, em <strong>fredaccount.stlouisfed.org</strong> — só um e-mail, ativa na hora, sem cartão de crédito.</div>
 
-          <div style="font-family:var(--font-mono);font-size:10.5px;color:var(--teal);text-transform:uppercase;letter-spacing:.06em;margin-bottom:8px;border-top:1px solid var(--line-soft);padding-top:12px;">🔑 Integração CoinGecko Pro (opcional, plano Basic $35/mês) — preço/histórico mais confiáveis, ativa as médias de 200/100/50 semanas por completo</div>
+          <div style="font-family:var(--font-mono);font-size:10.5px;color:var(--teal);text-transform:uppercase;letter-spacing:.06em;margin-bottom:8px;border-top:1px solid var(--line-soft);padding-top:12px;">🔑 Integração CoinGecko Pro (opcional, plano Basic $35/mês) — preço e histórico diário mais confiáveis, sem limite de chamadas. As médias de 200/100/50 semanas NÃO dependem disso: vêm da Binance, de graça.</div>
           <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:6px;">
             <input type="password" id="cgApiKeyInput" placeholder="cole sua chave paga aqui" style="flex:1;min-width:220px;background:var(--panel);border:1px solid var(--line-soft);color:var(--text);padding:8px 10px;font-size:12.5px;border-radius:2px;">
             <button class="small" id="btnSaveCgKey">Salvar</button>
@@ -627,7 +627,7 @@
 
 <footer class="wrap">
   <div style="font-family:var(--font-mono);font-size:10px;color:var(--copper);margin-bottom:8px;">build <span id="buildVersionFooter">—</span> — se essa linha não aparecer no seu arquivo, você está num arquivo antigo, baixe o mais recente</div>
-  SEIOS CRIPTO — instrumento local. Todos os dados ficam salvos apenas neste navegador (localStorage), no seu HD. Nada é enviado para nenhum servidor. Preços via CoinGecko · Sentimento via Alternative.me F&amp;G Index · Funding via Binance (best-effort, sem chave). Este instrumento não é recomendação de investimento.
+  SEIOS CRIPTO — instrumento local. Os dados ficam salvos apenas neste navegador: estado e histórico recente em localStorage, histórico antigo em IndexedDB. Nada é enviado para nenhum servidor — exceto, se você ligar a opção, as chamadas com chave que passam por proxy CORS. Fontes: CoinGecko (preço e histórico diário) · Binance (funding, open interest, long/short, taker, livro, médias semanais) · Alternative.me (Fear &amp; Greed) · CoinMetrics (MVRV) · mempool.space (hash rate) · Deribit (put/call) · FRED (macro e ativos globais, requer chave) · GDELT (tom de notícias) · CryptoQuant (opcional, requer chave). Este instrumento não é recomendação de investimento.
 </footer>
 
 <script>
@@ -692,7 +692,12 @@
   let lastPrice = null;
   let ws;
 
+  let reconexaoTimer = null;
+  let fechadoDePropusito = false;
+
   function connect(){
+    cancelarReconexao();                       // nunca dois caminhos abrindo socket
+    if(ws && ws.readyState <= 1) return;        // já conectado ou conectando
     const statusEl = document.getElementById("liveStatus");
     if(!statusEl) return; // painel não existe nessa tela, não faz nada
     statusEl.textContent = "○ conectando...";
@@ -727,10 +732,27 @@
     };
 
     ws.onclose = () => {
+      // fechamento INTENCIONAL (aba escondida) não agenda reconexão. Antes
+      // agendava sempre: se a aba voltasse dentro dos 3s, o visibilitychange
+      // conectava e o timer pendente conectava de novo — dois sockets abertos,
+      // um deles órfão consumindo dado e bateria em silêncio.
+      if(fechadoDePropusito){
+        if(statusEl) statusEl.innerHTML = '<span style="color:var(--text-faint);">○ pausado (aba em segundo plano)</span>';
+        return;
+      }
       if(statusEl) statusEl.innerHTML = '<span style="color:var(--brick);">○ reconectando...</span>';
-      setTimeout(connect, 3000);
+      agendarReconexao();
     };
     ws.onerror = () => { try{ ws.close(); }catch(e){} };
+  }
+
+  // um único timer de reconexão em voo, sempre
+  function agendarReconexao(){
+    if(reconexaoTimer) return;
+    reconexaoTimer = setTimeout(()=>{ reconexaoTimer = null; connect(); }, 3000);
+  }
+  function cancelarReconexao(){
+    if(reconexaoTimer){ clearTimeout(reconexaoTimer); reconexaoTimer = null; }
   }
 
   function drawChart(){
@@ -752,10 +774,14 @@
   // pausa a conexão quando a aba sai de foco, retoma quando volta —
   // evita gastar dado/bateria à toa em segundo plano
   document.addEventListener("visibilitychange", ()=>{
-    if(document.visibilityState === "visible" && (!ws || ws.readyState > 1)){
-      connect();
-    } else if(document.visibilityState === "hidden" && ws && ws.readyState === 1){
-      ws.close();
+    if(document.visibilityState === "visible"){
+      fechadoDePropusito = false;
+      cancelarReconexao();               // mata qualquer timer pendente
+      if(!ws || ws.readyState > 1) connect(); // e só então abre um socket
+    } else if(document.visibilityState === "hidden"){
+      fechadoDePropusito = true;
+      cancelarReconexao();
+      if(ws && ws.readyState <= 1){ try{ ws.close(); }catch(e){} }
     }
   });
 
@@ -769,7 +795,7 @@ const STORAGE_KEY = "seios_btc_v2";
 // fonte única da versão — usada no rodapé, no histórico e nos exports.
 // Muda toda vez que a fórmula de score/pesos muda, pra nunca misturar
 // decisões de regras diferentes como se fossem comparáveis.
-const BUILD_VERSION = "2026-08-07.48-backfill-lider";
+const BUILD_VERSION = "2026-08-07.49-audit-fixes-2";
 
 // indicador padrão — auto = tenta buscar sozinho; manual = você preenche
 function ind(label, source, note){
@@ -826,7 +852,7 @@ function defaultState(){
       }},
       derivativos:   { label:"Derivativos",                  weight:.15, indicators:{
         funding:   ind("Funding rate", "auto"),
-        openInterest: ind("Open Interest (variação)", "auto"),
+        openInterest: ind("Open Interest × preço × funding (posicionamento)", "auto"),
         putCall:   ind("Put/Call ratio (Deribit)", "auto"),
         longShort: ind("Long/Short ratio (posicionamento, Binance)", "auto"),
         takerRatio: ind("Taker buy/sell ratio (agressão do book, Binance)", "auto"),
@@ -1875,11 +1901,56 @@ async function refreshMarketData(){
       const d24 = variacaoOI(serie, 24);
       const d4  = variacaoOI(serie, 4);
       if(d24){
-        // sem projeção: é a variação que de fato aconteceu em ~24h
-        setAuto("derivativos","openInterest", clamp(d24.pct * 10, -100, 100),
-          `OI ${d24.pct>=0?"+":""}${d24.pct.toFixed(2)}% em ${d24.horasReais.toFixed(0)}h${d4 ? ` · ${d4.pct>=0?"+":""}${d4.pct.toFixed(2)}% em 4h` : ""}`);
+        // OI SOZINHO NÃO TEM DIREÇÃO. Antes, OI subindo virava score positivo e
+        // OI caindo virava negativo — mas contrato aberto crescendo pode ser
+        // long entrando OU short entrando; são leituras opostas com o mesmo
+        // número. A coleta estava certa desde a v46; a interpretação, não.
+        //
+        // A direção vem do CRUZAMENTO com preço e funding:
+        //   OI↑ + preço↑ → dinheiro novo comprando: construtivo, mas se o
+        //                  funding estiver esticado é alavancagem frágil
+        //   OI↑ + preço↓ → shorts entrando com convicção: baixista
+        //   OI↓ + preço↓ → posições sendo liquidadas/desalavancadas: costuma
+        //                  ser exaustão de venda, levemente construtivo
+        //   OI↓ + preço↑ → short squeeze / realização: alta sem lastro novo
+        const varPreco24h = S.market.change24h;
+        const fundingInd = S.motors.derivativos.indicators.funding;
+        const fundingScore = valorVigente("derivativos","funding");
+        const oiSobe = d24.pct > 0.5, oiCai = d24.pct < -0.5;
+
+        let score, leitura;
+        if(varPreco24h === null || varPreco24h === undefined){
+          // sem preço não há cruzamento possível — magnitude não é direção
+          score = null;
+          leitura = `OI ${d24.pct>=0?"+":""}${d24.pct.toFixed(2)}% em 24h — sem variação de preço pra cruzar, não pontua`;
+        } else {
+          const precoSobe = varPreco24h > 0.3, precoCai = varPreco24h < -0.3;
+          const intensidade = Math.min(Math.abs(d24.pct) * 8, 60);
+          if(oiSobe && precoSobe){
+            // funding esticado desconta a leitura: alta alavancada é frágil
+            const fundingEsticado = fundingScore !== null && fundingScore < -30;
+            score = fundingEsticado ? -intensidade * 0.5 : intensidade;
+            leitura = fundingEsticado
+              ? `OI +${d24.pct.toFixed(2)}% com preço subindo, mas funding esticado — alta alavancada, frágil`
+              : `OI +${d24.pct.toFixed(2)}% com preço subindo — dinheiro novo comprando`;
+          } else if(oiSobe && precoCai){
+            score = -intensidade;
+            leitura = `OI +${d24.pct.toFixed(2)}% com preço caindo — shorts entrando com convicção`;
+          } else if(oiCai && precoCai){
+            score = intensidade * 0.4;
+            leitura = `OI ${d24.pct.toFixed(2)}% com preço caindo — desalavancagem, possível exaustão de venda`;
+          } else if(oiCai && precoSobe){
+            score = -intensidade * 0.4;
+            leitura = `OI ${d24.pct.toFixed(2)}% com preço subindo — squeeze/realização, alta sem posição nova`;
+          } else {
+            score = 0;
+            leitura = `OI ${d24.pct>=0?"+":""}${d24.pct.toFixed(2)}% e preço ${varPreco24h>=0?"+":""}${varPreco24h.toFixed(2)}% — ambos de lado, sem sinal`;
+          }
+        }
+        setAuto("derivativos","openInterest", score === null ? null : clamp(score, -100, 100),
+          `${leitura}${d4 ? ` · 4h: ${d4.pct>=0?"+":""}${d4.pct.toFixed(2)}%` : ""}`);
         results.ok.push("open interest");
-        logDone(line, true, `${d24.pct>=0?"+":""}${d24.pct.toFixed(2)}% em 24h`);
+        logDone(line, true, score === null ? "sem cruzamento (falta preço)" : `${d24.pct>=0?"+":""}${d24.pct.toFixed(2)}%/24h → score ${Math.round(score)}`);
       } else {
         setAuto("derivativos","openInterest", null, "série de OI ainda sem 24h de cobertura");
         logDone(line, true, "cobertura insuficiente");
@@ -2544,6 +2615,30 @@ async function fetchHashrateHistorySeries(){
 
 // último ponto da série com data <= dateStr. Devolve null se a série ainda
 // não tinha começado naquela data — melhor não pontuar do que espiar o futuro.
+/* MAPAS DE SÉRIE DE DIAS ÚTEIS × BTC QUE OPERA 7 DIAS.
+   DXY, curva, S&P, petróleo, euro e juros vêm do FRED com observações só em
+   dias úteis. O backtest consultava esses mapas pela data exata, então em todo
+   sábado e domingo — cerca de 28% dos dias do teste — esses fatores
+   simplesmente sumiam do cálculo, e o motor Macro rodava mancando ou nem
+   existia. Não é dado faltante de verdade: na sexta o mercado conheceu o DXY,
+   e no sábado ele continua conhecendo o mesmo número.
+
+   Mesma filosofia já aplicada ao hashrate: vale a ÚLTIMA observação disponível
+   até aquela data. O limite de 5 dias evita arrastar valor de feriado longo
+   ou de série interrompida indefinidamente. */
+function valorDeMapaAte(map, dateStr, maxDiasAtras){
+  if(!map) return undefined;
+  if(map[dateStr] !== undefined) return map[dateStr];
+  const limite = maxDiasAtras || 5;
+  const d = new Date(dateStr + "T00:00:00Z");
+  for(let i=1; i<=limite; i++){
+    d.setUTCDate(d.getUTCDate() - 1);
+    const chave = d.toISOString().slice(0,10);
+    if(map[chave] !== undefined) return map[chave];
+  }
+  return undefined;
+}
+
 function ultimoConhecidoAte(series, dateStr){
   let achado = null;
   for(let i=0;i<series.length;i++){
@@ -2796,13 +2891,32 @@ function computeDivergence(composites){
   const mean = pares.reduce((a,p)=>a+p.v*p.w, 0) / wTotal;
   return Math.sqrt(pares.reduce((a,p)=>a+p.w*Math.pow(p.v-mean,2), 0) / wTotal);
 }
-function bucketAction(score, completeness, divergence){
-  if(completeness < 0.5) return "Aguardar confirmação (dados insuficientes)";
+/* As travas usam COBERTURA, não completeness.
+   completeness conta o peso inteiro de um motor assim que UM indicador dele
+   existe — é o número mais generoso do sistema. Deixá-lo governando a decisão
+   significava, no limite, liberar "Avaliar posição vendida (short)" com um
+   indicador vivo por motor. A v46 criou a cobertura e a levou pros textos da
+   tela, mas não até aqui, que é justamente onde ela decide alguma coisa.
+
+   Os cortes foram recalibrados pra escala nova: cobertura é estruturalmente
+   menor que completeness (é fração de indicadores, não de motores), então
+   exigir 0,5 de cobertura seria travar o sistema quase sempre. 0,35 pra
+   operar e 0,5 + concordância pra liberar short mantêm o rigor relativo
+   original sem inviabilizar o uso normal. */
+const COBERTURA_MINIMA = 0.35;      // abaixo disso não se opina
+const COBERTURA_ALTA_CONVICCAO = 0.50; // exigida pra cogitar short
+
+function bucketAction(score, completeness, divergence, cobertura){
+  // cobertura ausente (chamadas antigas): cai pra completeness, com o corte antigo
+  const cob = (cobertura === undefined || cobertura === null) ? null : cobertura;
+  const travaBaixa = cob === null ? (completeness < 0.5) : (cob < COBERTURA_MINIMA);
+  if(travaBaixa) return "Aguardar confirmação (dados insuficientes)";
   if(score >= 40) return "Reforçar";
   if(score >= 15) return "Entrar parcialmente";
   if(score > -15) return "Observar";
   if(score > -55) return "Reduzir";
-  return (completeness >= 0.7 && divergence < 35) ? "Avaliar posição vendida (short)" : "Sair";
+  const convicao = cob === null ? (completeness >= 0.7) : (cob >= COBERTURA_ALTA_CONVICCAO);
+  return (convicao && divergence < 35) ? "Avaliar posição vendida (short)" : "Sair";
 }
 
 async function runScoreBacktest(){
@@ -2945,45 +3059,46 @@ async function runScoreBacktest(){
       let macro = null;
       const macroVals = [];
       ["juros","inflacao","liquidez","dxy","curva"].forEach(k=>{
-        if(macroMaps[k] && macroMaps[k][date] !== undefined) macroVals.push(macroMaps[k][date]);
+        const v = valorDeMapaAte(macroMaps[k], date);
+        if(v !== undefined) macroVals.push(v);
       });
       if(macroVals.length){ macro = avg(macroVals); sourcesUsed.add("Macro (FRED)"); }
 
       // regime macro histórico — junta valor bruto + retorno futuro desse
       // dia, pra depois testar por faixa (acima/abaixo da mediana do período)
-      if(macroMaps.jurosRaw && macroMaps.jurosRaw[date] !== undefined){
-        regimeRaw.juros.push({ v: macroMaps.jurosRaw[date], fwd: ((closes[i+forwardDays]-closes[i])/closes[i])*100 });
-      }
-      if(macroMaps.inflacaoRaw && macroMaps.inflacaoRaw[date] !== undefined){
-        regimeRaw.inflacao.push({ v: macroMaps.inflacaoRaw[date], fwd: ((closes[i+forwardDays]-closes[i])/closes[i])*100 });
-      }
-      if(macroMaps.dxyRaw && macroMaps.dxyRaw[date] !== undefined){
-        regimeRaw.dxy.push({ v: macroMaps.dxyRaw[date], fwd: ((closes[i+forwardDays]-closes[i])/closes[i])*100 });
-      }
-      if(macroMaps.petroleoRaw && macroMaps.petroleoRaw[date] !== undefined){
-        regimeRaw.petroleo.push({ v: macroMaps.petroleoRaw[date], fwd: ((closes[i+forwardDays]-closes[i])/closes[i])*100 });
-      }
-      if(macroMaps.euroRaw && macroMaps.euroRaw[date] !== undefined){
-        regimeRaw.euro.push({ v: macroMaps.euroRaw[date], fwd: ((closes[i+forwardDays]-closes[i])/closes[i])*100 });
-      }
-      if(macroMaps.sp500Raw && macroMaps.sp500Raw[date] !== undefined){
-        regimeRaw.sp500.push({ v: macroMaps.sp500Raw[date], fwd: ((closes[i+forwardDays]-closes[i])/closes[i])*100 });
-      }
+      { const vr = valorDeMapaAte(macroMaps.jurosRaw, date);
+        if(vr !== undefined) regimeRaw.juros.push({ v: vr, fwd: ((closes[i+forwardDays]-closes[i])/closes[i])*100 }); }
+      { const vr = valorDeMapaAte(macroMaps.inflacaoRaw, date);
+        if(vr !== undefined) regimeRaw.inflacao.push({ v: vr, fwd: ((closes[i+forwardDays]-closes[i])/closes[i])*100 }); }
+      { const vr = valorDeMapaAte(macroMaps.dxyRaw, date);
+        if(vr !== undefined) regimeRaw.dxy.push({ v: vr, fwd: ((closes[i+forwardDays]-closes[i])/closes[i])*100 }); }
+      { const vr = valorDeMapaAte(macroMaps.petroleoRaw, date);
+        if(vr !== undefined) regimeRaw.petroleo.push({ v: vr, fwd: ((closes[i+forwardDays]-closes[i])/closes[i])*100 }); }
+      { const vr = valorDeMapaAte(macroMaps.euroRaw, date);
+        if(vr !== undefined) regimeRaw.euro.push({ v: vr, fwd: ((closes[i+forwardDays]-closes[i])/closes[i])*100 }); }
+      { const vr = valorDeMapaAte(macroMaps.sp500Raw, date);
+        if(vr !== undefined) regimeRaw.sp500.push({ v: vr, fwd: ((closes[i+forwardDays]-closes[i])/closes[i])*100 }); }
 
       // Ativos Globais — as séries de petróleo/euro/S&P já eram buscadas pra
       // tabela de regime, mas o motor (8% do peso) ficava fora do teste. Usa
       // exatamente as mesmas fórmulas do ao vivo, pra medir a mesma coisa.
       const agVals = [];
-      if(macroMaps.petroleoRaw && macroMaps.petroleoRaw[date] !== undefined) agVals.push(clamp(-macroMaps.petroleoRaw[date]*3, -100, 100));
-      if(macroMaps.euroRaw && macroMaps.euroRaw[date] !== undefined) agVals.push(clamp(macroMaps.euroRaw[date]*8, -100, 100));
-      if(macroMaps.sp500Raw && macroMaps.sp500Raw[date] !== undefined) agVals.push(clamp(macroMaps.sp500Raw[date]*6, -100, 100));
+      const agPet = valorDeMapaAte(macroMaps.petroleoRaw, date);
+      const agEur = valorDeMapaAte(macroMaps.euroRaw, date);
+      const agSp  = valorDeMapaAte(macroMaps.sp500Raw, date);
+      if(agPet !== undefined) agVals.push(clamp(-agPet*3, -100, 100));
+      if(agEur !== undefined) agVals.push(clamp(agEur*8, -100, 100));
+      if(agSp  !== undefined) agVals.push(clamp(agSp*6, -100, 100));
       const ativosGlobais = agVals.length ? avg(agVals) : null;
       if(ativosGlobais !== null) sourcesUsed.add("Ativos Globais (FRED)");
 
       const composites = { macro, institucional, onchain, derivativos, tecnico, sentimento, ativosGlobais, geopolitico:null, eventos:null };
       const { score, completeness } = aggregateScore(composites);
       const divergence = computeDivergence(composites);
-      const action = bucketAction(score, completeness, divergence);
+      // no backtest a cobertura de indicador não é reconstituível dia a dia
+      // (não há histórico por indicador), então passa null e a função cai
+      // conscientemente na regra antiga por completeness
+      const action = bucketAction(score, completeness, divergence, null);
       const fwd = ((closes[i+forwardDays]-closes[i])/closes[i])*100;
 
       (buckets[action] = buckets[action] || []).push(fwd);
@@ -3313,6 +3428,20 @@ function generateAutoScenario(){
   let existing = S.scenarios.find(s => s.auto && !s.rival && (s.status === "ativa" || s.status === "confirmada"));
 
   if(existing){
+    /* MUDANÇA MATERIAL REBAIXA O STATUS.
+       A v46 passou a reaproveitar também cenários "confirmada" (pra não deixar
+       um confirmado órfão disputando com um novo). Mas o bloco abaixo reescreve
+       tipo, título, gatilhos e convicção — e antes preservava o status. Ou seja:
+       um Bull que você tinha confirmado podia virar Bear mantendo o selo de
+       confirmado. Uma tese não pode trocar de conteúdo e herdar a validação da
+       tese anterior; isso esvazia o Premise Tracker inteiro.
+
+       Regra: se a DIREÇÃO mudou, o cenário volta pra "ativa" e a confirmação
+       antiga fica registrada no histórico de revisões. Recalcular a mesma
+       direção com número novo não rebaixa nada. */
+    const mudouDirecao = existing.type !== type;
+    const eraConfirmada = existing.status === "confirmada";
+
     existing.title = `Cenário automático — ${ms.label} (${dateLabel})`;
     existing.type = type;
     existing.probability = probability;
@@ -3322,10 +3451,26 @@ function generateAutoScenario(){
     existing.invalidateTriggers = invalidateTriggers;
     existing.updatedAt = now;
     existing.revisions = existing.revisions || [];
+
+    if(mudouDirecao && eraConfirmada){
+      existing.status = "ativa";
+      existing.revisions.push({ date:now, note:`Direção mudou (${existing.revisions.length ? "" : ""}${eraConfirmada ? "estava confirmada" : ""}) — status rebaixado de "confirmada" para "ativa": a tese não é mais a que você validou.` });
+    } else if(mudouDirecao){
+      existing.revisions.push({ date:now, note:`Direção do cenário mudou para "${type}".` });
+    }
     existing.revisions.push({ date:now, note:`Recalculado: score ${ms.score.toFixed(0)}` });
 
     const linkedPremise = S.premises.find(p => existing.premiseIds.includes(p.id) && p.auto);
     if(linkedPremise){
+      // a premissa carrega os composites do momento; se o texto muda, a
+      // evidência que a sustentava mudou junto. Premissa confirmada/enfraquecida
+      // volta pra "ativa" quando o conteúdo é reescrito — mesmo princípio.
+      const textoMudou = linkedPremise.description !== premiseDescription;
+      if(textoMudou && linkedPremise.status !== "ativa" && linkedPremise.status !== "invalidada"){
+        linkedPremise.history = linkedPremise.history || [];
+        linkedPremise.history.push({ date:now, from:linkedPremise.status, to:"ativa", note:"conteúdo recalculado — validação anterior não se aplica ao texto novo" });
+        linkedPremise.status = "ativa";
+      }
       linkedPremise.description = premiseDescription;
       linkedPremise.evidenceFor = filledMotors;
       linkedPremise.updatedAt = now;
@@ -3504,8 +3649,8 @@ function computeDecision(){
     }
   }
 
-  if(ms.completeness < 0.5){
-    reasoning.push("Dados insuficientes (menos de 50% do peso total preenchido) para sustentar uma leitura confiável.");
+  if(ms.cobertura < COBERTURA_MINIMA){
+    reasoning.push(`Dados insuficientes: só ${(ms.cobertura*100).toFixed(0)}% dos indicadores estão preenchidos e vigentes (mínimo ${(COBERTURA_MINIMA*100).toFixed(0)}%). O peso com algum dado é ${(ms.completeness*100).toFixed(0)}%, mas isso conta o motor inteiro por um indicador só — não sustenta uma leitura.`);
     return { action:"Aguardar confirmação", reasoning, leader:null, topFactors, allMotors };
   }
 
@@ -3525,8 +3670,8 @@ function computeDecision(){
     reasoning.push("Nenhum cenário ativo cadastrado ainda — leitura baseada apenas no estado de mercado.");
   }
 
-  const highConviction = ms.completeness >= 0.7 && ms.divergence < 35;
-  if(ms.divergence >= 35 && ms.completeness >= 0.5){
+  const highConviction = ms.cobertura >= COBERTURA_ALTA_CONVICCAO && ms.divergence < 35;
+  if(ms.divergence >= 35 && ms.cobertura >= COBERTURA_MINIMA){
     reasoning.push(`⚠ Os motores discordam fortemente entre si (divergência ${ms.divergence.toFixed(0)}) — leitura menos confiável do que o score isolado sugere.`);
   }
 
@@ -3543,7 +3688,7 @@ function computeDecision(){
     action = "Reduzir";
   } else if(highConviction){
     action = "Avaliar posição vendida (short)";
-    reasoning.push("Score fortemente negativo, dados completos e motores em concordância — cenário extremo o suficiente para cogitar hedge/short, não apenas redução.");
+    reasoning.push(`Score fortemente negativo, cobertura de ${(ms.cobertura*100).toFixed(0)}% dos indicadores e motores em concordância — cenário extremo o suficiente para cogitar hedge/short, não apenas redução.`);
   } else {
     action = "Sair";
   }
@@ -3590,8 +3735,8 @@ function renderIndicatorRow(motorKey, indKey, d){
     <div class="indicator-row">
       <div>
         <div class="ind-top">
-          <span class="ind-name">${d.label}</span>
-          <span class="ind-src ${isAuto && !d.locked && !d.fetchFailed && !f.expirado ? "auto" : "manual"}">${srcLabel}</span>
+          <span class="ind-name">${esc(d.label)}</span>
+          <span class="ind-src ${isAuto && !d.locked && !d.fetchFailed && !f.expirado ? "auto" : "manual"}">${esc(srcLabel)}</span>
         </div>
         <div class="ind-bar-track">
           <div class="ind-bar-mid"></div>
@@ -4359,15 +4504,19 @@ function computePersonalTrackRecord(){
 function renderMemoryPanel(){
   const wrap = document.getElementById("memoryWrap");
   if(!wrap) return;
-  const resolved = S.history.filter(h=>parseResultadoPct(h.resultado)!==null).length;
-  const pending = S.history.length - resolved;
+  // as contagens usam o histórico COMPLETO (quente + arquivo frio), igual ao
+  // cálculo estatístico logo abaixo. Antes contavam só S.history, então a tela
+  // podia dizer "nenhum resolveu ainda" havendo resolvidos no arquivo.
+  const completo = getFullHistory();
+  const resolved = completo.filter(h=>parseResultadoPct(h.resultado)!==null).length;
+  const pending = completo.length - resolved;
 
-  if(!S.history.length){
+  if(!completo.length){
     wrap.innerHTML = `<div class="empty-state">Ainda sem histórico nenhum — começa a se preencher sozinho na próxima atualização.</div>`;
     return;
   }
   if(!resolved){
-    wrap.innerHTML = `<div class="empty-state">${S.history.length} registro(s) no histórico, mas nenhum ainda resolveu o resultado (leva 7 dias). Volte aqui depois — a tabela aparece sozinha assim que o primeiro resolver.</div>`;
+    wrap.innerHTML = `<div class="empty-state">${completo.length} registro(s) no histórico, mas nenhum ainda resolveu o resultado (leva 7 dias). Volte aqui depois — a tabela aparece sozinha assim que o primeiro resolver.</div>`;
     return;
   }
 
@@ -4797,7 +4946,10 @@ function triggerDownloadWithFallback(blob, filename){
   URL.revokeObjectURL(url);
 }
 
-document.getElementById("btnExport").addEventListener("click", ()=>{
+document.getElementById("btnExport").addEventListener("click", async ()=>{
+  const btnEx = document.getElementById("btnExport");
+  const txtOriginal = btnEx.textContent;
+  btnEx.disabled = true; btnEx.textContent = "montando backup…";
   S.lastExportAt = new Date().toISOString();
   saveState();
   renderBackupWarning();
@@ -4808,14 +4960,27 @@ document.getElementById("btnExport").addEventListener("click", ()=>{
   // backup COMPLETO: depois de 500 registros o histórico antigo mora no
   // IndexedDB e não está mais em S.history, então exportar só S deixava de ser
   // backup de tudo justamente quando havia mais a perder
+  // lê o arquivo frio DIRETO do IndexedDB, não do espelho em memória: o
+  // espelho carrega de forma assíncrona no startup, e exportar nos primeiros
+  // segundos gerava um backup sem a parte fria — silenciosamente incompleto
+  let arquivoAgora;
+  try{
+    arquivoAgora = await getAllArchivedEntries();
+  }catch(e){
+    arquivoAgora = ARQUIVO_ESPELHO; // último recurso
+    console.warn("Não consegui ler o arquivo frio no export, usando o espelho:", e);
+  }
+  ARQUIVO_ESPELHO = arquivoAgora;
+
   const paraExportar = Object.assign({}, S, {
     apiKeys: { cryptoquant:"", fred:"", coingecko:"" },
     _chavesRemovidas: true,
-    _arquivoFrio: ARQUIVO_ESPELHO,
-    _arquivoFrioCount: ARQUIVO_ESPELHO.length
+    _arquivoFrio: arquivoAgora,
+    _arquivoFrioCount: arquivoAgora.length
   });
   const blob = new Blob([JSON.stringify(paraExportar, null, 2)], {type:"application/json"});
   triggerDownloadWithFallback(blob, `seios-btc-export-${new Date().toISOString().slice(0,10)}.json`);
+  btnEx.disabled = false; btnEx.textContent = txtOriginal;
 });
 
 document.getElementById("btnExportCsv").addEventListener("click", async ()=>{
@@ -4838,6 +5003,85 @@ document.getElementById("btnExportCsv").addEventListener("click", async ()=>{
   triggerDownloadWithFallback(blob, `seios-btc-historico-${new Date().toISOString().slice(0,10)}.csv`);
 });
 
+/* VALIDAÇÃO E SANEAMENTO DO BACKUP IMPORTADO.
+   Antes bastava existir um objeto `motors` — qualquer coisa passava, inclusive
+   tipos errados capazes de quebrar o estado, e strings que depois iam parar no
+   innerHTML. O escape resolve a injeção; isto aqui resolve o resto: garante
+   que o formato é o esperado e converte o que for lixo em algo inofensivo,
+   em vez de confiar num arquivo que pode vir de qualquer lugar. */
+const CAMPOS_TEXTO_INDICADOR = ["label","note","source"];
+
+function validarBackup(p){
+  const erros = [];
+  if(!p || typeof p !== "object" || Array.isArray(p)){ erros.push("O arquivo não contém um objeto de estado."); return erros; }
+  if(!p.motors || typeof p.motors !== "object" || Array.isArray(p.motors)){ erros.push("Falta o bloco de motores (`motors`)."); return erros; }
+
+  const chaves = Object.keys(p.motors);
+  if(!chaves.length) erros.push("O bloco de motores está vazio.");
+  chaves.forEach(mk=>{
+    const m = p.motors[mk];
+    if(!m || typeof m !== "object"){ erros.push(`Motor "${mk}" com formato inválido.`); return; }
+    if(typeof m.weight !== "number" || !Number.isFinite(m.weight) || m.weight < 0 || m.weight > 1){
+      erros.push(`Motor "${mk}" tem peso inválido (esperava número entre 0 e 1).`);
+    }
+    if(!m.indicators || typeof m.indicators !== "object"){ erros.push(`Motor "${mk}" sem indicadores.`); return; }
+    Object.keys(m.indicators).forEach(ik=>{
+      const ind = m.indicators[ik];
+      if(!ind || typeof ind !== "object"){ erros.push(`Indicador "${mk}.${ik}" com formato inválido.`); return; }
+      if(ind.value !== null && ind.value !== undefined &&
+         (typeof ind.value !== "number" || !Number.isFinite(ind.value) || ind.value < -100 || ind.value > 100)){
+        erros.push(`Indicador "${mk}.${ik}" com valor fora da escala -100..+100.`);
+      }
+    });
+  });
+
+  [["history","histórico"],["scenarios","cenários"],["premises","premissas"],["events","eventos"]].forEach(([k,nome])=>{
+    if(p[k] !== undefined && !Array.isArray(p[k])) erros.push(`O bloco de ${nome} deveria ser uma lista.`);
+  });
+  if(p._arquivoFrio !== undefined && !Array.isArray(p._arquivoFrio)) erros.push("O arquivo de longo prazo veio num formato inesperado.");
+
+  return erros.slice(0, 8); // não despeja cem linhas na tela
+}
+
+// converte o que passou na validação mas ainda pode incomodar: textos viram
+// string curta, números viram número, o resto vira null
+function sanitizarBackup(p){
+  const txt = (v, max)=> v === null || v === undefined ? v : String(v).slice(0, max || 300);
+  Object.values(p.motors || {}).forEach(m=>{
+    if(!m || typeof m !== "object" || !m.indicators) return;
+    Object.values(m.indicators).forEach(ind=>{
+      if(!ind || typeof ind !== "object") return;
+      CAMPOS_TEXTO_INDICADOR.forEach(c=>{ if(ind[c] !== undefined) ind[c] = txt(ind[c]); });
+      if(typeof ind.value !== "number" || !Number.isFinite(ind.value)) ind.value = null;
+      ind.locked = !!ind.locked;
+      ind.fetchFailed = !!ind.fetchFailed;
+    });
+  });
+  (p.scenarios || []).forEach(sc=>{
+    if(!sc || typeof sc !== "object") return;
+    ["title","description","horizon","status","type","confidence"].forEach(c=>{ if(sc[c] !== undefined) sc[c] = txt(sc[c]); });
+    ["confirmTriggers","invalidateTriggers","premiseIds"].forEach(c=>{
+      if(!Array.isArray(sc[c])) sc[c] = [];
+      else sc[c] = sc[c].map(x=>txt(x)).filter(Boolean);
+    });
+    if(typeof sc.probability !== "number" || !Number.isFinite(sc.probability)) sc.probability = 50;
+    sc.probability = Math.max(0, Math.min(100, sc.probability));
+  });
+  (p.premises || []).forEach(pr=>{
+    if(!pr || typeof pr !== "object") return;
+    ["description","status"].forEach(c=>{ if(pr[c] !== undefined) pr[c] = txt(pr[c]); });
+  });
+  (p.events || []).forEach(ev=>{
+    if(!ev || typeof ev !== "object") return;
+    if(ev.title !== undefined) ev.title = txt(ev.title, 200);
+  });
+  (p.history || []).forEach(h=>{
+    if(!h || typeof h !== "object") return;
+    ["action","leaderTitle","resultado"].forEach(c=>{ if(h[c] !== undefined) h[c] = txt(h[c], 200); });
+  });
+  return p;
+}
+
 /* --- importar/restaurar backup — fecha o ciclo do risco de localStorage --- */
 document.getElementById("btnImport").addEventListener("click", ()=>{
   document.getElementById("importFileInput").click();
@@ -4856,11 +5100,13 @@ document.getElementById("importFileInput").addEventListener("change", (e)=>{
       document.getElementById("importFileInput").value = "";
       return;
     }
-    if(!parsed || typeof parsed !== "object" || !parsed.motors){
-      if(preview) preview.innerHTML = `<div style="margin-top:10px;padding:10px 14px;border:1px solid var(--brick);background:var(--brick-soft);font-family:var(--font-mono);font-size:11.5px;color:var(--brick);">Esse arquivo não parece ser um backup do SEIOS (esperava um .json exportado daqui pelo botão "Exportar dados").</div>`;
+    const problemas = validarBackup(parsed);
+    if(problemas.length){
+      if(preview) preview.innerHTML = `<div style="margin-top:10px;padding:10px 14px;border:1px solid var(--brick);background:var(--brick-soft);font-family:var(--font-mono);font-size:11.5px;color:var(--brick);">Esse arquivo não passou na validação de backup do SEIOS:<ul style="margin:6px 0 0 16px;">${problemas.map(x=>`<li>${esc(x)}</li>`).join("")}</ul></div>`;
       document.getElementById("importFileInput").value = "";
       return;
     }
+    sanitizarBackup(parsed);
 
     // confirmação na própria tela — sem diálogo nativo, que esse
     // visualizador pode engolir silenciosamente (mesma lição do confirm())
@@ -4888,12 +5134,20 @@ document.getElementById("importFileInput").addEventListener("change", (e)=>{
         localStorage.setItem(STORAGE_KEY, JSON.stringify(parsed));
         S = loadState();
         saveState();
-        if(arquivoDoBackup && arquivoDoBackup.length){
-          clearArchive()
-            .then(()=> archiveHistoryEntries(arquivoDoBackup))
-            .then(()=> recarregarEspelhoDoArquivo())
-            .then(()=> renderAll());
-        }
+        // O archive é SEMPRE limpo, mesmo quando o backup não traz arquivo frio.
+        // Antes o clear só rodava se _arquivoFrio existisse e tivesse itens —
+        // então importar um backup antigo (sem o campo) ou vazio deixava os
+        // registros arquivados anteriores vivos no IndexedDB, e o
+        // getFullHistory() os misturava com o histórico importado. A tela
+        // promete substituir os dados atuais; agora substitui de verdade.
+        clearArchive()
+          .then(()=> (arquivoDoBackup && arquivoDoBackup.length)
+            ? archiveHistoryEntries(arquivoDoBackup)
+            : Promise.resolve(true))
+          .then(()=> recarregarEspelhoDoArquivo())
+          .then(()=> renderAll())
+          .catch(err=> console.warn("Falha ao restaurar o arquivo de longo prazo:", err));
+        ARQUIVO_ESPELHO = [];
         renderAll();
         preview.innerHTML = `<div style="margin-top:10px;padding:10px 14px;border:1px solid var(--teal);background:var(--teal-soft);font-family:var(--font-mono);font-size:11.5px;color:var(--teal);">✓ Backup restaurado com sucesso. Suas chaves de API deste navegador foram mantidas (backups não carregam chave).</div>`;
       });

@@ -959,7 +959,7 @@ const STORAGE_KEY = "seios_btc_v2";
 // fonte única da versão — usada no rodapé, no histórico e nos exports.
 // Muda toda vez que a fórmula de score/pesos muda, pra nunca misturar
 // decisões de regras diferentes como se fossem comparáveis.
-const BUILD_VERSION = "2026-08-10.56-vintage-fix";
+const BUILD_VERSION = "2026-08-10.57-diagnostico-fred";
 
 // indicador padrão — auto = tenta buscar sozinho; manual = você preenche
 function ind(label, source, note){
@@ -2990,13 +2990,19 @@ function hashrateScoreAtDate(series, dateStr){
    E a rede de segurança: se mesmo assim vier pouca coisa, refazemos a chamada
    sem vintage. Melhor um backtest com dado revisado — e dizendo isso — do que
    um backtest silenciosamente vazio. */
-const FRED_REALTIME_TUDO = "&realtime_start=1776-07-04&realtime_end=9999-12-31";
+// A janela de tempo real só precisa cobrir as divulgações das observações
+// pedidas. Começar em 1776 fazia o FRED devolver décadas de vintages para
+// séries diárias — payload enorme, candidato a estourar o prazo de 15s e cair
+// no catch silencioso. Começa junto com a janela de observação.
+function fredRealtime(startDate){
+  return `&realtime_start=${startDate}&realtime_end=9999-12-31`;
+}
 
 async function fetchFredSeriesRange(seriesId, apiKey, startDate){
   const base = `https://api.stlouisfed.org/fred/series/observations?series_id=${seriesId}&api_key=${encodeURIComponent(apiKey)}&file_type=json&sort_order=asc&observation_start=${startDate}`;
 
   let data = await (async ()=>{
-    const res = await smartFetch(base + FRED_REALTIME_TUDO + "&output_type=4");
+    const res = await smartFetch(base + fredRealtime(startDate) + "&output_type=4");
     if(!res.ok) throw new Error("FRED falhou: " + seriesId);
     return res.json();
   })();
@@ -3047,7 +3053,19 @@ function comDefasagem(dataReferencia, dias){
   return d;
 }
 
+/* Os catch(e){} desta função eram todos vazios. Quando uma série do FRED
+   falhava, ela sumia sem deixar rastro — e o log só dizia "8 séries" sem
+   informar QUAIS. Foi assim que passamos duas versões sem perceber que o Fed
+   Funds tinha caído. Agora cada série declara o que aconteceu, com o motivo. */
+const FRED_DIAG = { ok: [], falhou: [] };
+
+function fredRegistra(seriesId, erro){
+  if(erro) FRED_DIAG.falhou.push({ id: seriesId, motivo: (erro && erro.message) || String(erro) });
+  else if(!FRED_DIAG.ok.includes(seriesId)) FRED_DIAG.ok.push(seriesId);
+}
+
 async function fetchMacroHistoryMaps(apiKey){
+  FRED_DIAG.ok = []; FRED_DIAG.falhou = [];
   const startDaily = new Date(Date.now() - 400*24*3600*1000).toISOString().slice(0,10);
   // 900 dias garante observações suficientes pra que o preenchimento por
   // meses cubra o ano inteiro do backtest (bug anterior: só cobria ~2 meses)
@@ -3056,6 +3074,7 @@ async function fetchMacroHistoryMaps(apiKey){
 
   try{
     const obs = await fetchFredSeriesRange("DFF", apiKey, startDaily);
+    fredRegistra("DFF", null);
     maps.juros = {};
     maps.jurosRaw = {}; // valor bruto (%), pra testar por faixa depois — não só o score já transformado
     obs.forEach((o,idx)=>{
@@ -3063,10 +3082,11 @@ async function fetchMacroHistoryMaps(apiKey){
       maps.juros[o.date] = clamp(-(o.value - past.value)*40, -100, 100);
       maps.jurosRaw[o.date] = o.value;
     });
-  }catch(e){ /* segue sem esse indicador nesse backtest */ }
+  }catch(e){ fredRegistra("DFF", e); }
 
   try{
     const obs = await fetchFredSeriesRange("DTWEXBGS", apiKey, startDaily);
+    fredRegistra("DTWEXBGS", null);
     maps.dxy = {};
     maps.dxyRaw = {};
     obs.forEach((o,idx)=>{
@@ -3075,16 +3095,18 @@ async function fetchMacroHistoryMaps(apiKey){
       maps.dxy[o.date] = clamp(-pct*8, -100, 100);
       maps.dxyRaw[o.date] = pct;
     });
-  }catch(e){}
+  }catch(e){ fredRegistra("DTWEXBGS", e); }
 
   try{
     const obs = await fetchFredSeriesRange("T10Y2Y", apiKey, startDaily);
+    fredRegistra("T10Y2Y", null);
     maps.curva = {};
     obs.forEach(o=>{ maps.curva[o.date] = clamp(o.value*40, -100, 100); });
-  }catch(e){}
+  }catch(e){ fredRegistra("T10Y2Y", e); }
 
   try{
     const obs = await fetchFredSeriesRange("CPIAUCSL", apiKey, startMonthly);
+    fredRegistra("CPIAUCSL", null);
     maps.inflacao = {};
     maps.inflacaoRaw = {};
     for(let idx=15; idx<obs.length; idx++){
@@ -3097,10 +3119,11 @@ async function fetchMacroHistoryMaps(apiKey){
       fillDailyRange(maps.inflacao, desde, to, score);
       fillDailyRange(maps.inflacaoRaw, desde, to, yoyNow);
     }
-  }catch(e){}
+  }catch(e){ fredRegistra("CPIAUCSL", e); }
 
   try{
     const obs = await fetchFredSeriesRange("M2SL", apiKey, startMonthly);
+    fredRegistra("M2SL", null);
     maps.liquidez = {};
     for(let idx=12; idx<obs.length; idx++){
       const yoy = (obs[idx].value/obs[idx-12].value - 1)*100;
@@ -3109,39 +3132,42 @@ async function fetchMacroHistoryMaps(apiKey){
       const to = idx+1 < obs.length ? comDefasagem(obs[idx+1].date, DEFASAGEM_PUBLICACAO_DIAS.M2SL) : new Date();
       fillDailyRange(maps.liquidez, desde, to, score);
     }
-  }catch(e){}
+  }catch(e){ fredRegistra("M2SL", e); }
 
   // Ativos Globais — mesmo padrão de momentum 90d, com valor bruto separado
   // pra alimentar a tabela de "Regime macro histórico" (testar por faixa)
   try{
     const obs = await fetchFredSeriesRange("DCOILWTICO", apiKey, startDaily);
+    fredRegistra("DCOILWTICO", null);
     maps.petroleoRaw = {};
     obs.forEach((o,idx)=>{
       const past = obs[indiceDiasAtras(obs, idx, 90)]; // 90 dias de calendário
       const pct = past.value ? ((o.value - past.value)/past.value)*100 : 0;
       maps.petroleoRaw[o.date] = pct;
     });
-  }catch(e){}
+  }catch(e){ fredRegistra("DCOILWTICO", e); }
 
   try{
     const obs = await fetchFredSeriesRange("DEXUSEU", apiKey, startDaily);
+    fredRegistra("DEXUSEU", null);
     maps.euroRaw = {};
     obs.forEach((o,idx)=>{
       const past = obs[indiceDiasAtras(obs, idx, 90)]; // 90 dias de calendário
       const pct = past.value ? ((o.value - past.value)/past.value)*100 : 0;
       maps.euroRaw[o.date] = pct;
     });
-  }catch(e){}
+  }catch(e){ fredRegistra("DEXUSEU", e); }
 
   try{
     const obs = await fetchFredSeriesRange("SP500", apiKey, startDaily);
+    fredRegistra("SP500", null);
     maps.sp500Raw = {};
     obs.forEach((o,idx)=>{
       const past = obs[indiceDiasAtras(obs, idx, 90)]; // 90 dias de calendário
       const pct = past.value ? ((o.value - past.value)/past.value)*100 : 0;
       maps.sp500Raw[o.date] = pct;
     });
-  }catch(e){}
+  }catch(e){ fredRegistra("SP500", e); }
 
   return maps;
 }
@@ -3161,7 +3187,7 @@ async function fetchOnchainHistoryMaps(apiKey){
         if(dateField && val !== null) maps.mvrv[String(row[dateField]).slice(0,10)] = clamp((2-val)*40, -100, 100);
       });
     }
-  }catch(e){}
+  }catch(e){ /* CryptoQuant opcional — segue sem ele */ }
   return maps;
 }
 
@@ -3330,7 +3356,10 @@ async function runScoreBacktest(){
     if(S.apiKeys.fred){
       line = logStep("consultando macro histórico — Fed/CPI/M2/DXY/curva (FRED)", "calibrationLog");
       macroMaps = await fetchMacroHistoryMaps(S.apiKeys.fred).catch(()=>({}));
-      logDone(line, Object.keys(macroMaps).length>0, `${Object.keys(macroMaps).length} séries`, "calibrationLog");
+      logDone(line, FRED_DIAG.ok.length>0,
+        `${FRED_DIAG.ok.length}/8 séries: ${FRED_DIAG.ok.join(", ")}` +
+        (FRED_DIAG.falhou.length ? ` · FALHOU: ${FRED_DIAG.falhou.map(f=>f.id+" ("+f.motivo+")").join(", ")}` : ""),
+        "calibrationLog");
       await sleep(200);
     }
 
@@ -3634,10 +3663,11 @@ async function runScoreBacktest(){
         const total = allForwardReturns ? allForwardReturns.length : 0;
         const frac = total > 0 ? nGate/total : 0;
         const semVintage = (S.market.fredSemVintage || []);
-        if(frac < 0.2 && !semVintage.length) return "";
+        if(frac < 0.2 && !semVintage.length && !FRED_DIAG.falhou.length) return "";
         return `<div style="margin:14px 0;padding:12px 16px;border:1px solid var(--brick);background:var(--brick-soft);font-family:var(--font-mono);font-size:11.5px;color:var(--brick);line-height:1.5;">
           ${frac >= 0.2 ? `⚠ <strong>${nGate} de ${total} dias (${(frac*100).toFixed(0)}%) caíram em "dados insuficientes".</strong> Quando essa fatia é grande, as outras linhas não estão medindo acerto do sistema — estão medindo o outro pedaço do calendário. Trate os números como não conclusivos até algum motor voltar.<br>` : ""}
-          ${semVintage.length ? `⚠ Sem vintage (divulgação inicial) em: ${esc(semVintage.join(", "))}. Estas séries entraram com o valor REVISADO de hoje — look-ahead residual.` : ""}
+          ${semVintage.length ? `⚠ Sem vintage (divulgação inicial) em: ${esc(semVintage.join(", "))}. Estas séries entraram com o valor REVISADO de hoje — look-ahead residual.<br>` : ""}
+          ${FRED_DIAG.falhou.length ? `⚠ <strong>Séries do FRED que FALHARAM e ficaram fora do teste:</strong> ${esc(FRED_DIAG.falhou.map(f=>f.id+" — "+f.motivo).join(" · "))}. O motor correspondente rodou incompleto ou não rodou.` : ""}
         </div>`;
       })()}
       <p style="font-family:var(--font-mono);font-size:10.5px;color:var(--text-faint);margin-top:10px;">

@@ -26,7 +26,7 @@
     --line-soft:#123321;
     --text:#33FF6E;
     --text-dim:#7FCC9A;
-    --text-faint:#3D7A55;
+    --text-faint:#478A60;
     --copper:#33FF6E;
     --copper-soft:#33FF6E33;
     --teal:#33FF6E;
@@ -470,6 +470,16 @@
     .live-strip{flex-wrap:wrap;gap:8px;}
     .live-chart{width:100%;flex-basis:100%;}
   }
+  /* Acessibilidade: quem pede menos movimento no sistema não deve receber uma
+     chuva de caracteres animada competindo com o conteúdo. WCAG C39. */
+  @media (prefers-reduced-motion: reduce){
+    *, *::before, *::after{
+      animation-duration:.001ms !important; animation-iteration-count:1 !important;
+      transition-duration:.001ms !important; scroll-behavior:auto !important;
+    }
+    #matrixCanvas{display:none !important;}
+  }
+
   @media(max-width:640px){
     .brand-title{font-size:24px;}
     .ticker{text-align:left;}
@@ -679,7 +689,7 @@
         <div class="panel-mark">§ Decision Engine</div>
         <h2 class="panel-title">Leitura e recomendação</h2>
       </div>
-      <div class="panel-desc">Determinística e auditável — cada fator abaixo é rastreável até a fonte.</div>
+      <div class="panel-desc">Determinística e auditável — cada fator abaixo é rastreável até a fonte. <strong>A ação é uma hipótese de leitura, não uma ordem:</strong> o backtest ainda não é validado fora da amostra e a convicção não é probabilidade calibrada.</div>
     </div>
     <div class="decision-block">
       <div class="decision-verdict">
@@ -777,6 +787,10 @@
    em nenhum dado/lógica do sistema
    ===================================================================== */
 (function initMatrixRain(){
+  // respeita a preferência de menos movimento também no laço de desenho —
+  // esconder o canvas por CSS não impede o requestAnimationFrame de rodar
+  if(window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches) return;
+
   const canvas = document.getElementById("matrixCanvas");
   if(!canvas) return;
   const ctx = canvas.getContext("2d");
@@ -945,7 +959,7 @@ const STORAGE_KEY = "seios_btc_v2";
 // fonte única da versão — usada no rodapé, no histórico e nos exports.
 // Muda toda vez que a fórmula de score/pesos muda, pra nunca misturar
 // decisões de regras diferentes como se fossem comparáveis.
-const BUILD_VERSION = "2026-08-07.53-barra-limpa";
+const BUILD_VERSION = "2026-08-10.54-auditoria-externa";
 
 // indicador padrão — auto = tenta buscar sozinho; manual = você preenche
 function ind(label, source, note){
@@ -1010,12 +1024,12 @@ function defaultState(){
       tecnico:       { label:"Técnico",                      weight:.04, indicators:{
         tendencia: ind("Tendência 30d", "auto"),
         momentum:  ind("Momentum 24h", "auto"),
-        rsi:       ind("RSI (14)", "auto"),
+        rsi:       ind("RSI-SMA (14, média simples)", "auto"),
         mediaMovel:ind("Preço vs. Média Móvel 50d", "auto"),
         bookImbalance: ind("Desequilíbrio do livro de ofertas (Binance)", "auto")
       }},
       sentimento:    { label:"Sentimento",                   weight:.05, indicators:{
-        fearGreed: ind("Fear & Greed Index", "auto"),
+        fearGreed: ind("Fear & Greed (contém volatilidade e momentum — sobrepõe o Técnico)", "auto"),
         social:    ind("Sentimento social (X/Reddit/Telegram) — qualitativo", "manual")
       }},
       geopolitico:   { label:"Geopolítico",                  weight:.05, indicators:{
@@ -1235,13 +1249,39 @@ const CORS_PROXIES = [
   url => "https://corsproxy.io/?" + encodeURIComponent(url)
 ];
 
+/* SEM TIMEOUT, UMA FONTE PENDURADA TRAVAVA A RODADA INTEIRA.
+   O fetch não tem prazo por padrão: se um provedor aceita a conexão e não
+   responde, a atualização fica presa e nenhum dos outros 28 resultados aparece.
+   A auditoria ainda flagrou HTTP 451 da Binance (bloqueio geográfico) — erro
+   estrutural que não adianta repetir. Agora: prazo por tentativa, cancelamento
+   e nenhuma segunda cadeia para erro que não vai mudar. */
+const TIMEOUT_DIRETO_MS = 8000;
+const TIMEOUT_PROXY_MS = 12000;
+const STATUS_SEM_RETRY = [400, 401, 403, 404, 451];
+
+async function fetchComPrazo(url, ms){
+  const ctrl = new AbortController();
+  const timer = setTimeout(()=> ctrl.abort(), ms);
+  try{
+    return await fetch(url, { signal: ctrl.signal });
+  }finally{
+    clearTimeout(timer);
+  }
+}
+
 async function smartFetchOnce(url, opts){
   const permiteProxy = !opts || opts.allowProxy !== false;
   try{
-    const res = await fetch(url);
+    const res = await fetchComPrazo(url, TIMEOUT_DIRETO_MS);
     if(res.ok) return res;
+    if(STATUS_SEM_RETRY.includes(res.status)){
+      const e = new Error("status " + res.status + " (definitivo, sem nova tentativa)");
+      e.semRetry = true;
+      throw e;
+    }
     throw new Error("status " + res.status);
   }catch(directErr){
+    if(directErr && directErr.semRetry) throw directErr;
     if(!permiteProxy){
       // URL com chave de API e proxy não autorizado — falha aqui de propósito,
       // em vez de entregar a credencial pra um intermediário de terceiro
@@ -1249,7 +1289,7 @@ async function smartFetchOnce(url, opts){
     }
     for(const buildProxyUrl of CORS_PROXIES){
       try{
-        const res = await fetch(buildProxyUrl(url));
+        const res = await fetchComPrazo(buildProxyUrl(url), TIMEOUT_PROXY_MS);
         if(res.ok){
           if(urlTemSegredo(url)) S.proxyUsadoComChave = true; // pra avisar na tela que aconteceu de verdade
           return res;
@@ -1276,6 +1316,9 @@ async function smartFetch(url){
   try{
     return await smartFetchOnce(url, opts);
   }catch(firstErr){
+    // erro estrutural (bloqueio geográfico, chave inválida, rota inexistente)
+    // não melhora com insistência — só gasta o tempo da rodada
+    if(firstErr && firstErr.semRetry) throw firstErr;
     await sleep(1000);
     return await smartFetchOnce(url, opts);
   }
@@ -1988,11 +2031,18 @@ async function refreshMarketData(){
         S.market.volatility = Math.sqrt(variance);
         S.market.volatilityBase = "retornos diários (30 fechamentos)";
 
+        // guarda os fechamentos diários pra resolver o resultado no dia CERTO,
+        // e não com o preço de quando você abriu o app (ver autoResolveOutcomes)
+        S.market.fechamentosDiarios = {};
+        diarios.slice(-200).forEach(pt=>{
+          S.market.fechamentosDiarios[new Date(pt[0]).toISOString().slice(0,10)] = pt[1];
+        });
+
         const rsi = computeRSI(prices, 14); // 14 dias
         if(rsi !== null){
           // leitura CONTRÁRIA — evidência de calibração (205 dias, ago/2026):
           // RSI alto historicamente antecedeu queda, não continuação
-          setAuto("tecnico","rsi", clamp(-(rsi-50)*2, -100, 100), `RSI(14) diário: ${rsi.toFixed(0)} (leitura contrária: alto = risco de reversão)`);
+          setAuto("tecnico","rsi", clamp(-(rsi-50)*2, -100, 100), `RSI-SMA(14) diário: ${rsi.toFixed(0)} (leitura contrária: alto = risco de reversão)`);
         }
 
         const sma50 = computeSMA(prices, 50); // 50 dias
@@ -2417,17 +2467,55 @@ function autoLogHistory(){
 // 40 dias não é comparável com um de 7. O Case Engine usa esse campo pra só
 // contar as janelas realmente parecidas — antes ele misturava tudo na mesma
 // média como se fossem a mesma medida.
+/* O RÓTULO DEPENDIA DE QUANDO VOCÊ ABRIA O APP.
+   A resolução comparava o preço de AGORA com o do registro — então um registro
+   de 7 dias atrás resolvia em 7, 12 ou 40 dias conforme o seu hábito. O rótulo
+   passava a medir seu comportamento, não o horizonte definido.
+
+   Agora procuramos o fechamento diário EXATO em t+7 (com tolerância de 2 dias
+   para feriado/lacuna). Sem esse fechamento, o registro fica pendente em vez de
+   receber um rótulo errado. O preço de agora só é usado como último recurso, e
+   nesse caso o registro é marcado como aproximado e NÃO entra na estatística. */
+function fechamentoEm(dataStr){
+  const mapa = S.market.fechamentosDiarios;
+  if(!mapa) return null;
+  const d = new Date(dataStr + "T00:00:00Z");
+  for(let i = 0; i <= 2; i++){                 // tolera feriado/fim de semana
+    const k = new Date(d.getTime() + i*86400000).toISOString().slice(0,10);
+    if(mapa[k] !== undefined) return { preco: mapa[k], data: k, desvioDias: i };
+  }
+  return null;
+}
+
 function autoResolveOutcomes(){
-  if(!S.market.price) return;
   S.history.forEach(h=>{
     if(h.resultado) return; // já resolvido
     const ageMs = Date.now() - new Date(h.date).getTime();
     if(ageMs < OUTCOME_HORIZON_MS) return; // ainda não completou o horizonte
     if(!h.price) return;
-    const pct = ((S.market.price - h.price) / h.price) * 100;
-    const days = Math.round(ageMs / (24*3600*1000));
-    h.resultado = `${pct>=0?"+":""}${pct.toFixed(1)}% em ${days}d (auto)`;
-    h.resultadoDias = days;
+
+    const alvo = new Date(new Date(h.date).getTime() + OUTCOME_HORIZON_MS);
+    const fech = fechamentoEm(alvo.toISOString().slice(0,10));
+
+    if(fech){
+      const pct = ((fech.preco - h.price) / h.price) * 100;
+      const dias = Math.round((new Date(fech.data + "T00:00:00Z") - new Date(h.date)) / 86400000);
+      h.resultado = `${pct>=0?"+":""}${pct.toFixed(1)}% em ${dias}d (fechamento de ${fech.data})`;
+      h.resultadoDias = dias;
+      h.resultadoFonte = "fechamento-exato";
+      return;
+    }
+
+    // sem a série diária ainda: só resolve de forma aproximada se já passou
+    // muito tempo, e marca para não contaminar a estatística
+    if(!S.market.price) return;
+    const diasCorridos = Math.round(ageMs / 86400000);
+    if(diasCorridos > CASE_ENGINE_JANELA_MAX){
+      const pct = ((S.market.price - h.price) / h.price) * 100;
+      h.resultado = `${pct>=0?"+":""}${pct.toFixed(1)}% em ${diasCorridos}d (aproximado)`;
+      h.resultadoDias = diasCorridos;
+      h.resultadoFonte = "aproximado";
+    }
   });
 }
 
@@ -2566,6 +2654,38 @@ function motorComposite(motorKey){
    cobertura mede o que o nome diz: a fração dos indicadores realmente
    preenchidos e vigentes, ponderada pelo peso do motor. É sempre ≤ completeness
    e costuma ser bem menor. As duas passaram a ser exibidas lado a lado. */
+/* RENORMALIZAÇÃO SILENCIOSA — o modelo que roda não era o modelo declarado.
+   computeMarketState divide por `weightUsed`, então quando um motor não tem dado
+   os demais são reescalonados para somar 100%. Sem chave do FRED, por exemplo,
+   Macro (28%) e Ativos Globais (8%) morrem juntos: sobram 64% do peso, e
+   Institucional/On-chain/Derivativos saltam de 15% declarados para 23,44%
+   efetivos — um fator de 1,56 em tudo. A tela continuava exibindo os pesos
+   nominais. A renormalização em si é defensável; escondê-la não é.
+
+   pesosEfetivos() devolve o peso REAL de cada motor nesta leitura, e a tela
+   passa a mostrar os dois quando eles divergem. */
+function pesosEfetivos(){
+  const out = {};
+  let usado = 0;
+  Object.entries(S.motors).forEach(function(par){
+    const mk = par[0];
+    if(motorComposite(mk) !== null) usado += par[1].weight;
+  });
+  Object.entries(S.motors).forEach(function(par){
+    const mk = par[0], motor = par[1];
+    const vivo = motorComposite(mk) !== null;
+    out[mk] = {
+      nominal: motor.weight,
+      efetivo: vivo && usado > 0 ? motor.weight / usado : 0,
+      vivo,
+      fator: usado > 0 ? 1 / usado : 1
+    };
+  });
+  out._pesoVivo = usado;
+  out._fator = usado > 0 ? 1 / usado : 1;
+  return out;
+}
+
 function computeCobertura(){
   let coberto = 0, total = 0;
   Object.entries(S.motors).forEach(function(par){
@@ -2616,7 +2736,7 @@ function computeMarketState(){
   else if(score <= -40) label = "Bear forte";
   else if(score <= -15) label = "Bear";
 
-  return { score, completeness, label, composites, divergence, cobertura: computeCobertura() };
+  return { score, completeness, label, composites, divergence, cobertura: computeCobertura(), pesos: pesosEfetivos() };
 }
 
 function volatilityLabel(){
@@ -2788,6 +2908,21 @@ function valorDeMapaAte(map, dateStr, maxDiasAtras){
   return undefined;
 }
 
+/* "VARIAÇÃO 90 DIAS" CONTAVA 90 LINHAS, NÃO 90 DIAS.
+   `obs[idx-90]` volta 90 REGISTROS. Séries do FRED como DXY, curva, petróleo e
+   S&P são de dias úteis: 90 registros ≈ 126 dias corridos. O rótulo dizia uma
+   unidade e o código media outra — mesma família do bug de granularidade do
+   CoinGecko. Agora a janela é por CALENDÁRIO. */
+function indiceDiasAtras(obs, idx, dias){
+  const alvo = new Date(obs[idx].date + "T00:00:00Z");
+  alvo.setUTCDate(alvo.getUTCDate() - dias);
+  const alvoStr = alvo.toISOString().slice(0,10);
+  for(let i = idx; i >= 0; i--){
+    if(obs[i].date <= alvoStr) return i;
+  }
+  return 0; // série não alcança tão atrás; usa o ponto mais antigo
+}
+
 function ultimoConhecidoAte(series, dateStr){
   let achado = null;
   for(let i=0;i<series.length;i++){
@@ -2811,12 +2946,25 @@ function hashrateScoreAtDate(series, dateStr){
   return clamp(pct*6, -100, 100);
 }
 
+/* VINTAGES DO FRED — `output_type=4` = "initial release only".
+   Corrigimos a defasagem de PUBLICAÇÃO na v46, mas o backtest continuava lendo
+   os valores REVISADOS de hoje para datas passadas. Dado macro é revisto: CPI,
+   M2 e PIB mudam meses depois. Usar o número revisado no passado é look-ahead
+   sutil — o operador daquela data conhecia a PRIMEIRA divulgação, não a atual.
+   Vale só aqui, no backtest. Ao vivo, o valor corrente é o que o mercado vê. */
 async function fetchFredSeriesRange(seriesId, apiKey, startDate){
-  const url = `https://api.stlouisfed.org/fred/series/observations?series_id=${seriesId}&api_key=${encodeURIComponent(apiKey)}&file_type=json&sort_order=asc&observation_start=${startDate}`;
+  const url = `https://api.stlouisfed.org/fred/series/observations?series_id=${seriesId}&api_key=${encodeURIComponent(apiKey)}&file_type=json&sort_order=asc&output_type=4&observation_start=${startDate}`;
   const res = await smartFetch(url);
   if(!res.ok) throw new Error("FRED falhou: " + seriesId);
   const data = await res.json();
-  return (data.observations || []).filter(o=>o.value !== ".").map(o=>({date:o.date, value:Number(o.value)}));
+  // com output_type=4 a API pode devolver mais de uma linha por data; fica a
+  // primeira (a divulgação inicial), que é o que existia naquele momento
+  const vistos = new Set();
+  return (data.observations || [])
+    .filter(o=>o.value !== "." && Number.isFinite(Number(o.value)))
+    .map(o=>({date:o.date, value:Number(o.value)}))
+    .filter(o=>{ if(vistos.has(o.date)) return false; vistos.add(o.date); return true; })
+    .sort((a,b)=> a.date < b.date ? -1 : 1);
 }
 
 function fillDailyRange(map, fromDate, toDate, value){
@@ -2858,7 +3006,7 @@ async function fetchMacroHistoryMaps(apiKey){
     maps.juros = {};
     maps.jurosRaw = {}; // valor bruto (%), pra testar por faixa depois — não só o score já transformado
     obs.forEach((o,idx)=>{
-      const past = obs[Math.max(0, idx-90)];
+      const past = obs[indiceDiasAtras(obs, idx, 90)]; // 90 dias de calendário
       maps.juros[o.date] = clamp(-(o.value - past.value)*40, -100, 100);
       maps.jurosRaw[o.date] = o.value;
     });
@@ -2869,7 +3017,7 @@ async function fetchMacroHistoryMaps(apiKey){
     maps.dxy = {};
     maps.dxyRaw = {};
     obs.forEach((o,idx)=>{
-      const past = obs[Math.max(0, idx-90)];
+      const past = obs[indiceDiasAtras(obs, idx, 90)]; // 90 dias de calendário
       const pct = past.value ? ((o.value - past.value)/past.value)*100 : 0;
       maps.dxy[o.date] = clamp(-pct*8, -100, 100);
       maps.dxyRaw[o.date] = pct;
@@ -2916,7 +3064,7 @@ async function fetchMacroHistoryMaps(apiKey){
     const obs = await fetchFredSeriesRange("DCOILWTICO", apiKey, startDaily);
     maps.petroleoRaw = {};
     obs.forEach((o,idx)=>{
-      const past = obs[Math.max(0, idx-90)];
+      const past = obs[indiceDiasAtras(obs, idx, 90)]; // 90 dias de calendário
       const pct = past.value ? ((o.value - past.value)/past.value)*100 : 0;
       maps.petroleoRaw[o.date] = pct;
     });
@@ -2926,7 +3074,7 @@ async function fetchMacroHistoryMaps(apiKey){
     const obs = await fetchFredSeriesRange("DEXUSEU", apiKey, startDaily);
     maps.euroRaw = {};
     obs.forEach((o,idx)=>{
-      const past = obs[Math.max(0, idx-90)];
+      const past = obs[indiceDiasAtras(obs, idx, 90)]; // 90 dias de calendário
       const pct = past.value ? ((o.value - past.value)/past.value)*100 : 0;
       maps.euroRaw[o.date] = pct;
     });
@@ -2936,7 +3084,7 @@ async function fetchMacroHistoryMaps(apiKey){
     const obs = await fetchFredSeriesRange("SP500", apiKey, startDaily);
     maps.sp500Raw = {};
     obs.forEach((o,idx)=>{
-      const past = obs[Math.max(0, idx-90)];
+      const past = obs[indiceDiasAtras(obs, idx, 90)]; // 90 dias de calendário
       const pct = past.value ? ((o.value - past.value)/past.value)*100 : 0;
       maps.sp500Raw[o.date] = pct;
     });
@@ -3055,13 +3203,23 @@ function computeDivergence(composites){
 const COBERTURA_MINIMA = 0.35;      // abaixo disso não se opina
 const COBERTURA_ALTA_CONVICCAO = 0.50; // exigida pra cogitar short
 
+/* DIVERGÊNCIA ERA TRAVA SÓ DE UM LADO.
+   Score +70 com divergência 71 devolvia "Reforçar". A dispersão entre motores
+   só era consultada no caminho do short (score ≤ −55). Ou seja: motores
+   brigando bloqueavam a decisão pessimista e não tocavam na otimista. Não há
+   razão para a política ser assimétrica — discordância é discordância.
+   Agora divergência alta rebaixa a convicção nos DOIS sentidos. */
+const DIVERGENCIA_ALTA = 35;
+
 function bucketAction(score, completeness, divergence, cobertura){
   // cobertura ausente (chamadas antigas): cai pra completeness, com o corte antigo
   const cob = (cobertura === undefined || cobertura === null) ? null : cobertura;
   const travaBaixa = cob === null ? (completeness < 0.5) : (cob < COBERTURA_MINIMA);
   if(travaBaixa) return "Aguardar confirmação (dados insuficientes)";
-  if(score >= 40) return "Reforçar";
-  if(score >= 15) return "Entrar parcialmente";
+  const discordam = divergence >= DIVERGENCIA_ALTA;
+  // convicção máxima exige motores concordando — mesma régua dos dois lados
+  if(score >= 40) return discordam ? "Entrar parcialmente" : "Reforçar";
+  if(score >= 15) return discordam ? "Observar" : "Entrar parcialmente";
   if(score > -15) return "Observar";
   if(score > -55) return "Reduzir";
   const convicao = cob === null ? (completeness >= 0.7) : (cob >= COBERTURA_ALTA_CONVICCAO);
@@ -3483,7 +3641,7 @@ function avaliarGatilho(texto){
   const mmInd = S.motors.tecnico.indicators.mediaMovel;
   const fundInd = S.motors.derivativos.indicators.funding;
 
-  // RSI: o valor cru está na nota ("RSI(14) diário: 47")
+  // RSI: o valor cru está na nota ("RSI-SMA(14) diário: 47")
   const rsiCru = (()=>{ const m = /rsi\(14\)[^:]*:\s*(-?\d+(?:\.\d+)?)/i.exec(rsiInd.note || ""); return m ? Number(m[1]) : null; })();
   // distância pra MM50 idem ("preço +3.2% vs. MM50 diária")
   const distMM = (()=>{ const m = /preço\s*([+-]?\d+(?:\.\d+)?)%\s*vs\.?\s*mm50/i.exec(mmInd.note || ""); return m ? Number(m[1]) : null; })();
@@ -3594,11 +3752,11 @@ function generateAutoScenario(){
     // leitura contrária (evidência de calibração): RSI baixo favorece alta,
     // RSI alto favorece queda — os gatilhos respeitam isso, não o oposto
     if(ehBear){
-      confirmTriggers.push("RSI(14) diário permanece acima de 60 (sobrecompra sustentando a queda)");
-      invalidateTriggers.push("RSI(14) diário cai abaixo de 35 (sobrevenda pode reverter a tese)");
+      confirmTriggers.push("RSI-SMA(14) diário permanece acima de 60 (sobrecompra sustentando a queda)");
+      invalidateTriggers.push("RSI-SMA(14) diário cai abaixo de 35 (sobrevenda pode reverter a tese)");
     } else {
-      confirmTriggers.push("RSI(14) diário permanece abaixo de 40 (sobrevenda sustentando a alta)");
-      invalidateTriggers.push("RSI(14) diário sobe acima de 65 (sobrecompra pode reverter a tese)");
+      confirmTriggers.push("RSI-SMA(14) diário permanece abaixo de 40 (sobrevenda sustentando a alta)");
+      invalidateTriggers.push("RSI-SMA(14) diário sobe acima de 65 (sobrecompra pode reverter a tese)");
     }
   }
   if(der.funding.value !== null){
@@ -3822,13 +3980,23 @@ function computeDecision(){
     .map(([key,motor])=>({ key, label:motor.label, composite: ms.composites[key], weight: motor.weight }))
     .filter(m=>m.composite !== null);
 
+  if(ms.pesos && ms.pesos._fator > 1.02){
+    const inflados = Object.entries(ms.pesos)
+      .filter(([k,v])=>k[0] !== "_" && v.vivo)
+      .map(([k,v])=>`${S.motors[k].label} ${(v.nominal*100).toFixed(0)}%→${(v.efetivo*100).toFixed(1)}%`);
+    const ausentes = Object.entries(ms.pesos)
+      .filter(([k,v])=>k[0] !== "_" && !v.vivo)
+      .map(([k])=>S.motors[k].label);
+    reasoning.push(`⚠ Pesos reescalonados: ${ausentes.length ? `sem dado em ${ausentes.join(", ")}` : "motores ausentes"}, os presentes passaram a valer ${ms.pesos._fator.toFixed(2)}x o declarado (${inflados.slice(0,3).join(" · ")}${inflados.length>3?" …":""}). O modelo executado não é o da etiqueta.`);
+  }
+
   reasoning.push(`Cobertura: ${(ms.cobertura*100).toFixed(0)}% dos indicadores preenchidos e vigentes · ${(ms.completeness*100).toFixed(0)}% do peso tem pelo menos um dado · divergência ponderada entre motores: ${ms.divergence.toFixed(0)} · volatilidade 30d (retornos diários): ${volatilityLabel()}`);
 
   // dado vencido não some em silêncio — ele sai da conta e é declarado
   {
     const vencidos = indicadoresExpirados();
     if(vencidos.length){
-      const amostra = vencidos.slice(0,3).map(v=>`${v.label} (${Math.round(v.horas)}h, limite ${v.limite}h)`).join(" · ");
+      const amostra = vencidos.slice(0,3).map(v=>`${esc(v.label)} (${Math.round(v.horas)}h, limite ${v.limite}h)`).join(" · ");
       reasoning.push(`⚠ ${vencidos.length} indicador(es) com dado vencido não estão pontuando: ${amostra}${vencidos.length>3?" …":""}. Atualize os dados de mercado pra recuperá-los.`);
     }
   }
@@ -3838,7 +4006,7 @@ function computeDecision(){
   const hs = computeHorizonScores();
   const horizonBits = ["curto","medio","longo"]
     .filter(k=>hs[k].score !== null)
-    .map(k=>`${HORIZON_LABELS[k].title} (${HORIZON_LABELS[k].window}): ${hs[k].label}`);
+    .map(k=>`${HORIZON_LABELS[k].title} (${HORIZON_LABELS[k].window}): ${esc(hs[k].label)}`);
   if(horizonBits.length){
     reasoning.push(`Por prazo — ${horizonBits.join(" · ")}. A recomendação abaixo mistura os três; veja o painel "Temporalidade" pra separar.`);
   }
@@ -3859,7 +4027,7 @@ function computeDecision(){
       return { key, label:S.motors[key].label, without, delta: without - ms.score };
     }).sort((a,b)=>Math.abs(b.delta)-Math.abs(a.delta)).slice(0,2);
     counterfactuals.forEach(cf=>{
-      reasoning.push(`Sem ${cf.label}: o score iria de ${ms.score.toFixed(0)} para ${cf.without.toFixed(0)} (Δ${cf.delta>=0?"+":""}${cf.delta.toFixed(0)})`);
+      reasoning.push(`Sem ${esc(cf.label)}: o score iria de ${ms.score.toFixed(0)} para ${cf.without.toFixed(0)} (Δ${cf.delta>=0?"+":""}${cf.delta.toFixed(0)})`);
     });
   }
 
@@ -3917,9 +4085,19 @@ function computeDecision(){
   if(leaderFlag){
     action = "Aguardar confirmação";
   } else if(ms.score >= 40){
-    action = "Reforçar";
+    if(ms.divergence >= DIVERGENCIA_ALTA){
+      action = "Entrar parcialmente";
+      reasoning.push(`Score de ${ms.score.toFixed(0)} pediria "Reforçar", mas os motores discordam demais (divergência ${ms.divergence.toFixed(0)}) — leitura rebaixada. A mesma régua vale do lado vendido.`);
+    } else {
+      action = "Reforçar";
+    }
   } else if(ms.score >= 15){
-    action = "Entrar parcialmente";
+    if(ms.divergence >= DIVERGENCIA_ALTA){
+      action = "Observar";
+      reasoning.push(`Score de ${ms.score.toFixed(0)} pediria "Entrar parcialmente", mas a divergência entre motores (${ms.divergence.toFixed(0)}) desqualifica a convicção.`);
+    } else {
+      action = "Entrar parcialmente";
+    }
   } else if(ms.score > -15){
     action = "Observar";
   } else if(ms.score > -55){
@@ -4076,7 +4254,7 @@ function wireEventLogHandlers(){
 }
 
 /* cores fixas em hex — evita depender de var() dentro de atributos SVG */
-const COLOR = { teal:"#33FF6E", brick:"#FF4444", gold:"#FFC53D", copper:"#33FF6E", faint:"#3D7A55", line:"#1F5B34", text:"#33FF6E" };
+const COLOR = { teal:"#33FF6E", brick:"#FF4444", gold:"#FFC53D", copper:"#33FF6E", faint:"#478A60", line:"#1F5B34", text:"#33FF6E" };
 
 function gaugeSVG(pct, color, size, stroke){
   const r = (size - stroke) / 2;
@@ -4173,8 +4351,18 @@ function renderState(){
     const indLines = Object.values(motor.indicators || {})
       .filter(i=>i.value !== null && i.value !== undefined)
       .map(i=>`${i.label}: ${i.value>=0?"+":""}${Math.round(i.value)}`);
-    const tooltip = `${motor.label} — peso ${(motor.weight*100).toFixed(0)}%${c!==null?` · leitura ${c.toFixed(0)}`:" · sem dados ainda"}${indLines.length?"\n"+indLines.join("\n"):""}`;
-    return dialWidget(motor.label, pct, color, `peso ${(motor.weight*100).toFixed(0)}%`, 90, 8, 15, c===null?null:Math.round(c), tooltip);
+    // peso EFETIVO, não o nominal: quando faltam motores, os presentes são
+    // reescalonados e passam a valer mais do que a etiqueta dizia
+    const pe = ms.pesos ? ms.pesos[key] : null;
+    const efet = pe && pe.vivo ? pe.efetivo : 0;
+    const divergePeso = pe && pe.vivo && Math.abs(efet - motor.weight) > 0.005;
+    const sub = !pe || !pe.vivo
+      ? `peso ${(motor.weight*100).toFixed(0)}% · sem dado`
+      : (divergePeso
+          ? `peso ${(efet*100).toFixed(1)}% <span style="opacity:.55;">(nominal ${(motor.weight*100).toFixed(0)}%)</span>`
+          : `peso ${(motor.weight*100).toFixed(0)}%`);
+    const tooltip = `${motor.label}\nPeso nominal: ${(motor.weight*100).toFixed(0)}%${pe && pe.vivo ? `\nPeso EFETIVO nesta leitura: ${(efet*100).toFixed(2)}%` : "\nSem dado — não pontua"}${divergePeso ? `\n(motores ausentes fizeram os presentes valerem ${(pe.fator).toFixed(2)}x o declarado)` : ""}${c!==null?`\nLeitura: ${c.toFixed(0)}`:""}${indLines.length?"\n\n"+indLines.join("\n"):""}`;
+    return dialWidget(motor.label, pct, color, sub, 90, 8, 15, c===null?null:Math.round(c), tooltip);
   }).join("");
 
   const overallPct = clamp((ms.score+100)/2, 0, 100);
@@ -4560,7 +4748,7 @@ function renderPremises(){
       <span class="premise-id">${esc(p.id)}</span>
       <div>
         <div class="premise-desc">${esc(p.description)}</div>
-        <div class="premise-link">cenários: ${linkedTitles.join(", ") || "nenhum"} · evidências a favor: ${(p.evidenceFor||[]).length} · contrárias: ${(p.evidenceAgainst||[]).length}</div>
+        <div class="premise-link">cenários: ${linkedTitles.map(esc).join(", ") || "nenhum"} · evidências a favor: ${(p.evidenceFor||[]).length} · contrárias: ${(p.evidenceAgainst||[]).length}</div>
       </div>
       <span class="stamp st-${esc(p.status)}">${esc(p.status)}</span>
       <div class="premise-actions">
@@ -4700,6 +4888,8 @@ function computeCaseEngine(){
   // só as janelas comparáveis entram na conta
   const usable = resolvidos.filter(h => {
     const d = resultadoDiasDe(h);
+    // resolução aproximada não entra: mede quando o app abriu, não o horizonte
+    if(h.resultadoFonte === "aproximado") return false;
     return d !== null && d >= CASE_ENGINE_JANELA_MIN && d <= CASE_ENGINE_JANELA_MAX;
   });
   const foraDaJanela = resolvidos.length - usable.length;
@@ -4742,6 +4932,7 @@ function computePersonalTrackRecord(){
     const pct = parseResultadoPct(h.resultado);
     if(pct === null) return; // ainda não resolveu
     const dias = resultadoDiasDe(h);
+    if(h.resultadoFonte === "aproximado"){ foraDaJanela++; return; }
     if(dias === null || dias < CASE_ENGINE_JANELA_MIN || dias > CASE_ENGINE_JANELA_MAX){ foraDaJanela++; return; }
     const key = h.action || "—";
     (groups[key] = groups[key] || []).push(pct);
@@ -4918,9 +5109,14 @@ function renderHero(){
   const hs = computeHorizonScores();
   const p = S.market.price;
 
-  // o veredito é a palavra, não o número. Cor carrega o mesmo significado.
-  const rotulo = scoreLabel(ms.score);
-  const cor = ms.score >= 15 ? COLOR.teal : (ms.score <= -15 ? COLOR.brick : COLOR.gold);
+  /* SEM DADO NÃO É "NEUTRO".
+     Com cobertura zero o score é 0, e 0 vira "Neutro" — uma leitura de aparência
+     legítima construída sobre nada. É o pior tipo de erro de interface: parece
+     informação. Abaixo da cobertura mínima o veredito passa a dizer o que é. */
+  const semLeitura = ms.cobertura < COBERTURA_MINIMA;
+  const rotulo = semLeitura ? "Sem leitura" : scoreLabel(ms.score);
+  const cor = semLeitura ? COLOR.faint
+    : (ms.score >= 15 ? COLOR.teal : (ms.score <= -15 ? COLOR.brick : COLOR.gold));
   const fmt = v => "$" + Math.round(v).toLocaleString("en-US");
 
   const mas = S.market.weeklyMAs || {};
@@ -4946,7 +5142,9 @@ function renderHero(){
         <div class="hero-eyebrow">Estado do mercado — BTC</div>
         <h2 class="hero-verdict" style="color:${cor};">${esc(rotulo)}</h2>
         <div class="hero-action" style="color:${cor};">${esc(d.action)}</div>
-        <p class="hero-line">${esc(fraseDoEstado(ms, hs))}</p>
+        <p class="hero-line">${semLeitura
+          ? `Cobertura de apenas ${(ms.cobertura*100).toFixed(0)}% dos indicadores — abaixo do mínimo de ${(COBERTURA_MINIMA*100).toFixed(0)}%. Não há base para uma leitura. Clique em "Atualizar dados".`
+          : esc(fraseDoEstado(ms, hs))}</p>
       </div>
       <div class="hero-side">
         <div>

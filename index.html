@@ -959,7 +959,7 @@ const STORAGE_KEY = "seios_btc_v2";
 // fonte única da versão — usada no rodapé, no histórico e nos exports.
 // Muda toda vez que a fórmula de score/pesos muda, pra nunca misturar
 // decisões de regras diferentes como se fossem comparáveis.
-const BUILD_VERSION = "2026-08-10.57-diagnostico-fred";
+const BUILD_VERSION = "2026-08-10.58-acertou-ou-errou";
 
 // indicador padrão — auto = tenta buscar sozinho; manual = você preenche
 function ind(label, source, note){
@@ -3528,7 +3528,22 @@ async function runScoreBacktest(){
       const arr = buckets[k];
       const meanRet = avg(arr);
       const winRate = (arr.filter(x=>x>0).length/arr.length)*100;
-      return { label:k, count:arr.length, avg:meanRet, winRate, vsBaseline: meanRet - baseline.avg };
+      /* SINAL INVERTIDO PARA RECOMENDAÇÃO DEFENSIVA.
+         "Reduzir" seguido de queda de 8,7% contra uma referência de -5,1%
+         aparecia como -3,6pp — a pior linha da tabela. Mas reduzir exposição
+         antes de uma queda MAIOR que a média é ACERTO, não erro. A coluna
+         calculava tudo como se toda recomendação fosse sinal de compra.
+         Agora cada linha declara se acertou, com a régua correta pro seu lado. */
+      const defensiva = k === "Reduzir" || k === "Sair" || k === "Avaliar posição vendida (short)";
+      const dif = meanRet - baseline.avg;
+      return {
+        label: k, count: arr.length, avg: meanRet, winRate,
+        vsBaseline: dif,
+        defensiva,
+        // pra defensiva, quanto MAIS negativo o retorno, melhor foi a chamada
+        acerto: defensiva ? -dif : dif,
+        neutra: k === "Observar"
+      };
     });
 
     if(!rows.length){
@@ -3549,14 +3564,23 @@ async function runScoreBacktest(){
         <br>— se o sistema completo não bater essas estratégias de 1 indicador só, todos os motores extras não estão agregando valor.
       </div>` : ""}
       <table class="hist">
-        <thead><tr><th>Recomendação que o sistema teria dado</th><th>Dias (12m)</th><th>Retorno médio em 30d</th><th>vs. referência</th><th>% das vezes que subiu</th></tr></thead>
+        <thead><tr><th>Recomendação que o sistema teria dado</th><th>Dias (12m)</th><th>Retorno médio em 30d</th><th>Acertou?</th><th>% das vezes que subiu</th></tr></thead>
         <tbody>
           ${rows.map(r=>`
             <tr>
               <td>${r.label}</td>
               <td>${r.count}${r.count < 15 ? ' <span style="color:var(--gold);font-size:9.5px;">amostra pequena</span>' : ""}</td>
               <td style="color:${r.avg>=0?"var(--teal)":"var(--brick)"};">${r.avg>=0?"+":""}${r.avg.toFixed(1)}%</td>
-              <td style="color:${r.vsBaseline>=0?"var(--teal)":"var(--brick)"};">${r.vsBaseline>=0?"+":""}${r.vsBaseline.toFixed(1)}pp</td>
+              <td style="color:${Math.abs(r.acerto)<1 ? "var(--text-faint)" : (r.acerto>0?"var(--teal)":"var(--brick)")};">
+                ${Math.abs(r.acerto) < 1
+                  ? `≈ igual à referência`
+                  : `${r.acerto>0 ? "✓ acertou" : "✗ errou"} por ${Math.abs(r.acerto).toFixed(1)}pp`}
+                <span style="display:block;font-size:9.5px;color:var(--text-faint);">
+                  ${r.defensiva
+                    ? `defensiva: queda maior que a média é acerto (${r.vsBaseline>=0?"+":""}${r.vsBaseline.toFixed(1)}pp vs. ref.)`
+                    : `compra: retorno acima da média é acerto (${r.vsBaseline>=0?"+":""}${r.vsBaseline.toFixed(1)}pp vs. ref.)`}
+                </span>
+              </td>
               <td>${r.winRate.toFixed(0)}%</td>
             </tr>
           `).join("")}

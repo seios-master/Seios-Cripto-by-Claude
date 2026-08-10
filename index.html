@@ -959,7 +959,7 @@ const STORAGE_KEY = "seios_btc_v2";
 // fonte única da versão — usada no rodapé, no histórico e nos exports.
 // Muda toda vez que a fórmula de score/pesos muda, pra nunca misturar
 // decisões de regras diferentes como se fossem comparáveis.
-const BUILD_VERSION = "2026-08-10.54-auditoria-externa";
+const BUILD_VERSION = "2026-08-10.55-prazo-por-fonte";
 
 // indicador padrão — auto = tenta buscar sozinho; manual = você preenche
 function ind(label, source, note){
@@ -1259,11 +1259,37 @@ const TIMEOUT_DIRETO_MS = 8000;
 const TIMEOUT_PROXY_MS = 12000;
 const STATUS_SEM_RETRY = [400, 401, 403, 404, 451];
 
+/* PRAZO POR FONTE.
+   Um prazo único era simples demais e errado: o GDELT varre um índice global de
+   notícias e leva de 10 a 20 segundos com frequência — comportamento normal
+   dele, não falha. Com 8s ele era abortado toda vez, e o motor Geopolítico
+   morria por causa da MINHA proteção, não por causa da API.
+   Cada fonte declara o prazo que a natureza dela pede. */
+const TIMEOUT_POR_FONTE = [
+  { padrao: /gdeltproject\.org/i,   direto: 30000, proxy: 40000 }, // varredura global de notícias
+  { padrao: /coinmetrics\.io/i,     direto: 15000, proxy: 20000 }, // séries longas
+  { padrao: /stlouisfed\.org/i,     direto: 15000, proxy: 20000 }, // FRED sempre via proxy
+  { padrao: /coingecko\.com/i,      direto: 15000, proxy: 20000 }, // 365 dias de histórico
+];
+
+function prazosDe(url){
+  const regra = TIMEOUT_POR_FONTE.find(r => r.padrao.test(url));
+  return regra
+    ? { direto: regra.direto, proxy: regra.proxy }
+    : { direto: TIMEOUT_DIRETO_MS, proxy: TIMEOUT_PROXY_MS };
+}
+
 async function fetchComPrazo(url, ms){
   const ctrl = new AbortController();
   const timer = setTimeout(()=> ctrl.abort(), ms);
   try{
     return await fetch(url, { signal: ctrl.signal });
+  }catch(e){
+    // "Fetch is aborted" não diz nada a quem lê o log. Diz o que aconteceu.
+    if(e && (e.name === "AbortError" || /abort/i.test(e.message || ""))){
+      throw new Error(`tempo esgotado após ${(ms/1000).toFixed(0)}s`);
+    }
+    throw e;
   }finally{
     clearTimeout(timer);
   }
@@ -1272,7 +1298,7 @@ async function fetchComPrazo(url, ms){
 async function smartFetchOnce(url, opts){
   const permiteProxy = !opts || opts.allowProxy !== false;
   try{
-    const res = await fetchComPrazo(url, TIMEOUT_DIRETO_MS);
+    const res = await fetchComPrazo(url, prazosDe(url).direto);
     if(res.ok) return res;
     if(STATUS_SEM_RETRY.includes(res.status)){
       const e = new Error("status " + res.status + " (definitivo, sem nova tentativa)");
@@ -1289,7 +1315,7 @@ async function smartFetchOnce(url, opts){
     }
     for(const buildProxyUrl of CORS_PROXIES){
       try{
-        const res = await fetchComPrazo(buildProxyUrl(url), TIMEOUT_PROXY_MS);
+        const res = await fetchComPrazo(buildProxyUrl(url), prazosDe(url).proxy);
         if(res.ok){
           if(urlTemSegredo(url)) S.proxyUsadoComChave = true; // pra avisar na tela que aconteceu de verdade
           return res;

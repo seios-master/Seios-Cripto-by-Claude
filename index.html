@@ -959,7 +959,7 @@ const STORAGE_KEY = "seios_btc_v2";
 // fonte única da versão — usada no rodapé, no histórico e nos exports.
 // Muda toda vez que a fórmula de score/pesos muda, pra nunca misturar
 // decisões de regras diferentes como se fossem comparáveis.
-const BUILD_VERSION = "2026-08-13.58.1-fixture";
+const BUILD_VERSION = "2026-08-13.58.2-fixture";
 
 // indicador padrão — auto = tenta buscar sozinho; manual = você preenche
 function ind(label, source, note){
@@ -6101,8 +6101,12 @@ document.addEventListener("click", (e)=>{
   function montarPainel(){
     caixa = document.createElement("div");
     caixa.className = "wrap";
-    caixa.style.cssText = "margin:28px auto;padding:16px;border:1px solid var(--copper,#2f7);" +
-      "background:rgba(3,16,7,.6);font-family:var(--font-mono,ui-monospace,Menlo,monospace);";
+    // position/z-index explícitos: o canvas do matrix é position:fixed z-index:0 e
+    // pinta por cima de qualquer bloco não posicionado — sem isto o painel existe
+    // no DOM, ocupa altura, e fica invisível atrás da chuva verde.
+    caixa.style.cssText = "position:relative;z-index:2;margin:28px auto;padding:16px;" +
+      "border:1px solid var(--copper,#2f7);border-radius:6px;" +
+      "background:#050B07;font-family:var(--font-mono,ui-monospace,Menlo,monospace);";
     caixa.innerHTML =
       '<div style="font-size:11px;letter-spacing:.14em;color:var(--text-faint,#6a6);margin-bottom:4px">' +
       '§ TESTE DE REGRESSÃO</div>' +
@@ -6120,7 +6124,9 @@ document.addEventListener("click", (e)=>{
       "color:var(--text-dim,#8a8);font-family:inherit;";
     saida.textContent = "Toque em 1 e depois atualize os dados de mercado.";
     caixa.appendChild(saida);
-    document.body.appendChild(caixa);
+    // dentro da camada de conteúdo (z-index:1), não solto no body
+    const camada = document.querySelector('body > div[style*="z-index:1"]') || document.body;
+    camada.appendChild(caixa);
     verificarFixtureExistente();
   }
 

@@ -959,7 +959,7 @@ const STORAGE_KEY = "seios_btc_v2";
 // fonte única da versão — usada no rodapé, no histórico e nos exports.
 // Muda toda vez que a fórmula de score/pesos muda, pra nunca misturar
 // decisões de regras diferentes como se fossem comparáveis.
-const BUILD_VERSION = "2026-08-10.58-acertou-ou-errou";
+const BUILD_VERSION = "2026-08-13.58.1-fixture";
 
 // indicador padrão — auto = tenta buscar sozinho; manual = você preenche
 function ind(label, source, note){
@@ -5975,6 +5975,248 @@ document.addEventListener("click", (e)=>{
     popup.style.display = "none";
   }
 });
+
+
+/* =====================================================================
+   § TESTE DE REGRESSÃO (v58.1) — congelar a leitura de hoje e comparar
+   =====================================================================
+   Nada aqui altera score, peso ou fórmula. O bloco fica inerte até você
+   tocar num dos botões. Existe por um motivo: quando a gente muda o
+   Geopolítico no v59, é preciso provar que SÓ o Geopolítico mudou. Sem uma
+   foto congelada dos payloads, "mudou porque eu mexi" e "mudou porque o
+   mercado andou" viram a mesma coisa e nenhuma correção fica demonstrada.
+
+   Congela três coisas, não uma:
+   1. os payloads crus de cada chamada (inclusive as que FALHARAM — a queda
+      do GDELT faz parte do caso de teste, é ela que produziu o BULL de hoje)
+   2. o relógio, senão o módulo de frescor expira os indicadores em 24h e a
+      mesma foto passa a dar outro score
+   3. o resultado (composites, score, cobertura, horizontes) como baseline
+   ===================================================================== */
+(function(){
+  const fetchOriginal = window.fetch.bind(window);
+  const DateOriginal  = window.Date;
+  let modo = null, buffer = {}, congelado = null, faltando = [];
+
+  /* ---- guarda em IndexedDB (payload de 25+ chamadas não cabe no localStorage) ---- */
+  function abrirDB(cb){
+    const req = indexedDB.open("seios_fixture", 1);
+    req.onupgradeneeded = e => e.target.result.createObjectStore("fx");
+    req.onsuccess = e => cb(e.target.result);
+    req.onerror = () => escrever("Não consegui abrir o armazenamento local.");
+  }
+  function guardarFixture(obj, cb){
+    abrirDB(d => {
+      const t = d.transaction("fx","readwrite");
+      t.objectStore("fx").put(obj, "atual");
+      t.oncomplete = cb || function(){};
+    });
+  }
+  function lerFixture(cb){
+    abrirDB(d => {
+      const r = d.transaction("fx","readonly").objectStore("fx").get("atual");
+      r.onsuccess = () => cb(r.result || null);
+      r.onerror = () => cb(null);
+    });
+  }
+
+  /* ---- chave da chamada: tira cache-busting, senão o replay nunca casa ---- */
+  function chaveDe(url, opts){
+    const metodo = ((opts && opts.method) || "GET").toUpperCase();
+    let u;
+    try{ u = new URL(url, location.href); }catch(e){ return metodo + " " + url; }
+    ["_","t","ts","timestamp","cacheBust","nocache","rand"].forEach(p => u.searchParams.delete(p));
+    u.searchParams.sort();
+    return metodo + " " + u.origin + u.pathname + (u.search || "");
+  }
+
+  /* ---- relógio travado durante o replay ---- */
+  function travarRelogio(iso){
+    const fixo = new DateOriginal(iso).getTime();
+    function D(){
+      if(!(this instanceof D)) return new DateOriginal(fixo).toString();
+      return arguments.length === 0
+        ? new DateOriginal(fixo)
+        : new (Function.prototype.bind.apply(DateOriginal, [null].concat([].slice.call(arguments))))();
+    }
+    D.prototype = DateOriginal.prototype;
+    D.now = () => fixo;
+    D.parse = DateOriginal.parse;
+    D.UTC = DateOriginal.UTC;
+    window.Date = D;
+  }
+  function soltarRelogio(){ window.Date = DateOriginal; }
+
+  /* ---- intercepta a rede (todas as chamadas passam por fetchComPrazo) ---- */
+  window.fetch = function(entrada, opts){
+    const url = (typeof entrada === "string") ? entrada : (entrada && entrada.url);
+    const k = chaveDe(url, opts);
+
+    if(modo === "reproduzir"){
+      const g = congelado && congelado.chamadas[k];
+      if(!g){
+        if(faltando.indexOf(k) === -1) faltando.push(k);
+        return Promise.reject(new Error("sem dado congelado para esta chamada"));
+      }
+      if(g.status === 0) return Promise.reject(new Error(g.erro || "falha congelada"));
+      return Promise.resolve(new Response(g.corpo, {
+        status: g.status,
+        headers: { "Content-Type": "application/json" }
+      }));
+    }
+
+    const p = fetchOriginal(entrada, opts);
+    if(modo === "gravar"){
+      return p.then(r => {
+        try{ r.clone().text().then(txt => { buffer[k] = { status: r.status, corpo: txt }; }); }catch(e){}
+        return r;
+      }).catch(err => {
+        buffer[k] = { status: 0, corpo: "", erro: String(err && err.message || err) };
+        throw err;
+      });
+    }
+    return p;
+  };
+
+  /* ---- baseline lido das funções reais, não da tela ---- */
+  function lerEstado(){
+    const ms = computeMarketState();
+    const out = { "SCORE GERAL": +ms.score.toFixed(2), "COBERTURA %": +(ms.cobertura*100).toFixed(1) };
+    Object.entries(ms.composites).forEach(([k,v]) => {
+      out[S.motors[k] ? S.motors[k].label : k] = (v === null ? null : +v.toFixed(2));
+    });
+    try{
+      const h = computeHorizonScores();
+      ["curto","medio","longo"].forEach(g => {
+        if(h && h[g] && typeof h[g].score === "number") out["horizonte "+g] = +h[g].score.toFixed(2);
+      });
+    }catch(e){}
+    return out;
+  }
+
+  /* ---- painel ---- */
+  let caixa, saida, botao1;
+  function escrever(txt){ if(saida) saida.textContent = txt; }
+
+  function montarPainel(){
+    caixa = document.createElement("div");
+    caixa.className = "wrap";
+    caixa.style.cssText = "margin:28px auto;padding:16px;border:1px solid var(--copper,#2f7);" +
+      "background:rgba(3,16,7,.6);font-family:var(--font-mono,ui-monospace,Menlo,monospace);";
+    caixa.innerHTML =
+      '<div style="font-size:11px;letter-spacing:.14em;color:var(--text-faint,#6a6);margin-bottom:4px">' +
+      '§ TESTE DE REGRESSÃO</div>' +
+      '<div style="font-size:16px;color:var(--text,#cfc);margin-bottom:10px">Congelar a leitura de hoje</div>' +
+      '<div style="font-size:12px;color:var(--text-dim,#8a8);line-height:1.5;margin-bottom:12px">' +
+      'Guarda os dados crus desta atualização — inclusive as fontes que falharam — ' +
+      'para que a próxima versão possa ser testada contra exatamente o mesmo material.</div>';
+
+    botao1 = criarBotao("1 · CONGELAR OS DADOS DE HOJE", iniciarGravacao);
+    criarBotao("2 · RODAR COM OS DADOS CONGELADOS", iniciarReplay);
+    criarBotao("3 · COMPARAR COM O CONGELADO", compararAgora);
+
+    saida = document.createElement("pre");
+    saida.style.cssText = "white-space:pre-wrap;margin:12px 0 0;font-size:12px;line-height:1.5;" +
+      "color:var(--text-dim,#8a8);font-family:inherit;";
+    saida.textContent = "Toque em 1 e depois atualize os dados de mercado.";
+    caixa.appendChild(saida);
+    document.body.appendChild(caixa);
+    verificarFixtureExistente();
+  }
+
+  function criarBotao(rotulo, acao){
+    const b = document.createElement("button");
+    b.textContent = rotulo;
+    b.style.cssText = "display:block;width:100%;margin:6px 0;padding:14px;text-align:left;" +
+      "background:rgba(4,32,14,.8);color:var(--accent,#7f7);border:1px solid var(--line-soft,#2f7);" +
+      "border-radius:4px;font-family:inherit;font-size:13px;letter-spacing:.04em;";
+    b.onclick = acao;
+    caixa.appendChild(b);
+    return b;
+  }
+
+  function verificarFixtureExistente(){
+    lerFixture(fx => {
+      if(fx) escrever("Já existe uma foto congelada de " +
+        new DateOriginal(fx.capturadoEm).toLocaleString("pt-BR") +
+        " (" + Object.keys(fx.chamadas).length + " chamadas).\n" +
+        "Toque em 2 para rodar com ela, ou em 1 para substituir.");
+    });
+  }
+
+  function iniciarGravacao(){
+    modo = "gravar"; buffer = {};
+    escrever("Gravando.\n\nAgora toque em ATUALIZAR DADOS DE MERCADO, lá em cima, e espere o log " +
+             "dizer \"concluído\".\n\nDepois volte aqui e toque em SALVAR.");
+    botao1.textContent = "1 · SALVAR O QUE FOI GRAVADO";
+    botao1.onclick = salvarGravacao;
+  }
+
+  function salvarGravacao(){
+    if(!Object.keys(buffer).length){
+      escrever("Nenhuma chamada foi capturada. Você chegou a tocar em ATUALIZAR DADOS DE MERCADO?");
+      return;
+    }
+    const estado = lerEstado();
+    guardarFixture({
+      build: BUILD_VERSION,
+      capturadoEm: new DateOriginal().toISOString(),
+      chamadas: buffer,
+      baseline: estado
+    }, () => {
+      modo = null;
+      botao1.textContent = "1 · CONGELAR OS DADOS DE HOJE";
+      botao1.onclick = iniciarGravacao;
+      escrever("Congelado: " + Object.keys(buffer).length + " chamadas.\n\n" +
+        "Baseline desta leitura:\n" + formatar(estado) +
+        "\n\nConfira se estes números batem com os relógios da tela. Se baterem, está pronto.");
+    });
+  }
+
+  function iniciarReplay(){
+    lerFixture(fx => {
+      if(!fx){ escrever("Nada congelado ainda. Faça o passo 1 primeiro."); return; }
+      congelado = fx; faltando = []; modo = "reproduzir";
+      travarRelogio(fx.capturadoEm);
+      escrever("Dados congelados ativos.\nRelógio travado em " +
+        new DateOriginal(fx.capturadoEm).toLocaleString("pt-BR") +
+        "\nFoto gravada na build: " + (fx.build || "?") +
+        "\n\nAgora toque em ATUALIZAR DADOS DE MERCADO. Nada vai à internet — " +
+        "tudo vem da foto.\n\nQuando terminar, volte e toque em 3.");
+    });
+  }
+
+  function compararAgora(){
+    if(!congelado){ escrever("Rode o passo 2 antes de comparar."); return; }
+    const novo = lerEstado(), base = congelado.baseline;
+    let txt = "", mudaram = 0;
+    Object.keys(base).forEach(k => {
+      const a = base[k], b = novo[k];
+      if(typeof a !== "number" || typeof b !== "number"){
+        if(a !== b){ mudaram++; txt += "▲ " + k + ": " + a + " → " + b + "\n"; }
+        else txt += "  " + k + ": " + a + "\n";
+        return;
+      }
+      const d = b - a;
+      if(Math.abs(d) > 0.005) mudaram++;
+      txt += (Math.abs(d) > 0.005 ? "▲ " : "  ") + k + ": " + a + " → " + b +
+             "   (" + (d > 0 ? "+" : "") + d.toFixed(2) + ")\n";
+    });
+    txt += "\n" + mudaram + " de " + Object.keys(base).length + " campos mudaram.";
+    if(!mudaram) txt += "\nNada mudou — esta versão reproduz a foto exatamente.";
+    if(faltando.length) txt += "\n\nSem dado congelado para " + faltando.length +
+      " chamada(s) — a versão nova está buscando algo que a antiga não buscava:\n" +
+      faltando.join("\n");
+    escrever(txt);
+  }
+
+  function formatar(o){
+    return Object.keys(o).map(k => "  " + k + ": " + o[k]).join("\n");
+  }
+
+  if(document.readyState === "loading") document.addEventListener("DOMContentLoaded", montarPainel);
+  else montarPainel();
+})();
 
 })();
 </script>

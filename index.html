@@ -959,7 +959,7 @@ const STORAGE_KEY = "seios_btc_v2";
 // fonte única da versão — usada no rodapé, no histórico e nos exports.
 // Muda toda vez que a fórmula de score/pesos muda, pra nunca misturar
 // decisões de regras diferentes como se fossem comparáveis.
-const BUILD_VERSION = "2026-08-13.58.2-fixture";
+const BUILD_VERSION = "2026-08-13.59-escala-geo";
 
 // indicador padrão — auto = tenta buscar sozinho; manual = você preenche
 function ind(label, source, note){
@@ -1500,6 +1500,26 @@ async function readGdeltJson(res){
   }
 }
 
+/* RETRY CIRÚRGICO (v59) — o GDELT é a fonte mais instável do conjunto: cai
+   de forma intermitente, sem relação com volume de uso, e derruba DOIS motores
+   de uma vez (Geopolítico pelo tom, Eventos pelo volume). Uma segunda tentativa
+   com respiro resolve boa parte de falha intermitente e custa poucos segundos.
+   Só a chamada que falhou é repetida — nunca a leitura inteira. Se falhar de
+   novo, o indicador fica sem valor (null) e sai do cálculo: NUNCA reaproveita
+   a leitura anterior, que é como um dado velho vira voto silencioso. */
+async function comSegundaChance(fn, esperaMs){
+  try{
+    return await fn();
+  }catch(primeiroErro){
+    await sleep(esperaMs || 2500);
+    try{
+      return await fn();
+    }catch(segundoErro){
+      throw new Error(segundoErro.message + " (2 tentativas)");
+    }
+  }
+}
+
 async function fetchGdeltTone(){
   const query = encodeURIComponent('(war OR conflict OR invasion OR sanctions OR "military strike" OR terrorism OR coup)');
   const url = `https://api.gdeltproject.org/api/v2/doc/doc?query=${query}&mode=timelinetone&format=json&timespan=3d`;
@@ -1717,12 +1737,54 @@ function computeSMA(prices, period){
   return sum/period;
 }
 
+/* =====================================================================
+   § ESCALA E ASSIMETRIA (v59)
+   =====================================================================
+   Dois defeitos distintos, corrigidos aqui.
+
+   1. SATURAÇÃO. clamp(x*k, -100, 100) transforma qualquer coisa acima do
+   limiar no mesmo número. Com o EPU (*3) bastavam 33% de variação — comum
+   num índice que oscila entre 50 e 300 — para o indicador cravar 100 e parar
+   de responder. Um indicador saturado não é uma leitura forte: é um sensor
+   desligado que continua votando com peso máximo. escalaSuave() usa tangente
+   hiperbólica: se aproxima de ±100 sem nunca encostar, então continua
+   distinguindo 40% de 120% de variação.
+
+   2. ASSIMETRIA. "-pct*3" fazia incerteza CAINDO virar score positivo alto.
+   O motor tratava ausência de crise como sinal de alta. Isso está errado:
+   a ausência de guerra é o estado normal do mundo, não uma tese de compra.
+   Um motor de risco tem que poder puxar forte para baixo e pouco para cima.
+   TETO_POSITIVO limita o quanto o Geopolítico pode empurrar o score para
+   cima, sem limitar o quanto pode alertar. É a versão implementável hoje do
+   split GEO-RISK / GEO-TRANSMISSION, sem depender de fonte nova.
+   ===================================================================== */
+function escalaSuave(x, meia){
+  // meia = valor de x que produz ~76 de score. Nunca satura de fato.
+  if(x === null || x === undefined || Number.isNaN(Number(x))) return null;
+  return Math.round(100 * Math.tanh(Number(x) / meia) * 100) / 100;
+}
+
+// teto positivo por motor — só o Geopolítico por enquanto
+const TETO_POSITIVO = { geopolitico: 30 };
+
+function aplicarTeto(motorKey, valor){
+  if(valor === null) return null;
+  const teto = TETO_POSITIVO[motorKey];
+  return (teto !== undefined && valor > teto) ? teto : valor;
+}
+
+// um indicador em ±99.5 ou além está no limite da escala: registra para a tela
+function marcarSaturacao(ind, valor){
+  ind.saturado = (valor !== null && Math.abs(valor) >= 99.5);
+}
+
 function setAuto(motorKey, indKey, value, note){
   const ind = S.motors[motorKey].indicators[indKey];
   ind.fetchFailed = false;
   if(!ind.locked){
     ind.value = value;
     ind.note = note;
+    marcarSaturacao(ind, value);
     ind.updatedAt = new Date().toISOString(); // carimbo por indicador — base de todo o controle de frescor
   }
 }
@@ -1930,7 +1992,12 @@ async function refreshMarketData(){
         const obs = await fetchFredSeries("USEPUINDXD", S.apiKeys.fred, 95);
         const latest = obs[0].value, past = obs[obs.length-1].value;
         const pct = past ? ((latest-past)/past)*100 : 0;
-        setAuto("geopolitico","epu", clamp(-pct*3, -100, 100), `EPU ${latest.toFixed(0)} (${pct>=0?"+":""}${pct.toFixed(1)}% em ~90d)`);
+        // ESCALA — o multiplicador linear *3 saturava com 33% de variação, e o
+        // índice de incerteza oscila mais que isso rotineiramente (varia entre
+        // ~50 e ~300). Na prática o indicador vivia grudado no teto: deixava de
+        // ser medida e virava constante. escalaSuave() nunca satura de fato —
+        // 40% de variação dá ~66, 100% dá ~96, e continua respondendo depois.
+        setAuto("geopolitico","epu", escalaSuave(-pct, 40), `EPU ${latest.toFixed(0)} (${pct>=0?"+":""}${pct.toFixed(1)}% em ~90d)`);
         results.ok.push("epu (FRED)");
         logDone(line, true, latest.toFixed(0));
       }catch(e){ setFailed("geopolitico","epu"); results.fail.push("epu (FRED)"); logDone(line, false, e.message); }
@@ -2294,8 +2361,8 @@ async function refreshMarketData(){
   // GDELT — radar de notícia global, sem chave nenhuma
   { const line = logStep("consultando tom das notícias globais (GDELT)");
     try{
-      const tone = await fetchGdeltTone();
-      setAuto("geopolitico","gdelt", clamp(tone*8, -100, 100), `tom médio: ${tone.toFixed(2)}`);
+      const tone = await comSegundaChance(fetchGdeltTone, 3000);
+      setAuto("geopolitico","gdelt", escalaSuave(tone, 6), `tom médio: ${tone.toFixed(2)}`);
       results.ok.push("gdelt");
       logDone(line, true, tone.toFixed(2));
     }catch(e){ setFailed("geopolitico","gdelt"); results.fail.push("gdelt"); logDone(line, false, e.message); }
@@ -2305,7 +2372,7 @@ async function refreshMarketData(){
   // pausa, a segunda chamada quase sempre esbarra no limite da primeira
   { const line = logStep("consultando pico de volume de notícias de crise (GDELT)");
     try{
-      const spike = await fetchGdeltVolumeSpike();
+      const spike = await comSegundaChance(fetchGdeltVolumeSpike, 6000);
       setAuto("eventos","volumeSpike", volumeSpikeToScore(spike), `volume ${spike>=0?"+":""}${spike.toFixed(0)}% vs. normal`);
       results.ok.push("gdelt volume");
       logDone(line, true, `${spike>=0?"+":""}${spike.toFixed(0)}%`);
@@ -2667,7 +2734,7 @@ function motorComposite(motorKey){
     .map(ik=>valorVigente(motorKey, ik))
     .filter(v=>v!==null && v!==undefined && !Number.isNaN(v));
   if(!vals.length) return null;
-  return vals.reduce((a,b)=>a+b,0) / vals.length;
+  return aplicarTeto(motorKey, vals.reduce((a,b)=>a+b,0) / vals.length);
 }
 
 /* COBERTURA ≠ CONFIANÇA.

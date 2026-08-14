@@ -962,7 +962,7 @@ const STORAGE_KEY = "seios_btc_v2";
 // fonte única da versão — usada no rodapé, no histórico e nos exports.
 // Muda toda vez que a fórmula de score/pesos muda, pra nunca misturar
 // decisões de regras diferentes como se fossem comparáveis.
-const BUILD_VERSION = "2026-08-14.69.3-localstorage";
+const BUILD_VERSION = "2026-08-14.69.4-funcao-perdida";
 
 // indicador padrão — auto = tenta buscar sozinho; manual = você preenche
 function ind(label, source, note, excludeFromScore){
@@ -6866,6 +6866,46 @@ document.addEventListener("click", (e)=>{
     redesenhar();
   }
 
+  /* v69.4 — capturarIndicadores/aplicarIndicadores existiam desde o v68, mas
+     foram apagadas por acidente quando reescrevi o painel no v69: substituí um
+     intervalo de linhas e elas estavam dentro dele. O resultado foi um
+     ReferenceError no meio do salvar — a execução abortava e o botão ficava em
+     "SALVANDO…" para sempre, sem erro visível.
+     Persegui o IndexedDB por três versões por causa disso. A checagem de
+     sintaxe não pega chamada a função inexistente; só execução pega. Daí o
+     try/catch abrangente em salvarGravacao logo abaixo: qualquer exceção futura
+     aparece na tela em vez de virar tela travada. */
+  function capturarIndicadores(){
+    const out = {};
+    Object.entries(S.motors).forEach(function(par){
+      const mk = par[0], motor = par[1];
+      Object.keys(motor.indicators).forEach(function(ik){
+        const i = motor.indicators[ik];
+        out[mk + "." + ik] = {
+          value: i.value === undefined ? null : i.value,
+          note: i.note || "",
+          updatedAt: i.updatedAt || null,
+          fetchFailed: !!i.fetchFailed,
+          saturado: !!i.saturado
+        };
+      });
+    });
+    return out;
+  }
+
+  function aplicarIndicadores(mapa){
+    if(!mapa) return;
+    Object.keys(mapa).forEach(function(chave){
+      const parte = chave.split(".");
+      const motor = S.motors[parte[0]];
+      const i = motor && motor.indicators[parte[1]];
+      if(!i) return;
+      const g = mapa[chave];
+      i.value = g.value; i.note = g.note; i.updatedAt = g.updatedAt;
+      i.fetchFailed = g.fetchFailed; i.saturado = g.saturado;
+    });
+  }
+
   function salvarGravacao(){
     if(!Object.keys(buffer).length){
       escrever("Nenhuma chamada foi capturada.\n\nVocê chegou a tocar em ATUALIZAR DADOS DE MERCADO " +
@@ -6886,13 +6926,24 @@ document.addEventListener("click", (e)=>{
       }, 0) / 1048576;
     }catch(e){}
     escrever("Salvando " + capturadas + " chamadas (~" + mb.toFixed(1) + " MB) + estado dos indicadores…");
-    guardarFixture({
-      build: BUILD_VERSION,
-      capturadoEm: new DateOriginal().toISOString(),
-      chamadas: buffer,
-      indicadores: capturarIndicadores(),
-      baseline: estado
-    }, function(){
+
+    let foto;
+    try{
+      foto = {
+        build: BUILD_VERSION,
+        capturadoEm: new DateOriginal().toISOString(),
+        chamadas: buffer,
+        indicadores: capturarIndicadores(),
+        baseline: estado
+      };
+    }catch(e){
+      passo = "gravando"; redesenhar();
+      escrever("✗ Erro ao montar a foto:\n" + (e && e.message) +
+               "\n\nA gravação continua ativa — pode tentar de novo.");
+      return;
+    }
+
+    guardarFixture(foto, function(){
       modo = null; passo = "ocioso";
       redesenhar();
       // feedback no próprio botão: a mensagem de texto some se a tela estiver

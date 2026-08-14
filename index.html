@@ -445,7 +445,11 @@
      O painel é pra decidir; o relatório é pra auditar. Misturar os dois
      fez a tela responder perguntas que ninguém tinha feito ainda.
      ================================================================= */
-  .rel-bar{display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:10px;margin:26px 0 0;}
+  /* v67 — eram 5 por linha com 13 painéis; com 8 isso deixava a última fileira
+     com 3 órfãos. 4 colunas fecham 8 em duas linhas cheias. */
+  .rel-bar{display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin:26px 0 0;}
+  @media (max-width:900px){ .rel-bar{grid-template-columns:repeat(2,1fr);} }
+  @media (max-width:520px){ .rel-bar{grid-template-columns:1fr;} }
   .rel-btn{padding:14px 16px;background:rgba(0,0,0,.3);border:1px solid var(--line-soft);
     color:var(--text-dim);font-family:var(--font-mono);font-size:12.5px;text-align:left;
     cursor:pointer;transition:border-color .15s,color .15s,background .15s;line-height:1.35;}
@@ -958,7 +962,7 @@ const STORAGE_KEY = "seios_btc_v2";
 // fonte única da versão — usada no rodapé, no histórico e nos exports.
 // Muda toda vez que a fórmula de score/pesos muda, pra nunca misturar
 // decisões de regras diferentes como se fossem comparáveis.
-const BUILD_VERSION = "2026-08-14.67-fusao";
+const BUILD_VERSION = "2026-08-14.67.1-fusao";
 
 // indicador padrão — auto = tenta buscar sozinho; manual = você preenche
 function ind(label, source, note){

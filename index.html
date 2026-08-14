@@ -959,7 +959,7 @@ const STORAGE_KEY = "seios_btc_v2";
 // fonte única da versão — usada no rodapé, no histórico e nos exports.
 // Muda toda vez que a fórmula de score/pesos muda, pra nunca misturar
 // decisões de regras diferentes como se fossem comparáveis.
-const BUILD_VERSION = "2026-08-14.63-laboratorio";
+const BUILD_VERSION = "2026-08-14.64-escala-e-retornos";
 
 // indicador padrão — auto = tenta buscar sozinho; manual = você preenche
 function ind(label, source, note){
@@ -1929,7 +1929,7 @@ async function refreshMarketData(){
         const obs = await fetchFredSeries("DFF", S.apiKeys.fred, 95);
         const latest = obs[0].value, past = obs[obs.length-1].value;
         const delta = latest - past;
-        setAuto("macro","juros", clamp(-delta*40, -100, 100), `Fed Funds ${latest.toFixed(2)}% (${delta>=0?"+":""}${delta.toFixed(2)}pp em ~90d)`);
+        setAuto("macro","juros", escalaSuave(-delta, 2.5), `Fed Funds ${latest.toFixed(2)}% (${delta>=0?"+":""}${delta.toFixed(2)}pp em ~90d)`);
         results.ok.push("juros (FRED)");
         logDone(line, true, `${latest.toFixed(2)}%`);
       }catch(e){ setFailed("macro","juros"); results.fail.push("juros (FRED)"); logDone(line, false, e.message); }
@@ -1945,7 +1945,7 @@ async function refreshMarketData(){
         const yoyNow = (obs[0].value / obs[12].value - 1) * 100;
         const yoyPast = (obs[3].value / obs[15].value - 1) * 100;
         const delta = yoyNow - yoyPast;
-        setAuto("macro","inflacao", clamp(-delta*25, -100, 100), `CPI YoY ${yoyNow.toFixed(1)}% (${delta>=0?"acelerando":"desacelerando"})`);
+        setAuto("macro","inflacao", escalaSuave(-delta, 4), `CPI YoY ${yoyNow.toFixed(1)}% (${delta>=0?"acelerando":"desacelerando"})`);
         results.ok.push("inflação (FRED)");
         logDone(line, true, `YoY ${yoyNow.toFixed(1)}%`);
       }catch(e){ setFailed("macro","inflacao"); results.fail.push("inflação (FRED)"); logDone(line, false, e.message); }
@@ -1957,7 +1957,7 @@ async function refreshMarketData(){
         const obs = await fetchFredSeries("M2SL", S.apiKeys.fred, 16);
         if(obs.length < 13) throw new Error(`M2: só ${obs.length} meses válidos retornados (precisa de 13)`);
         const yoy = (obs[0].value / obs[12].value - 1) * 100;
-        setAuto("macro","liquidez", clamp(yoy*15, -100, 100), `M2 YoY ${yoy>=0?"+":""}${yoy.toFixed(1)}%`);
+        setAuto("macro","liquidez", escalaSuave(yoy, 6.67), `M2 YoY ${yoy>=0?"+":""}${yoy.toFixed(1)}%`);
         results.ok.push("liquidez/M2 (FRED)");
         logDone(line, true, `YoY ${yoy>=0?"+":""}${yoy.toFixed(1)}%`);
       }catch(e){ setFailed("macro","liquidez"); results.fail.push("liquidez/M2 (FRED)"); logDone(line, false, e.message); }
@@ -1969,7 +1969,7 @@ async function refreshMarketData(){
         const obs = await fetchFredSeries("DTWEXBGS", S.apiKeys.fred, 95);
         const latest = obs[0].value, past = obs[obs.length-1].value;
         const pct = ((latest-past)/past)*100;
-        setAuto("macro","dxy", clamp(-pct*8, -100, 100), `dólar ${pct>=0?"+":""}${pct.toFixed(1)}% em ~90d`);
+        setAuto("macro","dxy", escalaSuave(-pct, 12.5), `dólar ${pct>=0?"+":""}${pct.toFixed(1)}% em ~90d`);
         results.ok.push("dxy (FRED)");
         logDone(line, true, `${pct>=0?"+":""}${pct.toFixed(1)}%`);
       }catch(e){ setFailed("macro","dxy"); results.fail.push("dxy (FRED)"); logDone(line, false, e.message); }
@@ -1980,7 +1980,7 @@ async function refreshMarketData(){
       try{ // spread 10y-2y — invertido (negativo) sinaliza estresse macro
         const obs = await fetchFredSeries("T10Y2Y", S.apiKeys.fred, 5);
         const spread = obs[0].value;
-        setAuto("macro","curva", clamp(spread*40, -100, 100), `spread 10y-2y ${spread>=0?"+":""}${spread.toFixed(2)}pp`);
+        setAuto("macro","curva", escalaSuave(spread, 2.5), `spread 10y-2y ${spread>=0?"+":""}${spread.toFixed(2)}pp`);
         results.ok.push("curva de juros (FRED)");
         logDone(line, true, `${spread>=0?"+":""}${spread.toFixed(2)}pp`);
       }catch(e){ setFailed("macro","curva"); results.fail.push("curva de juros (FRED)"); logDone(line, false, e.message); }
@@ -2012,7 +2012,7 @@ async function refreshMarketData(){
         const obs = await fetchFredSeries("DCOILWTICO", S.apiKeys.fred, 95);
         const latest = obs[0].value, past = obs[obs.length-1].value;
         const pct = past ? ((latest-past)/past)*100 : 0;
-        setAuto("ativosGlobais","petroleo", clamp(-pct*3, -100, 100), `$${latest.toFixed(0)}/barril (${pct>=0?"+":""}${pct.toFixed(1)}% em ~90d)`);
+        setAuto("ativosGlobais","petroleo", escalaSuave(-pct, 33), `$${latest.toFixed(0)}/barril (${pct>=0?"+":""}${pct.toFixed(1)}% em ~90d)`);
         results.ok.push("petroleo (FRED)");
         logDone(line, true, `$${latest.toFixed(0)}`);
       }catch(e){ setFailed("ativosGlobais","petroleo"); results.fail.push("petroleo (FRED)"); logDone(line, false, e.message); }
@@ -2025,7 +2025,7 @@ async function refreshMarketData(){
         const obs = await fetchFredSeries("DEXUSEU", S.apiKeys.fred, 95);
         const latest = obs[0].value, past = obs[obs.length-1].value;
         const pct = past ? ((latest-past)/past)*100 : 0;
-        setAuto("ativosGlobais","euro", clamp(pct*8, -100, 100), `€/US$ ${latest.toFixed(3)} (${pct>=0?"+":""}${pct.toFixed(1)}% em ~90d)`);
+        setAuto("ativosGlobais","euro", escalaSuave(pct, 12.5), `€/US$ ${latest.toFixed(3)} (${pct>=0?"+":""}${pct.toFixed(1)}% em ~90d)`);
         results.ok.push("euro (FRED)");
         logDone(line, true, latest.toFixed(3));
       }catch(e){ setFailed("ativosGlobais","euro"); results.fail.push("euro (FRED)"); logDone(line, false, e.message); }
@@ -2038,7 +2038,7 @@ async function refreshMarketData(){
         const obs = await fetchFredSeries("SP500", S.apiKeys.fred, 95);
         const latest = obs[0].value, past = obs[obs.length-1].value;
         const pct = past ? ((latest-past)/past)*100 : 0;
-        setAuto("ativosGlobais","sp500", clamp(pct*6, -100, 100), `${latest.toFixed(0)} pts (${pct>=0?"+":""}${pct.toFixed(1)}% em ~90d)`);
+        setAuto("ativosGlobais","sp500", escalaSuave(pct, 16.7), `${latest.toFixed(0)} pts (${pct>=0?"+":""}${pct.toFixed(1)}% em ~90d)`);
         results.ok.push("sp500 (FRED)");
         logDone(line, true, latest.toFixed(0));
       }catch(e){ setFailed("ativosGlobais","sp500"); results.fail.push("sp500 (FRED)"); logDone(line, false, e.message); }
@@ -2051,7 +2051,7 @@ async function refreshMarketData(){
         const obs = await fetchFredSeries("PCOPPUSDM", S.apiKeys.fred, 6);
         const latest = obs[0].value, past = obs[Math.min(3, obs.length-1)].value;
         const pct = past ? ((latest-past)/past)*100 : 0;
-        setAuto("ativosGlobais","cobre", clamp(pct*10, -100, 100), `$${latest.toFixed(0)}/ton (${pct>=0?"+":""}${pct.toFixed(1)}% em ~3 meses) — demanda industrial em alta = bullish`);
+        setAuto("ativosGlobais","cobre", escalaSuave(pct, 10), `$${latest.toFixed(0)}/ton (${pct>=0?"+":""}${pct.toFixed(1)}% em ~3 meses) — demanda industrial em alta = bullish`);
         results.ok.push("cobre (FRED)");
         logDone(line, true, `$${latest.toFixed(0)}`);
       }catch(e){ setFailed("ativosGlobais","cobre"); results.fail.push("cobre (FRED)"); logDone(line, false, e.message); }
@@ -2063,7 +2063,7 @@ async function refreshMarketData(){
         // complacência (bullish), acima é medo crescente (bearish)
         const obs = await fetchFredSeries("VIXCLS", S.apiKeys.fred, 5);
         const latest = obs[0].value;
-        setAuto("ativosGlobais","vix", clamp(-(latest-18)*4, -100, 100), `VIX ${latest.toFixed(1)}`);
+        setAuto("ativosGlobais","vix", escalaSuave(-(latest-18), 25), `VIX ${latest.toFixed(1)}`);
         results.ok.push("vix (FRED)");
         logDone(line, true, latest.toFixed(1));
       }catch(e){ setFailed("ativosGlobais","vix"); results.fail.push("vix (FRED)"); logDone(line, false, e.message); }
@@ -2075,7 +2075,7 @@ async function refreshMarketData(){
         // de risco, mesma lógica já usada pro Fed Funds Rate (DFF)
         const obs = await fetchFredSeries("DGS10", S.apiKeys.fred, 95);
         const latest = obs[0].value, past = obs[obs.length-1].value;
-        setAuto("ativosGlobais","juros10a", clamp(-(latest-past)*40, -100, 100), `${latest.toFixed(2)}% (${(latest-past)>=0?"+":""}${(latest-past).toFixed(2)}pp em ~90d)`);
+        setAuto("ativosGlobais","juros10a", escalaSuave(-(latest-past), 2.5), `${latest.toFixed(2)}% (${(latest-past)>=0?"+":""}${(latest-past).toFixed(2)}pp em ~90d)`);
         results.ok.push("treasury10a (FRED)");
         logDone(line, true, latest.toFixed(2)+"%");
       }catch(e){ setFailed("ativosGlobais","juros10a"); results.fail.push("treasury10a (FRED)"); logDone(line, false, e.message); }
@@ -2505,7 +2505,10 @@ async function refreshMarketData(){
   // v61 — grava a foto imutável desta leitura. Fire and forget: se falhar,
   // avisa no console e a rodada segue normalmente.
   gravarSnapshot(results).then(function(snap){
-    if(snap && typeof renderPainelSerie === "function") renderPainelSerie();
+    if(!snap) return;
+    return preencherRetornos(snap.preco, snap.ts).then(function(){
+      if(typeof renderPainelSerie === "function") renderPainelSerie();
+    });
   });
   if(typeof renderProxyChaveAviso === "function") renderProxyChaveAviso(); // atualiza o aviso se o proxy foi usado com chave nesta rodada
 
@@ -2816,7 +2819,11 @@ function coberturaAuto(){
   Object.entries(S.motors).forEach(function(par){
     const mk = par[0], motor = par[1];
     Object.keys(motor.indicators).forEach(function(ik){
-      if(motor.indicators[ik].source !== "auto") return;
+      const ind = motor.indicators[ik];
+      if(ind.source !== "auto") return;
+      // NUPL é derivado do MVRV por identidade e nunca pontua — contá-lo como
+      // fonte que deveria ter respondido fazia a coleta parecer pior do que é
+      if(ind.excludeFromScore || ik === "nupl") return;
       total += motor.weight;
       if(valorVigente(mk, ik) !== null) vivos += motor.weight;
     });
@@ -3103,10 +3110,65 @@ function relatorioTexto(snap, snaps){
   return L.join("\n");
 }
 
+/* RETORNO FUTURO (v64) — o snapshot guardava o que o sistema VIU, mas não o
+   que ACONTECEU. Sem isso a série registra leituras órfãs: para saber se a de
+   ontem acertou seria preciso cruzar preço na mão, que é justamente o trabalho
+   manual que a série existe para eliminar.
+
+   A cada rodada, voltamos nos snapshots antigos e preenchemos o retorno de 1,
+   3 e 30 dias com o preço de agora — quando o tempo já passou de verdade. Isso
+   não é look-ahead: no instante da gravação o futuro não existia, e o
+   preenchimento só acontece depois que ele chega.
+
+   Três horizontes porque 30 dias em leituras diárias produz janelas quase
+   totalmente sobrepostas (N efetivo ridículo). Em 1 dia cada leitura é
+   praticamente independente — é o horizonte que dá evidência em semanas em vez
+   de anos, se é que há evidência. */
+async function preencherRetornos(precoAtual, agoraISO){
+  if(!precoAtual) return 0;
+  try{
+    const snaps = await lerSnapshots();
+    if(snaps.length < 2) return 0;
+    const agora = new Date(agoraISO || new Date().toISOString()).getTime();
+    const pendentes = [];
+
+    snaps.forEach(function(s){
+      if(!s.preco) return;
+      const idade = (agora - new Date(s.ts).getTime()) / (24*3600*1000);
+      s.retornos = s.retornos || {};
+      [1,3,30].forEach(function(h){
+        const chave = "d" + h;
+        if(s.retornos[chave] !== undefined && s.retornos[chave] !== null) return;
+        // tolerância de meio dia para os lados: a leitura diária não cai no
+        // mesmo segundo todo dia, e exigir precisão exata deixaria buracos
+        if(idade >= h - 0.5 && idade <= h + 0.5){
+          s.retornos[chave] = ((precoAtual - s.preco)/s.preco)*100;
+          if(pendentes.indexOf(s) === -1) pendentes.push(s);
+        }
+      });
+    });
+
+    if(!pendentes.length) return 0;
+    const db = await openSnapDB();
+    await new Promise(function(resolve, reject){
+      const tx = db.transaction(SNAP_STORE, "readwrite");
+      const store = tx.objectStore(SNAP_STORE);
+      pendentes.forEach(function(s){ store.put(s); });
+      tx.oncomplete = resolve;
+      tx.onerror = function(){ reject(tx.error); };
+    });
+    db.close();
+    return pendentes.length;
+  }catch(e){
+    console.warn("Não consegui preencher retornos:", e);
+    return 0;
+  }
+}
+
 function snapshotsParaCSV(snaps){
   const motores = Object.keys(S.motors);
   const cab = ["ts","build","preco","score","rotulo","acao","cobertura","coberturaAuto",
-    "concentracao","travadoPor","hCurto","hMedio","hLongo"]
+    "concentracao","travadoPor","hCurto","hMedio","hLongo","ret1d","ret3d","ret30d"]
     .concat(motores.map(function(m){ return "motor_" + m; }))
     .concat(motores.map(function(m){ return "peso_" + m; }))
     .concat(["falhas"]);
@@ -3119,7 +3181,8 @@ function snapshotsParaCSV(snaps){
   snaps.forEach(function(s){
     const l = [s.ts, s.build, s.preco, s.score, s.rotulo, s.acao, s.cobertura, s.coberturaAuto,
       s.concentracao, s.travadoPor,
-      s.horizontes && s.horizontes.curto, s.horizontes && s.horizontes.medio, s.horizontes && s.horizontes.longo]
+      s.horizontes && s.horizontes.curto, s.horizontes && s.horizontes.medio, s.horizontes && s.horizontes.longo,
+      s.retornos && s.retornos.d1, s.retornos && s.retornos.d3, s.retornos && s.retornos.d30]
       .concat(motores.map(function(m){ return s.composites ? s.composites[m] : null; }))
       .concat(motores.map(function(m){ return s.pesosEfetivos ? s.pesosEfetivos[m] : null; }))
       .concat([(s.falhas || []).join(" | ")]);
@@ -6817,6 +6880,19 @@ document.addEventListener("click", (e)=>{
 
   function log(t){ if(saida) saida.textContent = t; }
   function addLog(t){ if(saida) saida.textContent += "\n" + t; }
+  // mesmo vocabulário do log da leitura diária: ✓ com o valor, × com o motivo.
+  // Sem isso, o Macro veio com Nef 0 e só descobrimos a causa (duas séries FRED
+  // caídas) depois, lendo a tabela final — a falha tem que aparecer na hora.
+  function passo(nome){ addLog("› " + nome + "…"); }
+  function passoOk(nome, detalhe){
+    saida.textContent = saida.textContent.replace(new RegExp("› " + nome.replace(/[.*+?^${}()|[\]\\]/g,"\\$&") + "…$"),
+      "› " + nome + " ✓ " + (detalhe||"feito"));
+  }
+  function passoFalhou(nome, erro){
+    saida.textContent = saida.textContent.replace(new RegExp("› " + nome.replace(/[.*+?^${}()|[\]\\]/g,"\\$&") + "…$"),
+      "› " + nome + " × falhou — " + erro);
+  }
+  const respiro = function(ms){ return new Promise(function(r){ setTimeout(r, ms); }); };
 
   /* ---------- séries ---------- */
 
@@ -6970,23 +7046,28 @@ document.addEventListener("click", (e)=>{
     const faltando = [];
 
     try{
-      log("Buscando preço diário (Binance, ~5 anos)…");
+      log("LABORATÓRIO — buscando séries históricas\n");
+
+      passo("preço diário BTC (Binance, ~5 anos)");
       const precoMap = await klinesDiarios("BTCUSDT", DIAS);
       const datas = Object.keys(precoMap).sort();
-      if(datas.length < 400) throw new Error("preço histórico insuficiente");
-      addLog("preço: " + datas.length + " dias (" + datas[0] + " → " + datas[datas.length-1] + ")");
+      if(datas.length < 400){ passoFalhou("preço diário BTC (Binance, ~5 anos)", "histórico insuficiente"); throw new Error("preço histórico insuficiente"); }
+      passoOk("preço diário BTC (Binance, ~5 anos)", datas.length + " dias (" + datas[0] + " → " + datas[datas.length-1] + ")");
 
       let fng = {};
-      try{ fng = await fngHistorico(); addLog("Fear & Greed: " + Object.keys(fng).length + " dias"); }
-      catch(e){ faltando.push("Fear & Greed"); }
+      passo("Fear & Greed (Alternative.me)");
+      try{ fng = await fngHistorico(); passoOk("Fear & Greed (Alternative.me)", Object.keys(fng).length + " dias"); }
+      catch(e){ passoFalhou("Fear & Greed (Alternative.me)", e.message); faltando.push("Fear & Greed"); }
 
       let cm = { mvrv:{}, addr:{} };
-      try{ cm = await coinMetricsHistorico(); addLog("CoinMetrics MVRV: " + Object.keys(cm.mvrv).length + " dias"); }
-      catch(e){ faltando.push("MVRV / endereços ativos"); }
+      passo("MVRV + endereços ativos (CoinMetrics)");
+      try{ cm = await coinMetricsHistorico(); passoOk("MVRV + endereços ativos (CoinMetrics)", Object.keys(cm.mvrv).length + " dias"); }
+      catch(e){ passoFalhou("MVRV + endereços ativos (CoinMetrics)", e.message); faltando.push("MVRV / endereços ativos"); }
 
       let ouro = {};
-      try{ ouro = await klinesDiarios("PAXGUSDT", DIAS); addLog("ouro (PAXG): " + Object.keys(ouro).length + " dias"); }
-      catch(e){ faltando.push("ouro"); }
+      passo("ouro — PAXG/USDT (Binance)");
+      try{ ouro = await klinesDiarios("PAXGUSDT", DIAS); passoOk("ouro — PAXG/USDT (Binance)", Object.keys(ouro).length + " dias"); }
+      catch(e){ passoFalhou("ouro — PAXG/USDT (Binance)", e.message); faltando.push("ouro"); }
 
       // FRED só entra com chave — e carrega look-ahead
       const fredKey = (S.apiKeys && S.apiKeys.fred) || "";
@@ -6996,15 +7077,30 @@ document.addEventListener("click", (e)=>{
         const inicio = datas[0];
         const series = { juros:"DFF", dxy:"DTWEXBGS", curva:"T10Y2Y", sp500:"SP500", petroleo:"DCOILWTICO" };
         for(const nome in series){
-          try{ macro[nome] = await fredHistorico(series[nome], fredKey, inicio); }
-          catch(e){ faltando.push("FRED " + series[nome]); }
+          const rotulo = "FRED " + series[nome];
+          passo(rotulo);
+          let feito = false;
+          // duas séries falharam na primeira rodada do laboratório e o bloco
+          // Macro virou constante. Causa provável: rajada de chamadas seguidas
+          // ao FRED. Pausa entre elas + uma segunda tentativa.
+          for(let tent=0; tent<2 && !feito; tent++){
+            try{
+              macro[nome] = await fredHistorico(series[nome], fredKey, inicio);
+              passoOk(rotulo, Object.keys(macro[nome]).length + " obs");
+              feito = true;
+            }catch(e){
+              if(tent === 1){ passoFalhou(rotulo, e.message); faltando.push(rotulo); }
+              else await respiro(1500);
+            }
+          }
+          await respiro(600);
         }
-        addLog("FRED: " + Object.keys(macro).length + " série(s) — atenção: valores REVISADOS");
       } else {
+        addLog("› FRED × pulado — sem chave configurada");
         faltando.push("todo o bloco Macro e Ativos Globais (sem chave FRED)");
       }
 
-      addLog("\nMontando a tabela diária…");
+      addLog("\n› montando a tabela diária e avaliando os blocos…");
 
       const closes = datas.map(function(d){ return precoMap[d]; });
       const rsi = rsiDe(closes, 14);
@@ -7134,6 +7230,15 @@ document.addEventListener("click", (e)=>{
       'Serve para levantar hipóteses e descartar peso morto — <b>não altera score, peso nem veredito</b>. ' +
       'O que vale é a linha de VALIDAÇÃO, e mesmo ela deve ser confirmada pela série diária antes de virar decisão.</div>';
 
+    const fechar = document.createElement("button");
+    fechar.textContent = "×";
+    fechar.title = "fechar";
+    fechar.style.cssText = "position:absolute;top:10px;right:10px;width:34px;height:34px;" +
+      "background:transparent;color:#b9f;border:1px solid #63c;border-radius:4px;" +
+      "font-family:inherit;font-size:16px;line-height:1;";
+    fechar.onclick = function(){ caixa.style.display = "none"; };
+    caixa.appendChild(fechar);
+
     botao = document.createElement("button");
     botao.textContent = "🧪 APRENDER COM O PASSADO";
     botao.style.cssText = "display:block;width:100%;margin:6px 0;padding:14px;text-align:left;" +
@@ -7141,6 +7246,25 @@ document.addEventListener("click", (e)=>{
       "font-family:inherit;font-size:13px;letter-spacing:.04em;";
     botao.onclick = rodar;
     caixa.appendChild(botao);
+
+    const bcopiar = document.createElement("button");
+    bcopiar.textContent = "⧉ COPIAR O RESULTADO";
+    bcopiar.style.cssText = "display:block;width:100%;margin:6px 0;padding:12px;text-align:left;" +
+      "background:rgba(20,8,40,.4);color:#a8e;border:1px solid #52a;border-radius:4px;" +
+      "font-family:inherit;font-size:12px;letter-spacing:.04em;";
+    bcopiar.onclick = async function(){
+      const t = saida.textContent || "";
+      try{ await navigator.clipboard.writeText(t); bcopiar.textContent = "✓ COPIADO"; 
+        setTimeout(function(){ bcopiar.textContent = "⧉ COPIAR O RESULTADO"; }, 2500);
+      }catch(e){
+        const ta = document.createElement("textarea");
+        ta.value = t;
+        ta.style.cssText = "width:100%;height:200px;margin-top:8px;background:#100820;color:#b9f;" +
+          "border:1px solid #52a;font-family:inherit;font-size:10px;padding:8px;";
+        caixa.appendChild(ta); ta.focus(); ta.select();
+      }
+    };
+    caixa.appendChild(bcopiar);
 
     saida = document.createElement("pre");
     saida.style.cssText = "white-space:pre-wrap;margin:12px 0 0;font-size:11px;line-height:1.5;" +

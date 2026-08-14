@@ -959,7 +959,7 @@ const STORAGE_KEY = "seios_btc_v2";
 // fonte única da versão — usada no rodapé, no histórico e nos exports.
 // Muda toda vez que a fórmula de score/pesos muda, pra nunca misturar
 // decisões de regras diferentes como se fossem comparáveis.
-const BUILD_VERSION = "2026-08-13.60.1-trava-corrigida";
+const BUILD_VERSION = "2026-08-13.61-serie-diaria";
 
 // indicador padrão — auto = tenta buscar sozinho; manual = você preenche
 function ind(label, source, note){
@@ -2502,6 +2502,11 @@ async function refreshMarketData(){
   renderAll();
 
   logFinal(`concluído — ${results.ok.length} ok, ${results.fail.length} falharam`);
+  // v61 — grava a foto imutável desta leitura. Fire and forget: se falhar,
+  // avisa no console e a rodada segue normalmente.
+  gravarSnapshot(results).then(function(snap){
+    if(snap && typeof renderPainelSerie === "function") renderPainelSerie();
+  });
   if(typeof renderProxyChaveAviso === "function") renderProxyChaveAviso(); // atualiza o aviso se o proxy foi usado com chave nesta rodada
 
   if(results.ok.length === 0 && results.fail.length > 0){
@@ -2861,6 +2866,188 @@ function motivoSemLeitura(ms){
     return `${motorDominante()} está com ${(conc*100).toFixed(0)}% do peso efetivo (teto ${(CONCENTRACAO_MAXIMA*100).toFixed(0)}%). Com motores mudos, o score vira quase um motor só.`;
   }
   return null;
+}
+
+
+/* =====================================================================
+   § SNAPSHOT POINT-IN-TIME (v61) — a série que ainda não existia
+   =====================================================================
+   O backtest de hoje reconstrói o passado com o dado de HOJE: pega a série
+   revisada do FRED, recalcula o que o sistema "teria dito", e mede acerto
+   contra isso. O próprio painel confessa o problema no aviso do SP500 — valor
+   revisado entrando como se fosse a divulgação inicial. Reconstrução nunca
+   fica totalmente livre de look-ahead, por mais cuidado que se tenha.
+
+   A única forma de escapar disso é gravar, no instante da leitura, exatamente
+   o que o sistema viu — com o valor que a fonte deu naquele momento, com as
+   falhas que houve, com a cobertura que havia. Nada disso é recuperável depois.
+
+   Cada rodada grava um registro imutável. Em ~12 meses de leitura diária isso
+   vira ~365 observações genuinamente point-in-time, e aí walk-forward deixa de
+   ser aspiração. A barra para detectar 55% de acerto é ~777 observações
+   independentes: cada dia sem gravar é um dia que não volta.
+
+   Grava também o que costuma sumir: nota textual de cada indicador, quais
+   fontes falharam, e o motivo da trava quando houve. Um score sem o contexto
+   que o produziu não permite auditar nada seis meses depois.
+   ===================================================================== */
+const SNAP_DB = "seios_snapshots_v1";
+const SNAP_STORE = "snaps";
+
+function openSnapDB(){
+  return new Promise(function(resolve, reject){
+    if(!window.indexedDB){ reject(new Error("IndexedDB indisponível")); return; }
+    const req = indexedDB.open(SNAP_DB, 1);
+    req.onupgradeneeded = function(e){
+      const db = e.target.result;
+      if(!db.objectStoreNames.contains(SNAP_STORE)) db.createObjectStore(SNAP_STORE, { keyPath: "ts" });
+    };
+    req.onsuccess = function(e){ resolve(e.target.result); };
+    req.onerror = function(e){ reject(e.target.error); };
+  });
+}
+
+// monta o vetor completo da leitura atual
+function montarSnapshot(results){
+  const ms = computeMarketState();
+  const hs = computeHorizonScores();
+  const pesos = pesosEfetivos();
+
+  const indicadores = {};
+  Object.entries(S.motors).forEach(function(par){
+    const mk = par[0], motor = par[1];
+    Object.keys(motor.indicators).forEach(function(ik){
+      const ind = motor.indicators[ik];
+      const vig = valorVigente(mk, ik);
+      indicadores[mk + "." + ik] = {
+        valor: ind.value === undefined ? null : ind.value,
+        vigente: vig,                      // null = expirado ou ausente
+        origem: ind.source,
+        nota: ind.note || "",
+        falhou: !!ind.fetchFailed,
+        saturado: !!ind.saturado,
+        em: ind.updatedAt || null
+      };
+    });
+  });
+
+  const composites = {};
+  Object.keys(ms.composites).forEach(function(k){ composites[k] = ms.composites[k]; });
+
+  const efetivos = {};
+  Object.keys(pesos).forEach(function(k){
+    if(k.charAt(0) === "_") return;
+    efetivos[k] = pesos[k].efetivo;
+  });
+
+  let acao = null;
+  try{ acao = computeDecision().action; }catch(e){}
+
+  return {
+    ts: new Date().toISOString(),
+    build: BUILD_VERSION,
+    preco: S.market.price === undefined ? null : S.market.price,
+    variacao24h: S.market.change24h === undefined ? null : S.market.change24h,
+    score: ms.score,
+    rotulo: ms.label,
+    acao: acao,
+    divergencia: ms.divergence,
+    cobertura: ms.cobertura,
+    coberturaAuto: coberturaAuto(),
+    concentracao: concentracaoMaxima(),
+    travadoPor: motivoSemLeitura(ms),      // null quando a leitura vale
+    horizontes: {
+      curto: hs && hs.curto ? hs.curto.score : null,
+      medio: hs && hs.medio ? hs.medio.score : null,
+      longo: hs && hs.longo ? hs.longo.score : null
+    },
+    composites: composites,
+    pesosEfetivos: efetivos,
+    indicadores: indicadores,
+    falhas: results && results.fail ? results.fail.slice() : [],
+    ok: results && results.ok ? results.ok.length : null
+  };
+}
+
+// nunca lança para fora: um snapshot perdido não pode derrubar a rodada
+async function gravarSnapshot(results){
+  try{
+    const snap = montarSnapshot(results);
+    const db = await openSnapDB();
+    await new Promise(function(resolve, reject){
+      const tx = db.transaction(SNAP_STORE, "readwrite");
+      tx.objectStore(SNAP_STORE).put(snap);
+      tx.oncomplete = resolve;
+      tx.onerror = function(){ reject(tx.error); };
+    });
+    db.close();
+    return snap;
+  }catch(e){
+    console.warn("Snapshot não gravado:", e);
+    return null;
+  }
+}
+
+async function lerSnapshots(){
+  try{
+    const db = await openSnapDB();
+    const todos = await new Promise(function(resolve, reject){
+      const tx = db.transaction(SNAP_STORE, "readonly");
+      const req = tx.objectStore(SNAP_STORE).getAll();
+      req.onsuccess = function(){ resolve(req.result || []); };
+      req.onerror = function(){ reject(req.error); };
+    });
+    db.close();
+    return todos.sort(function(a,b){ return a.ts < b.ts ? -1 : 1; });
+  }catch(e){ return []; }
+}
+
+/* DETECTOR DE FEED CONGELADO — a falha que não acende luz nenhuma: a fonte
+   responde 200, com payload válido, com o mesmo número de ontem e de anteontem.
+   Nada falha, nada é marcado, e o indicador continua votando com peso cheio
+   enquanto está morto. Só a série revela: valor idêntico N leituras seguidas
+   em algo que deveria oscilar. */
+function indicadoresCongelados(snaps, minRepeticoes){
+  const min = minRepeticoes || 3;
+  if(snaps.length < min) return [];
+  const ultimos = snaps.slice(-min);
+  const chaves = Object.keys(ultimos[ultimos.length-1].indicadores || {});
+  const out = [];
+  chaves.forEach(function(k){
+    const vals = ultimos.map(function(s){
+      const i = s.indicadores && s.indicadores[k];
+      return i ? i.valor : undefined;
+    });
+    if(vals.some(function(v){ return v === undefined || v === null; })) return;
+    const primeiro = vals[0];
+    if(vals.every(function(v){ return v === primeiro; })) out.push({ chave: k, valor: primeiro, leituras: min });
+  });
+  return out;
+}
+
+function snapshotsParaCSV(snaps){
+  const motores = Object.keys(S.motors);
+  const cab = ["ts","build","preco","score","rotulo","acao","cobertura","coberturaAuto",
+    "concentracao","travadoPor","hCurto","hMedio","hLongo"]
+    .concat(motores.map(function(m){ return "motor_" + m; }))
+    .concat(motores.map(function(m){ return "peso_" + m; }))
+    .concat(["falhas"]);
+  const linhas = [cab.join(",")];
+  const esc = function(v){
+    if(v === null || v === undefined) return "";
+    const t = String(v).replace(/"/g, '""');
+    return /[",\n]/.test(t) ? '"' + t + '"' : t;
+  };
+  snaps.forEach(function(s){
+    const l = [s.ts, s.build, s.preco, s.score, s.rotulo, s.acao, s.cobertura, s.coberturaAuto,
+      s.concentracao, s.travadoPor,
+      s.horizontes && s.horizontes.curto, s.horizontes && s.horizontes.medio, s.horizontes && s.horizontes.longo]
+      .concat(motores.map(function(m){ return s.composites ? s.composites[m] : null; }))
+      .concat(motores.map(function(m){ return s.pesosEfetivos ? s.pesosEfetivos[m] : null; }))
+      .concat([(s.falhas || []).join(" | ")]);
+    linhas.push(l.map(esc).join(","));
+  });
+  return linhas.join("\n");
 }
 
 function computeCobertura(){
@@ -6391,6 +6578,93 @@ document.addEventListener("click", (e)=>{
 
   if(document.readyState === "loading") document.addEventListener("DOMContentLoaded", montarPainel);
   else montarPainel();
+})();
+
+/* =====================================================================
+   § PAINEL DA SÉRIE (v61) — o que já foi gravado, e o que a série revela
+   ===================================================================== */
+(function(){
+  let caixa, corpo;
+
+  function montar(){
+    caixa = document.createElement("div");
+    caixa.className = "wrap";
+    caixa.style.cssText = "position:relative;z-index:2;margin:20px auto 40px;padding:16px;" +
+      "border:1px solid var(--line-soft,#2f7);border-radius:6px;background:#050B07;" +
+      "font-family:var(--font-mono,ui-monospace,Menlo,monospace);";
+    caixa.innerHTML =
+      '<div style="font-size:11px;letter-spacing:.14em;color:var(--text-faint,#6a6);margin-bottom:4px">' +
+      '§ SÉRIE POINT-IN-TIME</div>' +
+      '<div style="font-size:16px;color:var(--text,#cfc);margin-bottom:10px">O que o sistema viu, dia a dia</div>' +
+      '<div style="font-size:12px;color:var(--text-dim,#8a8);line-height:1.5;margin-bottom:12px">' +
+      'Cada atualização grava uma foto imutável desta leitura — com o valor que a fonte deu no momento, ' +
+      'as falhas que houve e a cobertura que havia. É a série que o backtest reconstruído não consegue produzir.</div>';
+
+    const b = document.createElement("button");
+    b.textContent = "⇩ EXPORTAR A SÉRIE (.CSV)";
+    b.style.cssText = "display:block;width:100%;margin:6px 0;padding:14px;text-align:left;" +
+      "background:rgba(4,32,14,.8);color:var(--accent,#7f7);border:1px solid var(--line-soft,#2f7);" +
+      "border-radius:4px;font-family:inherit;font-size:13px;letter-spacing:.04em;";
+    b.onclick = exportar;
+    caixa.appendChild(b);
+
+    corpo = document.createElement("pre");
+    corpo.style.cssText = "white-space:pre-wrap;margin:12px 0 0;font-size:12px;line-height:1.5;" +
+      "color:var(--text-dim,#8a8);font-family:inherit;";
+    caixa.appendChild(corpo);
+
+    const camada = document.querySelector('body > div[style*="z-index:1"]') || document.body;
+    camada.appendChild(caixa);
+    atualizar();
+  }
+
+  async function atualizar(){
+    const snaps = await lerSnapshots();
+    if(!snaps.length){
+      corpo.textContent = "Nenhuma leitura gravada ainda. A próxima atualização de dados inicia a série.";
+      return;
+    }
+    const primeiro = new Date(snaps[0].ts), ultimo = new Date(snaps[snaps.length-1].ts);
+    const dias = new Set(snaps.map(function(s){ return s.ts.slice(0,10); })).size;
+
+    let txt = snaps.length + " leitura(s) gravada(s) · " + dias + " dia(s) distinto(s)\n" +
+      "primeira: " + primeiro.toLocaleString("pt-BR") + "\n" +
+      "última:   " + ultimo.toLocaleString("pt-BR") + "\n";
+
+    // a barra estatística, sem maquiar
+    const meta = 777;
+    const pct = Math.min(100, (dias / meta) * 100);
+    txt += "\nrumo às ~" + meta + " observações independentes: " + pct.toFixed(1) + "%\n";
+    if(dias < 30) txt += "(cedo demais para qualquer conclusão — isto é coleta, não evidência)\n";
+
+    const congelados = indicadoresCongelados(snaps, 3);
+    if(congelados.length){
+      txt += "\n⚠ sem variação nas últimas 3 leituras:\n";
+      congelados.forEach(function(c){ txt += "  " + c.chave + " = " + c.valor + "\n"; });
+      txt += "(pode ser normal em série lenta como CPI ou M2 — vale olhar se for algo que deveria oscilar)\n";
+    }
+
+    const ultimoSnap = snaps[snaps.length - 1];
+    if(ultimoSnap.travadoPor) txt += "\núltima leitura travada: " + ultimoSnap.travadoPor + "\n";
+
+    corpo.textContent = txt;
+  }
+
+  async function exportar(){
+    const snaps = await lerSnapshots();
+    if(!snaps.length){ corpo.textContent = "Nada gravado ainda para exportar."; return; }
+    const csv = snapshotsParaCSV(snaps);
+    const blob = new Blob([csv], { type: "text/csv;charset=utf-8" });
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(blob);
+    a.download = "seios-serie-" + new Date().toISOString().slice(0,10) + ".csv";
+    document.body.appendChild(a); a.click(); a.remove();
+  }
+
+  window.renderPainelSerie = atualizar;
+
+  if(document.readyState === "loading") document.addEventListener("DOMContentLoaded", montar);
+  else montar();
 })();
 
 })();

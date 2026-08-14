@@ -962,7 +962,7 @@ const STORAGE_KEY = "seios_btc_v2";
 // fonte única da versão — usada no rodapé, no histórico e nos exports.
 // Muda toda vez que a fórmula de score/pesos muda, pra nunca misturar
 // decisões de regras diferentes como se fossem comparáveis.
-const BUILD_VERSION = "2026-08-14.69.1-salvar";
+const BUILD_VERSION = "2026-08-14.69.2-idb";
 
 // indicador padrão — auto = tenta buscar sozinho; manual = você preenche
 function ind(label, source, note, excludeFromScore){
@@ -6624,6 +6624,13 @@ document.addEventListener("click", (e)=>{
   let modo = null, buffer = {}, congelado = null, faltando = [], estadoVivo = null;
 
   /* ---- guarda em IndexedDB (payload de 25+ chamadas não cabe no localStorage) ---- */
+  /* v69.2 — a versão anterior abria uma conexão NOVA a cada operação e não
+     fechava nenhuma: montar o painel abria uma, cada leitura abria outra, o
+     salvar abria mais uma. O Safari do iPad engasga com conexões acumuladas —
+     e quando engasga, a transação não resolve nem falha: fica pendurada para
+     sempre. Foi exatamente o "SALVANDO…" eterno.
+     Agora: uma conexão por operação, fechada sempre, e um prazo — porque uma
+     promessa que nunca resolve é pior que um erro. */
   function abrirDB(cb, onErro){
     let req;
     try{ req = indexedDB.open("seios_fixture", 1); }
@@ -6631,6 +6638,7 @@ document.addEventListener("click", (e)=>{
     req.onupgradeneeded = e => e.target.result.createObjectStore("fx");
     req.onsuccess = e => cb(e.target.result);
     req.onerror = () => (onErro || escrever)("Não consegui abrir o armazenamento local.");
+    req.onblocked = () => (onErro || escrever)("O armazenamento está bloqueado por outra aba do SEIOS. Feche as outras e tente de novo.");
   }
   /* v69.1 — a versão anterior só reagia ao SUCESSO: se a transação falhasse ou
      abortasse, oncomplete nunca disparava, o callback nunca era chamado e a
@@ -6641,31 +6649,46 @@ document.addEventListener("click", (e)=>{
      ou de transação virava silêncio absoluto.
      Agora todo caminho fala: sucesso, erro, aborto e exceção síncrona. */
   function guardarFixture(obj, cb, onErro){
+    let resolvido = false;
     const falhou = function(motivo){
+      if(resolvido) return; resolvido = true;
       if(typeof onErro === "function") onErro(motivo);
       else escrever("Não consegui salvar: " + motivo);
     };
+    const ok = function(){ if(resolvido) return; resolvido = true; (cb || function(){})(); };
+
+    // prazo: se em 20s a transação não deu sinal, ela não vai dar
+    const prazo = setTimeout(function(){
+      falhou("o armazenamento não respondeu em 20s.\n\n" +
+             "Costuma ser o Safari travando com muita coisa guardada. Tente: fechar\n" +
+             "outras abas do SEIOS, ou reabrir o app e repetir o congelamento.");
+    }, 20000);
+
     abrirDB(function(d){
       let t;
       try{
         t = d.transaction("fx","readwrite");
         t.objectStore("fx").put(obj, "atual");
       }catch(e){
-        falhou(e.message + "\n\n(a foto pode ter ficado grande demais para o " +
-               "armazenamento deste navegador)");
+        clearTimeout(prazo); try{ d.close(); }catch(_){}
+        falhou(e.message + "\n\n(a foto pode ter ficado grande demais)");
         return;
       }
-      t.oncomplete = function(){ (cb || function(){})(); };
-      t.onerror    = function(){ falhou((t.error && t.error.message) || "erro na transação"); };
-      t.onabort    = function(){ falhou((t.error && t.error.message) || "transação abortada — provável falta de espaço"); };
-    }, falhou);
+      t.oncomplete = function(){ clearTimeout(prazo); try{ d.close(); }catch(_){} ok(); };
+      t.onerror    = function(){ clearTimeout(prazo); try{ d.close(); }catch(_){}
+                                 falhou((t.error && t.error.message) || "erro na transação"); };
+      t.onabort    = function(){ clearTimeout(prazo); try{ d.close(); }catch(_){}
+                                 falhou((t.error && t.error.message) || "transação abortada — provável falta de espaço"); };
+    }, function(m){ clearTimeout(prazo); falhou(m); });
   }
   function lerFixture(cb){
-    abrirDB(d => {
-      const r = d.transaction("fx","readonly").objectStore("fx").get("atual");
-      r.onsuccess = () => cb(r.result || null);
-      r.onerror = () => cb(null);
-    });
+    abrirDB(function(d){
+      let r;
+      try{ r = d.transaction("fx","readonly").objectStore("fx").get("atual"); }
+      catch(e){ try{ d.close(); }catch(_){} cb(null); return; }
+      r.onsuccess = function(){ const v = r.result || null; try{ d.close(); }catch(_){} cb(v); };
+      r.onerror   = function(){ try{ d.close(); }catch(_){} cb(null); };
+    }, function(){ cb(null); });
   }
 
   /* ---- chave da chamada: tira cache-busting, senão o replay nunca casa ---- */
@@ -6854,7 +6877,16 @@ document.addEventListener("click", (e)=>{
     // feedback ANTES de tocar no banco: gravar é assíncrono e pode demorar,
     // e sem isto o toque parece não ter sido registrado
     botoes[1].textContent = "⏳ SALVANDO…";
-    escrever("Salvando " + capturadas + " chamadas + estado dos indicadores…");
+    // saber o tamanho antes ajuda a interpretar uma eventual falha: o Safari do
+    // iPad fica instável com objetos muito grandes num único registro
+    let mb = 0;
+    try{
+      mb = Object.keys(buffer).reduce(function(a,k){
+        return a + ((buffer[k].corpo || "").length);
+      }, 0) / 1048576;
+    }catch(e){}
+    escrever("Salvando " + capturadas + " chamadas (~" + mb.toFixed(1) + " MB) + estado dos indicadores…" +
+             (mb > 8 ? "\n\n(a foto está grande — se travar, é isso)" : ""));
     guardarFixture({
       build: BUILD_VERSION,
       capturadoEm: new DateOriginal().toISOString(),

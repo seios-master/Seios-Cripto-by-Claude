@@ -500,7 +500,7 @@
 <header class="masthead">
   <div class="wrap masthead-row">
     <div>
-      <p class="brand-eyebrow">SEIOS Cripto · Produto Vertical — Fase 3</p>
+      <p class="brand-eyebrow" id="brandEyebrow">SEIOS Cripto · Instrumento local</p>
       <h1 class="brand-title">Instrumento BTC</h1>
       <p class="brand-sub">dado → estado de mercado → cenário → premissa → decisão explicável</p>
     </div>
@@ -962,11 +962,12 @@ const STORAGE_KEY = "seios_btc_v2";
 // fonte única da versão — usada no rodapé, no histórico e nos exports.
 // Muda toda vez que a fórmula de score/pesos muda, pra nunca misturar
 // decisões de regras diferentes como se fossem comparáveis.
-const BUILD_VERSION = "2026-08-14.67.1-fusao";
+const BUILD_VERSION = "2026-08-14.68-ouro-e-fixture";
 
 // indicador padrão — auto = tenta buscar sozinho; manual = você preenche
-function ind(label, source, note){
-  return { label, source, value:null, note: note||"", locked:false, fetchFailed:false };
+function ind(label, source, note, excludeFromScore){
+  return { label, source, value:null, note: note||"", locked:false, fetchFailed:false,
+           excludeFromScore: !!excludeFromScore };
 }
 
 // pesos revisados em 05/08/2026 com base em pesquisa de mercado (VanEck,
@@ -1045,6 +1046,17 @@ function defaultState(){
       } }, // combina com S.events[] (manual)
       ativosGlobais: { label:"Ativos Globais",                weight:.08, indicators:{
         petroleo: ind("Petróleo WTI (momentum 90d)", "auto"),
+        /* v68 — OURO entra como SENSOR, não como voto. excludeFromScore mantém
+           ele fora da média do motor: é gravado na série todo dia, aparece no
+           diagnóstico, e não move o score em nada.
+           Por quê: a tese de que ouro e BTC competem pelo mesmo dinheiro e a
+           tese de que sobem juntos por causa comum (dólar fraco, juro real
+           caindo) são ambas plausíveis, e o laboratório não separou as duas
+           (spread positivo fraco, t≈0,43 nos três horizontes). Escolher um
+           sinal agora seria injetar convicção onde só há hipótese. A série
+           decide em alguns meses — e pode revelar que o sinal muda com o
+           regime, que nenhum valor fixo capturaria. */
+        ouro:    ind("Ouro — PAXG (momentum 90d) · sensor, não pontua", "auto", "", true),
         euro:    ind("Euro/Dólar (momentum 90d)", "auto"),
         sp500:   ind("S&P 500 (momentum 90d)", "auto"),
         cobre:   ind("Cobre (momentum mensal, \"Dr. Copper\")", "auto"),
@@ -2048,6 +2060,27 @@ async function refreshMarketData(){
     }
 
     await sleep(400);
+    // OURO (v68) — PAXG/USDT na Binance: ouro tokenizado, lastro 1:1 em onça
+    // troy, negociado 24/7. Não precisa de chave, mesma fonte que o laboratório
+    // usou. As séries de ouro do FRED foram descontinuadas em 2022, então esta
+    // é a via gratuita que sobrou.
+    { const line = logStep("consultando ouro — PAXG/USDT (Binance)");
+      try{
+        const res = await smartFetch("https://api.binance.com/api/v3/klines?symbol=PAXGUSDT&interval=1d&limit=95");
+        if(!res.ok) throw new Error("PAXG falhou (" + res.status + ")");
+        const rows = await res.json();
+        if(!rows || rows.length < 60) throw new Error("série de PAXG muito curta");
+        const latest = parseFloat(rows[rows.length-1][4]);
+        const past   = parseFloat(rows[Math.max(0, rows.length-91)][4]);
+        const pct = past ? ((latest-past)/past)*100 : 0;
+        setAuto("ativosGlobais","ouro", escalaSuave(pct, 15),
+          `$${latest.toFixed(0)}/oz (${pct>=0?"+":""}${pct.toFixed(1)}% em ~90d) — sensor, não pontua`);
+        results.ok.push("ouro (PAXG)");
+        logDone(line, true, `$${latest.toFixed(0)} · ${pct>=0?"+":""}${pct.toFixed(1)}%`);
+      }catch(e){ setFailed("ativosGlobais","ouro"); results.fail.push("ouro (PAXG)"); logDone(line, false, e.message); }
+    }
+
+    await sleep(400);
     { const line = logStep("consultando cobre — momentum mensal (FRED)");
       try{ // cobre é mensal, não diário — compara mês mais recente com ~3
         // meses atrás, mesmo padrão já usado pra inflação/liquidez
@@ -2743,6 +2776,7 @@ function motorComposite(motorKey){
   // valorVigente() devolve null pra dado vencido — indicador expirado sai da
   // média em vez de continuar votando com a leitura da semana passada
   const vals = Object.keys(motor.indicators)
+    .filter(ik => !motor.indicators[ik].excludeFromScore)   // v68: sensores ficam fora da média
     .map(ik=>valorVigente(motorKey, ik))
     .filter(v=>v!==null && v!==undefined && !Number.isNaN(v));
   if(!vals.length) return null;
@@ -2827,6 +2861,8 @@ function coberturaAuto(){
       if(ind.source !== "auto") return;
       // NUPL é derivado do MVRV por identidade e nunca pontua — contá-lo como
       // fonte que deveria ter respondido fazia a coleta parecer pior do que é
+      // sensores (ouro) e derivados (NUPL) não votam, logo não contam como
+      // fonte que "deveria" ter respondido para efeito de saúde da coleta
       if(ind.excludeFromScore || ik === "nupl") return;
       total += motor.weight;
       if(valorVigente(mk, ik) !== null) vivos += motor.weight;
@@ -6566,7 +6602,7 @@ document.addEventListener("click", (e)=>{
 (function(){
   const fetchOriginal = window.fetch.bind(window);
   const DateOriginal  = window.Date;
-  let modo = null, buffer = {}, congelado = null, faltando = [];
+  let modo = null, buffer = {}, congelado = null, faltando = [], estadoVivo = null;
 
   /* ---- guarda em IndexedDB (payload de 25+ chamadas não cabe no localStorage) ---- */
   function abrirDB(cb){
@@ -6721,6 +6757,44 @@ document.addEventListener("click", (e)=>{
     botao1.onclick = salvarGravacao;
   }
 
+  /* v68 — a fixture congelava a REDE mas não o ESTADO. Quando uma fonte falha
+     no replay, o sistema recorre ao último valor salvo em localStorage — que é
+     o de hoje, não o do dia congelado. Foi assim que o Geopolítico deu 17,36
+     num teste em que deveria dar 30: os payloads eram de ontem, o valor de
+     apoio era de hoje. Uma ferramenta de regressão que mistura duas épocas não
+     prova o que promete. Agora a foto leva o valor, a nota e o carimbo de cada
+     indicador, e o replay restaura tudo antes de rodar. */
+  function capturarIndicadores(){
+    const out = {};
+    Object.entries(S.motors).forEach(function(par){
+      const mk = par[0], motor = par[1];
+      Object.keys(motor.indicators).forEach(function(ik){
+        const i = motor.indicators[ik];
+        out[mk + "." + ik] = {
+          value: i.value === undefined ? null : i.value,
+          note: i.note || "",
+          updatedAt: i.updatedAt || null,
+          fetchFailed: !!i.fetchFailed,
+          saturado: !!i.saturado
+        };
+      });
+    });
+    return out;
+  }
+
+  function aplicarIndicadores(mapa){
+    if(!mapa) return;
+    Object.keys(mapa).forEach(function(chave){
+      const parte = chave.split(".");
+      const motor = S.motors[parte[0]];
+      const i = motor && motor.indicators[parte[1]];
+      if(!i) return;
+      const g = mapa[chave];
+      i.value = g.value; i.note = g.note; i.updatedAt = g.updatedAt;
+      i.fetchFailed = g.fetchFailed; i.saturado = g.saturado;
+    });
+  }
+
   function salvarGravacao(){
     if(!Object.keys(buffer).length){
       escrever("Nenhuma chamada foi capturada. Você chegou a tocar em ATUALIZAR DADOS DE MERCADO?");
@@ -6731,6 +6805,7 @@ document.addEventListener("click", (e)=>{
       build: BUILD_VERSION,
       capturadoEm: new DateOriginal().toISOString(),
       chamadas: buffer,
+      indicadores: capturarIndicadores(),
       baseline: estado
     }, () => {
       modo = null;
@@ -6747,7 +6822,13 @@ document.addEventListener("click", (e)=>{
       if(!fx){ escrever("Nada congelado ainda. Faça o passo 1 primeiro."); return; }
       congelado = fx; faltando = []; modo = "reproduzir";
       travarRelogio(fx.capturadoEm);
-      escrever("Dados congelados ativos.\nRelógio travado em " +
+      estadoVivo = capturarIndicadores();   // guarda o vivo para devolver no passo 4
+      aplicarIndicadores(fx.indicadores);
+      escrever((fx.indicadores ? "" :
+        "⚠ Foto gravada antes do v68: não guardou o estado dos indicadores.\n" +
+        "Fontes que falharem vão cair em valores de HOJE. Congele de novo\n" +
+        "(passo 1) para um teste realmente isolado.\n\n") +
+        "Dados congelados ativos.\nRelógio travado em " +
         new DateOriginal(fx.capturadoEm).toLocaleString("pt-BR") +
         "\nFoto gravada na build: " + (fx.build || "?") +
         "\n\nAgora toque em ATUALIZAR DADOS DE MERCADO. Nada vai à internet — " +
@@ -6758,6 +6839,10 @@ document.addEventListener("click", (e)=>{
   function sairDoModo(){
     modo = null; congelado = null; faltando = [];
     soltarRelogio();
+    // devolve o estado real — sem isto, sair do modo deixaria os indicadores do
+    // dia congelado se passando pela leitura atual
+    if(estadoVivo){ aplicarIndicadores(estadoVivo); estadoVivo = null;
+      if(typeof renderAll === "function") renderAll(); }
     escrever("Modo congelado desligado. O relógio voltou ao normal e as próximas " +
              "atualizações vão à internet de novo.\n\nA foto continua guardada — " +
              "toque em 2 quando quiser usá-la outra vez.");
@@ -6874,6 +6959,14 @@ document.addEventListener("click", (e)=>{
     corpo.textContent = txt;
     const cont = document.getElementById("serieContador");
     if(cont) cont.textContent = snaps.length + " leitura(s) · " + dias + " dia(s)";
+    // v68 — o cabeçalho dizia "Fase 3", texto fixo que não vinha de lugar
+    // nenhum: nenhuma variável, nenhum critério, nunca atualizado. Sugeria um
+    // plano que não existia. Agora informa onde o projeto REALMENTE está, e o
+    // número sobe sozinho a cada dia coletado.
+    const eye = document.getElementById("brandEyebrow");
+    if(eye){
+      eye.textContent = "SEIOS Cripto · Coletando — dia " + dias + " de ~777";
+    }
     // com o painel fechado por padrão, um alerta que só vive lá dentro deixa de
     // ser alerta. O detector existe justamente para aparecer sem ser procurado.
     const al = document.getElementById("alertaCongelado");
@@ -7399,7 +7492,18 @@ document.addEventListener("click", (e)=>{
 
     const bar = document.createElement("div");
     bar.style.cssText = "display:flex;gap:8px;flex-wrap:wrap;margin:10px 0;";
-    [["⧉ Copiar diagnóstico", function(){ if(window.copiarDiagnosticoSeios) window.copiarDiagnosticoSeios(); }],
+    [["⧉ Copiar este painel", async function(){
+        const t = corpo.textContent || "";
+        try{ await navigator.clipboard.writeText(t); }
+        catch(e){
+          const ta = document.createElement("textarea");
+          ta.value = t;
+          ta.style.cssText = "width:100%;height:200px;margin-top:8px;background:#020;color:#8f8;" +
+            "border:1px solid var(--line-soft);font-family:inherit;font-size:10px;padding:8px;";
+          caixa.appendChild(ta); ta.focus(); ta.select();
+        }
+      }],
+     ["⧉ Copiar diagnóstico", function(){ if(window.copiarDiagnosticoSeios) window.copiarDiagnosticoSeios(); }],
      ["⇩ Exportar a série (.csv)", function(){ if(window.exportarSerieSeios) window.exportarSerieSeios(); }]]
       .forEach(function(par){
         const b = document.createElement("button");
@@ -7502,9 +7606,21 @@ document.addEventListener("click", (e)=>{
     if(!linhas.length) t += "  (nenhum indicador com retorno vencido ainda)\n";
 
     /* --- rodapé honesto --- */
-    const nef1 = snaps.filter(function(s){ return s.retornos && typeof s.retornos.d1 === "number"; }).length;
+    const vencidas = snaps.filter(function(s){ return s.retornos && typeof s.retornos.d1 === "number"; });
+    const nef1 = vencidas.length;
+    const diasVencidos = new Set(vencidas.map(function(s){ return s.ts.slice(0,10); })).size;
     t += "\n────────\n" + snaps.length + " leitura(s) · " + dias + " dia(s) · " +
-         nef1 + " com retorno de 1 dia já vencido\n";
+         nef1 + " com retorno de 1 dia já vencido (em " + diasVencidos + " dia(s))\n";
+    // v68 — quando as observações vêm todas do mesmo punhado de dias, TODA
+    // média acima é o mesmo número repetido, e as linhas passam a parecer
+    // descoberta quando são a mesma observação vista de ângulos diferentes.
+    // Melhor dizer isso do que deixar a tabela sugerir o contrário.
+    if(nef1 > 0 && diasVencidos < 3){
+      t += "⚠ As " + nef1 + " observações vencidas vêm de apenas " + diasVencidos +
+           " dia(s) — elas compartilham quase o mesmo futuro.\n" +
+           "   Por isso praticamente todas as médias acima dão o MESMO valor.\n" +
+           "   Isso não é padrão descoberto: é a mesma observação repetida.\n";
+    }
     if(nef1 < 30) t += "AVISO: abaixo de ~30 observações nada aqui é evidência. É registro.\n";
     t += "Para uma diferença de 55% vs 50% ser detectável, são necessárias ~777 observações independentes.\n";
 

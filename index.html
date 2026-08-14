@@ -508,9 +508,11 @@
   </div>
   <div class="wrap controls-row">
     <button class="primary" id="btnRefresh" title="Busca todas as fontes e recalcula o estado de mercado">↻ Atualizar dados</button>
-    <button class="ghost" id="btnExport" title="Backup completo em .json — restaurável pelo botão Importar">⇩ Backup (.json)</button>
-    <button class="ghost" id="btnExportCsv" title="Histórico de decisões em .csv, abre no Excel">⇩ Histórico (.csv)</button>
+    <button class="ghost" id="btnDiag" title="Copia a leitura inteira em texto — para colar numa conversa">⧉ Diagnóstico</button>
+    <button class="ghost" id="btnExport" title="Salva TUDO em .json: estado, configurações, histórico e a série point-in-time">⇩ Salvar tudo (.json)</button>
     <button class="ghost" id="btnImport" title="Restaura um backup .json — substitui os dados atuais">⇧ Restaurar</button>
+    <span id="serieContador" style="align-self:center;font-size:11px;color:var(--text-faint);letter-spacing:.06em;"></span>
+    <button class="ghost" id="btnExportCsv" style="display:none;">⇩ Histórico (.csv)</button>
     <input type="file" id="importFileInput" accept="application/json,.json" style="display:none;">
     <div id="importPreview" style="flex-basis:100%;"></div>
   </div>
@@ -959,7 +961,7 @@ const STORAGE_KEY = "seios_btc_v2";
 // fonte única da versão — usada no rodapé, no histórico e nos exports.
 // Muda toda vez que a fórmula de score/pesos muda, pra nunca misturar
 // decisões de regras diferentes como se fossem comparáveis.
-const BUILD_VERSION = "2026-08-14.64-escala-e-retornos";
+const BUILD_VERSION = "2026-08-14.65-barra-e-backup";
 
 // indicador padrão — auto = tenta buscar sozinho; manual = você preenche
 function ind(label, source, note){
@@ -3016,8 +3018,15 @@ async function lerSnapshots(){
    em algo que deveria oscilar. */
 function indicadoresCongelados(snaps, minRepeticoes){
   const min = minRepeticoes || 3;
-  if(snaps.length < min) return [];
-  const ultimos = snaps.slice(-min);
+  // v65 — comparar LEITURAS consecutivas dava falso positivo em cascata: rodar
+  // três vezes no mesmo dia acusava juros, hash rate, F&G e EPU como congelados,
+  // quando todos são séries de granularidade diária lidas várias vezes no mesmo
+  // dia. O congelamento que importa é o que atravessa dias.
+  const porDia = {};
+  snaps.forEach(function(s){ porDia[s.ts.slice(0,10)] = s; }); // última leitura de cada dia
+  const dias = Object.keys(porDia).sort();
+  if(dias.length < min) return [];
+  const ultimos = dias.slice(-min).map(function(d){ return porDia[d]; });
   const chaves = Object.keys(ultimos[ultimos.length-1].indicadores || {});
   const out = [];
   chaves.forEach(function(k){
@@ -3098,7 +3107,7 @@ function relatorioTexto(snap, snaps){
            ((dias/777)*100).toFixed(1) + "% de ~777");
     const cong = indicadoresCongelados(snaps, 3);
     if(cong.length){
-      L.push("sem variação em 3 leituras: " + cong.map(function(c){ return c.chave; }).join(", "));
+      L.push("sem variação em 3 dias: " + cong.map(function(c){ return c.chave; }).join(", "));
     }
     if(snaps.length > 1){
       const ant = snaps[snaps.length-2];
@@ -3163,6 +3172,22 @@ async function preencherRetornos(precoAtual, agoraISO){
     console.warn("Não consegui preencher retornos:", e);
     return 0;
   }
+}
+
+// mescla em vez de substituir: se o aparelho já tem leituras próprias, um
+// backup antigo não pode apagá-las. Chave é o timestamp, então duplicatas
+// exatas se sobrescrevem sem multiplicar.
+async function restaurarSerie(lista){
+  const db = await openSnapDB();
+  const n = await new Promise(function(resolve, reject){
+    const tx = db.transaction(SNAP_STORE, "readwrite");
+    const store = tx.objectStore(SNAP_STORE);
+    lista.forEach(function(s){ if(s && s.ts) store.put(s); });
+    tx.oncomplete = function(){ resolve(lista.length); };
+    tx.onerror = function(){ reject(tx.error); };
+  });
+  db.close();
+  return n;
 }
 
 function snapshotsParaCSV(snaps){
@@ -6149,11 +6174,21 @@ document.getElementById("btnExport").addEventListener("click", async ()=>{
   }
   ARQUIVO_ESPELHO = arquivoAgora;
 
+  // v65 — a série point-in-time vive num IndexedDB PRÓPRIO (seios_snapshots_v1),
+  // que o backup não tocava. Um "backup completo" que não salvava justamente o
+  // ativo insubstituível: código se reescreve, série coletada dia a dia não.
+  // Limpar dados do Safari ou trocar de aparelho apagaria tudo em silêncio.
+  let serieAgora = [];
+  try{ serieAgora = await lerSnapshots(); }
+  catch(e){ console.warn("Não consegui ler a série para o backup:", e); }
+
   const paraExportar = Object.assign({}, S, {
     apiKeys: { cryptoquant:"", fred:"", coingecko:"" },
     _chavesRemovidas: true,
     _arquivoFrio: arquivoAgora,
-    _arquivoFrioCount: arquivoAgora.length
+    _arquivoFrioCount: arquivoAgora.length,
+    _serie: serieAgora,
+    _serieCount: serieAgora.length
   });
   const blob = new Blob([JSON.stringify(paraExportar, null, 2)], {type:"application/json"});
   triggerDownloadWithFallback(blob, `seios-btc-export-${new Date().toISOString().slice(0,10)}.json`);
@@ -6306,8 +6341,11 @@ document.getElementById("importFileInput").addEventListener("change", (e)=>{
         parsed.apiKeys = chavesAtuais;
         // restaura também o arquivo de longo prazo, se o backup trouxer
         const arquivoDoBackup = Array.isArray(parsed._arquivoFrio) ? parsed._arquivoFrio : null;
+        const serieDoBackup = Array.isArray(parsed._serie) ? parsed._serie : null;
         delete parsed._arquivoFrio;
         delete parsed._arquivoFrioCount;
+        delete parsed._serie;
+        delete parsed._serieCount;
         localStorage.setItem(STORAGE_KEY, JSON.stringify(parsed));
         S = loadState();
         saveState();
@@ -6324,6 +6362,17 @@ document.getElementById("importFileInput").addEventListener("change", (e)=>{
           .then(()=> recarregarEspelhoDoArquivo())
           .then(()=> renderAll())
           .catch(err=> console.warn("Falha ao restaurar o arquivo de longo prazo:", err));
+        // v65 — a série volta junto. Sem isto, restaurar um backup em aparelho
+        // novo devolveria o sistema mas não o histórico coletado, que é o que
+        // não tem como refazer.
+        if(serieDoBackup && serieDoBackup.length){
+          restaurarSerie(serieDoBackup)
+            .then(function(n){
+              if(typeof renderPainelSerie === "function") renderPainelSerie();
+              console.log("série restaurada: " + n + " leitura(s)");
+            })
+            .catch(function(err){ console.warn("Falha ao restaurar a série:", err); });
+        }
         ARQUIVO_ESPELHO = [];
         renderAll();
         preview.innerHTML = `<div style="margin-top:10px;padding:10px 14px;border:1px solid var(--teal);background:var(--teal-soft);font-family:var(--font-mono);font-size:11.5px;color:var(--teal);">✓ Backup restaurado com sucesso. Suas chaves de API deste navegador foram mantidas (backups não carregam chave).</div>`;
@@ -6788,7 +6837,7 @@ document.addEventListener("click", (e)=>{
 
     const congelados = indicadoresCongelados(snaps, 3);
     if(congelados.length){
-      txt += "\n⚠ sem variação nas últimas 3 leituras:\n";
+      txt += "\n⚠ sem variação nos últimos 3 dias:\n";
       congelados.forEach(function(c){ txt += "  " + c.chave + " = " + c.valor + "\n"; });
       txt += "(pode ser normal em série lenta como CPI ou M2 — vale olhar se for algo que deveria oscilar)\n";
     }
@@ -6797,6 +6846,8 @@ document.addEventListener("click", (e)=>{
     if(ultimoSnap.travadoPor) txt += "\núltima leitura travada: " + ultimoSnap.travadoPor + "\n";
 
     corpo.textContent = txt;
+    const cont = document.getElementById("serieContador");
+    if(cont) cont.textContent = snaps.length + " leitura(s) · " + dias + " dia(s)";
   }
 
   async function copiarDiagnostico(){
@@ -6812,6 +6863,9 @@ document.addEventListener("click", (e)=>{
     try{
       await navigator.clipboard.writeText(txt);
       corpo.textContent = "Diagnóstico copiado. É só colar na conversa.\n\n" + txt;
+      const b = document.getElementById("btnDiag");
+      if(b){ const antes = b.textContent; b.textContent = "✓ copiado";
+        setTimeout(function(){ b.textContent = antes; }, 2000); }
     }catch(e){
       // iOS bloqueia clipboard fora de gesto direto em alguns casos — cai para
       // um campo selecionável, que sempre funciona
@@ -6837,6 +6891,11 @@ document.addEventListener("click", (e)=>{
   }
 
   window.renderPainelSerie = atualizar;
+
+  // o botão do topo é o mesmo comando do painel: a rotina diária não deveria
+  // exigir rolar seis mil pixels até o rodapé
+  const btnTopo = document.getElementById("btnDiag");
+  if(btnTopo) btnTopo.addEventListener("click", copiarDiagnostico);
 
   if(document.readyState === "loading") document.addEventListener("DOMContentLoaded", montar);
   else montar();

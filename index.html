@@ -504,6 +504,7 @@
       <div class="ticker-price"><span class="cur">BTC/USD</span><span id="priceVal">—</span></div>
       <div class="ticker-delta" id="priceDelta">variação 24h: —</div>
       <div class="ticker-meta" id="lastUpdate">nunca atualizado</div>
+      <div class="ticker-meta" id="buildNow" style="opacity:.7;"></div>
     </div>
   </div>
   <div class="wrap controls-row">
@@ -512,6 +513,7 @@
     <button class="ghost" id="btnExport" title="Salva TUDO em .json: estado, configurações, histórico e a série point-in-time">⇩ Salvar tudo (.json)</button>
     <button class="ghost" id="btnImport" title="Restaura um backup .json — substitui os dados atuais">⇧ Restaurar</button>
     <span id="serieContador" style="align-self:center;font-size:11px;color:var(--text-faint);letter-spacing:.06em;"></span>
+    <span id="alertaCongelado" style="align-self:center;font-size:11px;letter-spacing:.06em;color:var(--amber,#e8a33d);"></span>
     <button class="ghost" id="btnExportCsv" style="display:none;">⇩ Histórico (.csv)</button>
     <input type="file" id="importFileInput" accept="application/json,.json" style="display:none;">
     <div id="importPreview" style="flex-basis:100%;"></div>
@@ -961,7 +963,7 @@ const STORAGE_KEY = "seios_btc_v2";
 // fonte única da versão — usada no rodapé, no histórico e nos exports.
 // Muda toda vez que a fórmula de score/pesos muda, pra nunca misturar
 // decisões de regras diferentes como se fossem comparáveis.
-const BUILD_VERSION = "2026-08-14.65-barra-e-backup";
+const BUILD_VERSION = "2026-08-14.66-cards";
 
 // indicador padrão — auto = tenta buscar sozinho; manual = você preenche
 function ind(label, source, note){
@@ -3190,6 +3192,27 @@ async function restaurarSerie(lista){
   return n;
 }
 
+
+/* v66 — os três painéis de ferramenta viravam blocos permanentes no fim da
+   página, e a rolagem voltou a ficar gigante. Agora entram no mesmo grid de
+   RELATÓRIOS, com a mesma mecânica: um aberto por vez, toca de novo e fecha.
+   Reaproveita a lógica que já existe em vez de criar um segundo sistema. */
+function virarCardRelatorio(caixa, id, titulo, subtitulo){
+  caixa.className = "panel rel-panel";
+  caixa.id = id;
+  caixa.hidden = true;
+  const destino = document.getElementById("deepDive") || document.body;
+  destino.appendChild(caixa);
+  const barra = document.getElementById("relBar");
+  if(barra){
+    const b = document.createElement("button");
+    b.className = "rel-btn";
+    b.dataset.rel = id;
+    b.innerHTML = titulo + '<span class="rb-sub">' + subtitulo + '</span>';
+    barra.appendChild(b);
+  }
+}
+
 function snapshotsParaCSV(snaps){
   const motores = Object.keys(S.motors);
   const cab = ["ts","build","preco","score","rotulo","acao","cobertura","coberturaAuto",
@@ -4964,8 +4987,18 @@ function renderTicker(){
     dEl.className = "ticker-delta";
   }
   document.getElementById("lastUpdate").textContent = S.market.lastFetch
-    ? "atualizado " + new Date(S.market.lastFetch).toLocaleString("pt-BR") + (S.market.lastFetchVersion ? " · " + S.market.lastFetchVersion : "")
+    ? "atualizado " + new Date(S.market.lastFetch).toLocaleString("pt-BR") + (S.market.lastFetchVersion ? " · coletado por " + S.market.lastFetchVersion : "")
     : "nunca atualizado";
+  // v66 — a versão do ARQUIVO CARREGADO, sempre visível no topo. A linha acima
+  // guarda a versão que COLETOU aqueles dados, que é outra coisa: depois de
+  // publicar uma build nova elas divergem até a próxima atualização, e essa
+  // divergência já causou dúvida ("subi o 65 e continua dizendo 64").
+  const bEl = document.getElementById("buildNow");
+  if(bEl){
+    const desatualizado = S.market.lastFetchVersion && S.market.lastFetchVersion !== BUILD_VERSION;
+    bEl.textContent = "rodando " + BUILD_VERSION + (desatualizado ? " — atualize os dados para usar esta versão" : "");
+    bEl.style.color = desatualizado ? "var(--amber, #e8a33d)" : "";
+  }
 }
 
 function renderCalibrationTimestamp(){
@@ -6636,14 +6669,7 @@ document.addEventListener("click", (e)=>{
   function escrever(txt){ if(saida) saida.textContent = txt; }
 
   function montarPainel(){
-    caixa = document.createElement("div");
-    caixa.className = "wrap";
-    // position/z-index explícitos: o canvas do matrix é position:fixed z-index:0 e
-    // pinta por cima de qualquer bloco não posicionado — sem isto o painel existe
-    // no DOM, ocupa altura, e fica invisível atrás da chuva verde.
-    caixa.style.cssText = "position:relative;z-index:2;margin:28px auto;padding:16px;" +
-      "border:1px solid var(--copper,#2f7);border-radius:6px;" +
-      "background:#050B07;font-family:var(--font-mono,ui-monospace,Menlo,monospace);";
+    caixa = document.createElement("section");
     caixa.innerHTML =
       '<div style="font-size:11px;letter-spacing:.14em;color:var(--text-faint,#6a6);margin-bottom:4px">' +
       '§ TESTE DE REGRESSÃO</div>' +
@@ -6662,9 +6688,8 @@ document.addEventListener("click", (e)=>{
       "color:var(--text-dim,#8a8);font-family:inherit;";
     saida.textContent = "Toque em 1 e depois atualize os dados de mercado.";
     caixa.appendChild(saida);
-    // dentro da camada de conteúdo (z-index:1), não solto no body
-    const camada = document.querySelector('body > div[style*="z-index:1"]') || document.body;
-    camada.appendChild(caixa);
+    virarCardRelatorio(caixa, "panelRegressao", "Teste de regressão",
+      "congelar a leitura e comparar versões");
     verificarFixtureExistente();
   }
 
@@ -6777,11 +6802,7 @@ document.addEventListener("click", (e)=>{
   let caixa, corpo;
 
   function montar(){
-    caixa = document.createElement("div");
-    caixa.className = "wrap";
-    caixa.style.cssText = "position:relative;z-index:2;margin:20px auto 40px;padding:16px;" +
-      "border:1px solid var(--line-soft,#2f7);border-radius:6px;background:#050B07;" +
-      "font-family:var(--font-mono,ui-monospace,Menlo,monospace);";
+    caixa = document.createElement("section");
     caixa.innerHTML =
       '<div style="font-size:11px;letter-spacing:.14em;color:var(--text-faint,#6a6);margin-bottom:4px">' +
       '§ SÉRIE POINT-IN-TIME</div>' +
@@ -6811,8 +6832,8 @@ document.addEventListener("click", (e)=>{
       "color:var(--text-dim,#8a8);font-family:inherit;";
     caixa.appendChild(corpo);
 
-    const camada = document.querySelector('body > div[style*="z-index:1"]') || document.body;
-    camada.appendChild(caixa);
+    virarCardRelatorio(caixa, "panelSerie", "Série point-in-time",
+      "o que o sistema viu, dia a dia");
     atualizar();
   }
 
@@ -6848,6 +6869,14 @@ document.addEventListener("click", (e)=>{
     corpo.textContent = txt;
     const cont = document.getElementById("serieContador");
     if(cont) cont.textContent = snaps.length + " leitura(s) · " + dias + " dia(s)";
+    // com o painel fechado por padrão, um alerta que só vive lá dentro deixa de
+    // ser alerta. O detector existe justamente para aparecer sem ser procurado.
+    const al = document.getElementById("alertaCongelado");
+    if(al){
+      al.textContent = congelados.length
+        ? "⚠ " + congelados.length + " indicador(es) sem variação há 3 dias"
+        : "";
+    }
   }
 
   async function copiarDiagnostico(){
@@ -7275,11 +7304,7 @@ document.addEventListener("click", (e)=>{
 
   /* ---------- painel ---------- */
   function montar(){
-    caixa = document.createElement("div");
-    caixa.className = "wrap";
-    caixa.style.cssText = "position:relative;z-index:2;margin:20px auto 40px;padding:16px;" +
-      "border:1px dashed var(--line-soft,#2f7);border-radius:6px;background:#07050B;" +
-      "font-family:var(--font-mono,ui-monospace,Menlo,monospace);";
+    caixa = document.createElement("section");
     caixa.innerHTML =
       '<div style="font-size:11px;letter-spacing:.14em;color:var(--text-faint,#6a6);margin-bottom:4px">' +
       '§ LABORATÓRIO — SALA SEPARADA</div>' +
@@ -7288,15 +7313,6 @@ document.addEventListener("click", (e)=>{
       'Testa blocos de indicadores contra ~5 anos de preço real, separando treino de validação. ' +
       'Serve para levantar hipóteses e descartar peso morto — <b>não altera score, peso nem veredito</b>. ' +
       'O que vale é a linha de VALIDAÇÃO, e mesmo ela deve ser confirmada pela série diária antes de virar decisão.</div>';
-
-    const fechar = document.createElement("button");
-    fechar.textContent = "×";
-    fechar.title = "fechar";
-    fechar.style.cssText = "position:absolute;top:10px;right:10px;width:34px;height:34px;" +
-      "background:transparent;color:#b9f;border:1px solid #63c;border-radius:4px;" +
-      "font-family:inherit;font-size:16px;line-height:1;";
-    fechar.onclick = function(){ caixa.style.display = "none"; };
-    caixa.appendChild(fechar);
 
     botao = document.createElement("button");
     botao.textContent = "🧪 APRENDER COM O PASSADO";
@@ -7331,8 +7347,8 @@ document.addEventListener("click", (e)=>{
     saida.textContent = "Leva 1–2 minutos. Busca preço, sentimento, on-chain e ouro; macro só com chave FRED.";
     caixa.appendChild(saida);
 
-    const camada = document.querySelector('body > div[style*="z-index:1"]') || document.body;
-    camada.appendChild(caixa);
+    virarCardRelatorio(caixa, "panelLaboratorio", "Aprender com o passado",
+      "laboratório — sala separada, não altera nada");
   }
 
   if(document.readyState === "loading") document.addEventListener("DOMContentLoaded", montar);

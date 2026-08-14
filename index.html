@@ -962,7 +962,7 @@ const STORAGE_KEY = "seios_btc_v2";
 // fonte única da versão — usada no rodapé, no histórico e nos exports.
 // Muda toda vez que a fórmula de score/pesos muda, pra nunca misturar
 // decisões de regras diferentes como se fossem comparáveis.
-const BUILD_VERSION = "2026-08-14.68-ouro-e-fixture";
+const BUILD_VERSION = "2026-08-14.69-painel-e-marcos";
 
 // indicador padrão — auto = tenta buscar sozinho; manual = você preenche
 function ind(label, source, note, excludeFromScore){
@@ -3060,11 +3060,18 @@ function indicadoresCongelados(snaps, minRepeticoes){
   // três vezes no mesmo dia acusava juros, hash rate, F&G e EPU como congelados,
   // quando todos são séries de granularidade diária lidas várias vezes no mesmo
   // dia. O congelamento que importa é o que atravessa dias.
+  // v69 — com 3 leituras por dia, comparar a ÚLTIMA de cada dia perde o que
+  // acontece dentro do dia. Agora um indicador só é acusado se ficou idêntico
+  // em TODAS as leituras dos últimos N dias — assim um valor que oscila de
+  // manhã para a noite nunca é confundido com fonte travada.
   const porDia = {};
-  snaps.forEach(function(s){ porDia[s.ts.slice(0,10)] = s; }); // última leitura de cada dia
+  snaps.forEach(function(s){
+    const d = s.ts.slice(0,10);
+    (porDia[d] = porDia[d] || []).push(s);
+  });
   const dias = Object.keys(porDia).sort();
   if(dias.length < min) return [];
-  const ultimos = dias.slice(-min).map(function(d){ return porDia[d]; });
+  const ultimos = dias.slice(-min).reduce(function(acc, d){ return acc.concat(porDia[d]); }, []);
   const chaves = Object.keys(ultimos[ultimos.length-1].indicadores || {});
   const out = [];
   chaves.forEach(function(k){
@@ -3074,7 +3081,8 @@ function indicadoresCongelados(snaps, minRepeticoes){
     });
     if(vals.some(function(v){ return v === undefined || v === null; })) return;
     const primeiro = vals[0];
-    if(vals.every(function(v){ return v === primeiro; })) out.push({ chave: k, valor: primeiro, leituras: min });
+    if(vals.every(function(v){ return v === primeiro; }))
+      out.push({ chave: k, valor: primeiro, leituras: vals.length, dias: min });
   });
   return out;
 }
@@ -3123,7 +3131,18 @@ function relatorioTexto(snap, snaps){
     const i = snap.indicadores[k];
     let linha = "  " + k + ": " + (i.valor === null ? "—" : num(i.valor, 2));
     if(i.vigente === null && i.valor !== null) linha += " [EXPIRADO, fora da conta]";
-    if(i.falhou) linha += " [FALHOU]";
+    if(i.falhou){
+      // v69 — "[FALHOU]" sozinho não distingue tropeço de agora de fonte morta
+      // há meio dia. Com a idade, dá para ver na hora se o valor que está
+      // pontuando é de minutos atrás ou está envelhecendo em silêncio.
+      let idade = "";
+      if(i.em){
+        const h = (Date.now() - new Date(i.em).getTime())/3600000;
+        idade = h < 1 ? " · valor de " + Math.round(h*60) + "min atrás"
+                      : " · valor de " + h.toFixed(1) + "h atrás";
+      }
+      linha += " [FALHOU" + idade + "]";
+    }
     if(i.saturado) linha += " [SATURADO]";
     if(i.nota) linha += "  — " + i.nota;
     L.push(linha);
@@ -6700,149 +6719,159 @@ document.addEventListener("click", (e)=>{
     return out;
   }
 
-  /* ---- painel ---- */
-  let caixa, saida, botao1;
+  /* ---- painel (v69: uma fonte de estado, um único redesenho) ----
+     A versão anterior tinha três funções mexendo no mesmo botão, e cada uma
+     precisava lembrar de desfazer o que a outra fez. Bastava congelar e depois
+     sair do modo para o botão 1 ficar preso em "SALVAR O QUE FOI GRAVADO"
+     eternamente — só fechando o app voltava ao normal.
+
+     Agora existe UM estado (passo) e UMA função que redesenha tudo a partir
+     dele. Nenhuma ação mexe em botão diretamente: elas mudam o estado e mandam
+     redesenhar. É impossível o botão discordar da situação real. */
+  let caixa, saida, botoes = {};
+  let passo = "ocioso";   // ocioso · gravando · congelado
+  let infoFixture = null; // metadados da última foto guardada
+
+  const TEXTOS = {
+    1: { ocioso: "1 · CONGELAR OS DADOS DE HOJE",
+         gravando: "1 · SALVAR O QUE FOI GRAVADO",
+         congelado: "1 · CONGELAR OS DADOS DE HOJE" }
+  };
+
   function escrever(txt){ if(saida) saida.textContent = txt; }
+
+  function redesenhar(){
+    if(!botoes[1]) return;
+    botoes[1].textContent = TEXTOS[1][passo];
+    botoes[1].onclick = (passo === "gravando") ? salvarGravacao : iniciarGravacao;
+    // 2 e 3 só fazem sentido fora do modo gravação; 4 só dentro do congelado
+    botoes[2].disabled = (passo === "gravando");
+    botoes[3].disabled = (passo !== "congelado");
+    botoes[4].disabled = (passo !== "congelado");
+    [2,3,4].forEach(function(n){
+      botoes[n].style.opacity = botoes[n].disabled ? ".4" : "1";
+    });
+    const marca = document.getElementById("regressaoPasso");
+    if(marca){
+      marca.textContent = passo === "gravando" ? "● gravando"
+                        : passo === "congelado" ? "● modo congelado ativo"
+                        : "";
+      marca.style.color = passo === "congelado" ? "var(--amber,#e8a33d)" : "var(--accent,#7f7)";
+    }
+  }
 
   function montarPainel(){
     caixa = document.createElement("section");
     caixa.innerHTML =
-      '<div style="font-size:11px;letter-spacing:.14em;color:var(--text-faint,#6a6);margin-bottom:4px">' +
-      '§ TESTE DE REGRESSÃO</div>' +
-      '<div style="font-size:16px;color:var(--text,#cfc);margin-bottom:10px">Congelar a leitura de hoje</div>' +
-      '<div style="font-size:12px;color:var(--text-dim,#8a8);line-height:1.5;margin-bottom:12px">' +
-      'Guarda os dados crus desta atualização — inclusive as fontes que falharam — ' +
-      'para que a próxima versão possa ser testada contra exatamente o mesmo material.</div>';
+      '<div class="panel-head"><div>' +
+      '<div class="panel-kicker">§ teste de regressão</div>' +
+      '<h2 class="panel-title">Congelar a leitura de hoje</h2></div>' +
+      '<div id="regressaoPasso" style="font-family:var(--font-mono);font-size:11px;"></div></div>' +
+      '<p class="panel-sub">Guarda os dados crus desta atualização — inclusive as fontes que falharam ' +
+      'e o valor de cada indicador — para que a próxima versão possa ser testada contra exatamente o mesmo material.</p>';
 
-    botao1 = criarBotao("1 · CONGELAR OS DADOS DE HOJE", iniciarGravacao);
-    criarBotao("2 · RODAR COM OS DADOS CONGELADOS", iniciarReplay);
-    criarBotao("3 · COMPARAR COM O CONGELADO", compararAgora);
-    criarBotao("4 · SAIR DO MODO CONGELADO", sairDoModo);
+    [[1, iniciarGravacao], [2, iniciarReplay], [3, compararAgora], [4, sairDoModo]]
+      .forEach(function(par){
+        const n = par[0];
+        const b = document.createElement("button");
+        b.textContent = n === 1 ? TEXTOS[1].ocioso
+          : n === 2 ? "2 · RODAR COM OS DADOS CONGELADOS"
+          : n === 3 ? "3 · COMPARAR COM O CONGELADO"
+          : "4 · SAIR DO MODO CONGELADO";
+        b.style.cssText = "display:block;width:100%;margin:6px 0;padding:14px;text-align:left;" +
+          "background:rgba(4,32,14,.8);color:var(--accent,#7f7);border:1px solid var(--line-soft,#2f7);" +
+          "border-radius:4px;font-family:var(--font-mono);font-size:13px;letter-spacing:.04em;";
+        b.onclick = par[1];
+        botoes[n] = b;
+        caixa.appendChild(b);
+      });
 
     saida = document.createElement("pre");
     saida.style.cssText = "white-space:pre-wrap;margin:12px 0 0;font-size:12px;line-height:1.5;" +
-      "color:var(--text-dim,#8a8);font-family:inherit;";
-    saida.textContent = "Toque em 1 e depois atualize os dados de mercado.";
+      "color:var(--text-dim,#8a8);font-family:var(--font-mono);";
+    saida.textContent = "Toque em 1, atualize os dados de mercado, e volte para salvar.";
     caixa.appendChild(saida);
+
     virarCardRelatorio(caixa, "panelRegressao", "Teste de regressão",
       "congelar a leitura e comparar versões");
     verificarFixtureExistente();
-  }
-
-  function criarBotao(rotulo, acao){
-    const b = document.createElement("button");
-    b.textContent = rotulo;
-    b.style.cssText = "display:block;width:100%;margin:6px 0;padding:14px;text-align:left;" +
-      "background:rgba(4,32,14,.8);color:var(--accent,#7f7);border:1px solid var(--line-soft,#2f7);" +
-      "border-radius:4px;font-family:inherit;font-size:13px;letter-spacing:.04em;";
-    b.onclick = acao;
-    caixa.appendChild(b);
-    return b;
+    redesenhar();
   }
 
   function verificarFixtureExistente(){
-    lerFixture(fx => {
-      if(fx) escrever("Já existe uma foto congelada de " +
-        new DateOriginal(fx.capturadoEm).toLocaleString("pt-BR") +
-        " (" + Object.keys(fx.chamadas).length + " chamadas).\n" +
-        "Toque em 2 para rodar com ela, ou em 1 para substituir.");
+    lerFixture(function(fx){
+      if(!fx) return;
+      infoFixture = fx;
+      escrever("Foto guardada: " + new DateOriginal(fx.capturadoEm).toLocaleString("pt-BR") +
+        " · " + Object.keys(fx.chamadas).length + " chamadas · build " + (fx.build || "?") +
+        (fx.indicadores ? "\n(inclui o estado dos indicadores — isolamento completo)"
+                        : "\n⚠ sem estado de indicadores (foto anterior ao v68) — congele de novo") +
+        "\n\nToque em 2 para rodar com ela, ou em 1 para substituir.");
+      redesenhar();
     });
   }
 
   function iniciarGravacao(){
-    modo = "gravar"; buffer = {};
+    modo = "gravar"; buffer = {}; passo = "gravando";
     escrever("Gravando.\n\nAgora toque em ATUALIZAR DADOS DE MERCADO, lá em cima, e espere o log " +
              "dizer \"concluído\".\n\nDepois volte aqui e toque em SALVAR.");
-    botao1.textContent = "1 · SALVAR O QUE FOI GRAVADO";
-    botao1.onclick = salvarGravacao;
-  }
-
-  /* v68 — a fixture congelava a REDE mas não o ESTADO. Quando uma fonte falha
-     no replay, o sistema recorre ao último valor salvo em localStorage — que é
-     o de hoje, não o do dia congelado. Foi assim que o Geopolítico deu 17,36
-     num teste em que deveria dar 30: os payloads eram de ontem, o valor de
-     apoio era de hoje. Uma ferramenta de regressão que mistura duas épocas não
-     prova o que promete. Agora a foto leva o valor, a nota e o carimbo de cada
-     indicador, e o replay restaura tudo antes de rodar. */
-  function capturarIndicadores(){
-    const out = {};
-    Object.entries(S.motors).forEach(function(par){
-      const mk = par[0], motor = par[1];
-      Object.keys(motor.indicators).forEach(function(ik){
-        const i = motor.indicators[ik];
-        out[mk + "." + ik] = {
-          value: i.value === undefined ? null : i.value,
-          note: i.note || "",
-          updatedAt: i.updatedAt || null,
-          fetchFailed: !!i.fetchFailed,
-          saturado: !!i.saturado
-        };
-      });
-    });
-    return out;
-  }
-
-  function aplicarIndicadores(mapa){
-    if(!mapa) return;
-    Object.keys(mapa).forEach(function(chave){
-      const parte = chave.split(".");
-      const motor = S.motors[parte[0]];
-      const i = motor && motor.indicators[parte[1]];
-      if(!i) return;
-      const g = mapa[chave];
-      i.value = g.value; i.note = g.note; i.updatedAt = g.updatedAt;
-      i.fetchFailed = g.fetchFailed; i.saturado = g.saturado;
-    });
+    redesenhar();
   }
 
   function salvarGravacao(){
     if(!Object.keys(buffer).length){
-      escrever("Nenhuma chamada foi capturada. Você chegou a tocar em ATUALIZAR DADOS DE MERCADO?");
+      escrever("Nenhuma chamada foi capturada.\n\nVocê chegou a tocar em ATUALIZAR DADOS DE MERCADO " +
+               "entre um toque e outro? Sem isso não há payload para guardar.");
       return;
     }
     const estado = lerEstado();
+    const capturadas = Object.keys(buffer).length;
     guardarFixture({
       build: BUILD_VERSION,
       capturadoEm: new DateOriginal().toISOString(),
       chamadas: buffer,
       indicadores: capturarIndicadores(),
       baseline: estado
-    }, () => {
-      modo = null;
-      botao1.textContent = "1 · CONGELAR OS DADOS DE HOJE";
-      botao1.onclick = iniciarGravacao;
-      escrever("Congelado: " + Object.keys(buffer).length + " chamadas.\n\n" +
+    }, function(){
+      modo = null; passo = "ocioso";
+      redesenhar();
+      // feedback no próprio botão: a mensagem de texto some se a tela estiver
+      // rolada, e sem sinal nenhum não dá para saber se o ciclo completou
+      const b = botoes[1];
+      b.textContent = "✓ SALVO";
+      setTimeout(function(){ redesenhar(); }, 2500);
+      escrever("✓ Congelado: " + capturadas + " chamadas + estado de todos os indicadores.\n\n" +
         "Baseline desta leitura:\n" + formatar(estado) +
-        "\n\nConfira se estes números batem com os relógios da tela. Se baterem, está pronto.");
+        "\n\nConfira se batem com os relógios da tela.");
+      verificarFixtureExistente();
     });
   }
 
   function iniciarReplay(){
-    lerFixture(fx => {
+    lerFixture(function(fx){
       if(!fx){ escrever("Nada congelado ainda. Faça o passo 1 primeiro."); return; }
-      congelado = fx; faltando = []; modo = "reproduzir";
+      congelado = fx; faltando = []; modo = "reproduzir"; passo = "congelado";
       travarRelogio(fx.capturadoEm);
-      estadoVivo = capturarIndicadores();   // guarda o vivo para devolver no passo 4
+      estadoVivo = capturarIndicadores();
       aplicarIndicadores(fx.indicadores);
+      redesenhar();
       escrever((fx.indicadores ? "" :
-        "⚠ Foto gravada antes do v68: não guardou o estado dos indicadores.\n" +
-        "Fontes que falharem vão cair em valores de HOJE. Congele de novo\n" +
-        "(passo 1) para um teste realmente isolado.\n\n") +
+        "⚠ Foto anterior ao v68: não guardou o estado dos indicadores.\n" +
+        "Fontes que falharem vão cair em valores de HOJE.\n\n") +
         "Dados congelados ativos.\nRelógio travado em " +
         new DateOriginal(fx.capturadoEm).toLocaleString("pt-BR") +
         "\nFoto gravada na build: " + (fx.build || "?") +
-        "\n\nAgora toque em ATUALIZAR DADOS DE MERCADO. Nada vai à internet — " +
-        "tudo vem da foto.\n\nQuando terminar, volte e toque em 3.");
+        "\n\nAgora toque em ATUALIZAR DADOS DE MERCADO. Nada vai à internet.\n" +
+        "Quando terminar, volte e toque em 3.");
     });
   }
 
   function sairDoModo(){
-    modo = null; congelado = null; faltando = [];
+    modo = null; congelado = null; faltando = []; passo = "ocioso";
     soltarRelogio();
-    // devolve o estado real — sem isto, sair do modo deixaria os indicadores do
-    // dia congelado se passando pela leitura atual
     if(estadoVivo){ aplicarIndicadores(estadoVivo); estadoVivo = null;
       if(typeof renderAll === "function") renderAll(); }
+    redesenhar();
     escrever("Modo congelado desligado. O relógio voltou ao normal e as próximas " +
              "atualizações vão à internet de novo.\n\nA foto continua guardada — " +
              "toque em 2 quando quiser usá-la outra vez.");
@@ -6852,7 +6881,7 @@ document.addEventListener("click", (e)=>{
     if(!congelado){ escrever("Rode o passo 2 antes de comparar."); return; }
     const novo = lerEstado(), base = congelado.baseline;
     let txt = "", mudaram = 0;
-    Object.keys(base).forEach(k => {
+    Object.keys(base).forEach(function(k){
       const a = base[k], b = novo[k];
       if(typeof a !== "number" || typeof b !== "number"){
         if(a !== b){ mudaram++; txt += "▲ " + k + ": " + a + " → " + b + "\n"; }
@@ -6865,19 +6894,20 @@ document.addEventListener("click", (e)=>{
              "   (" + (d > 0 ? "+" : "") + d.toFixed(2) + ")\n";
     });
     txt += "\n" + mudaram + " de " + Object.keys(base).length + " campos mudaram.";
-    if(!mudaram) txt += "\nNada mudou — esta versão reproduz a foto exatamente.";
+    if(!mudaram) txt += "\n✓ Nada mudou — esta versão reproduz a foto exatamente.";
     if(faltando.length) txt += "\n\nSem dado congelado para " + faltando.length +
-      " chamada(s) — a versão nova está buscando algo que a antiga não buscava:\n" +
-      faltando.join("\n");
+      " chamada(s) — a versão nova busca algo que a antiga não buscava:\n" + faltando.join("\n");
+    txt += "\n\nNão esqueça do passo 4 para voltar ao normal.";
     escrever(txt);
   }
 
   function formatar(o){
-    return Object.keys(o).map(k => "  " + k + ": " + o[k]).join("\n");
+    return Object.keys(o).map(function(k){ return "  " + k + ": " + o[k]; }).join("\n");
   }
 
   if(document.readyState === "loading") document.addEventListener("DOMContentLoaded", montarPainel);
   else montarPainel();
+
 })();
 
 /* =====================================================================
@@ -6940,15 +6970,31 @@ document.addEventListener("click", (e)=>{
       "primeira: " + primeiro.toLocaleString("pt-BR") + "\n" +
       "última:   " + ultimo.toLocaleString("pt-BR") + "\n";
 
-    // a barra estatística, sem maquiar
-    const meta = 777;
-    const pct = Math.min(100, (dias / meta) * 100);
-    txt += "\nrumo às ~" + meta + " observações independentes: " + pct.toFixed(1) + "%\n";
-    if(dias < 30) txt += "(cedo demais para qualquer conclusão — isto é coleta, não evidência)\n";
+    /* v69 — antes isto dizia "dia N de ~777", que dava a impressão de dois anos
+       de espera antes de qualquer resposta. Errado por dois motivos: 777 é a
+       amostra para provar um edge PEQUENO (55% vs 50%), e as perguntas úteis
+       agora são mais grosseiras; e cada leitura só vale 1/30 de observação no
+       horizonte de 30 dias, mas vale quase 1 inteira no de 1 dia — que é
+       justamente o que gravamos desde o v64. As perguntas têm marcos
+       diferentes, e mostrar só o mais distante desanima sem informar. */
+    const obs1d = snaps.filter(function(s){ return s.retornos && typeof s.retornos.d1 === "number"; }).length;
+    const MARCOS = [
+      { n: 40,  o: "distinguir indicador invertido de ruído" },
+      { n: 130, o: "detectar um edge grande (60% vs 50%)" },
+      { n: 777, o: "detectar um edge fino (55% vs 50%)" }
+    ];
+    const proximo = MARCOS.find(function(m){ return obs1d < m.n; }) || MARCOS[MARCOS.length-1];
+    txt += "\nobservações de 1 dia já vencidas: " + obs1d + "\n";
+    MARCOS.forEach(function(m){
+      const marca = obs1d >= m.n ? "✓" : (m === proximo ? "→" : " ");
+      txt += "  " + marca + " " + String(m.n).padStart(3) + " · " + m.o +
+             (m === proximo ? "  (faltam " + (m.n - obs1d) + ")" : "") + "\n";
+    });
+    txt += "3 leituras por dia ≈ 3 observações/dia neste horizonte.\n";
 
     const congelados = indicadoresCongelados(snaps, 3);
     if(congelados.length){
-      txt += "\n⚠ sem variação nos últimos 3 dias:\n";
+      txt += "\n⚠ idêntico em TODAS as leituras dos últimos 3 dias:\n";
       congelados.forEach(function(c){ txt += "  " + c.chave + " = " + c.valor + "\n"; });
       txt += "(pode ser normal em série lenta como CPI ou M2 — vale olhar se for algo que deveria oscilar)\n";
     }
@@ -6965,7 +7011,9 @@ document.addEventListener("click", (e)=>{
     // número sobe sozinho a cada dia coletado.
     const eye = document.getElementById("brandEyebrow");
     if(eye){
-      eye.textContent = "SEIOS Cripto · Coletando — dia " + dias + " de ~777";
+      const o1 = snaps.filter(function(x){ return x.retornos && typeof x.retornos.d1 === "number"; }).length;
+      eye.textContent = "SEIOS Cripto · Coletando — " + snaps.length + " leituras · " +
+                        o1 + " observações vencidas";
     }
     // com o painel fechado por padrão, um alerta que só vive lá dentro deixa de
     // ser alerta. O detector existe justamente para aparecer sem ser procurado.

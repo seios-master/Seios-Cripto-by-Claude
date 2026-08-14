@@ -626,12 +626,7 @@
     <button class="rel-btn" data-rel="panelDecision">Por que essa recomendação<span class="rb-sub">o raciocínio, fator por fator</span></button>
     <button class="rel-btn" data-rel="relChanges">O que mudou<span class="rb-sub">desde a atualização anterior</span></button>
     <button class="rel-btn" data-rel="relHorizon">Leitura por prazo<span class="rb-sub">curto, médio e longo separados</span></button>
-    <button class="rel-btn" data-rel="panelScenarios">Cenários<span class="rb-sub">a tese e o contraponto</span></button>
-    <button class="rel-btn" data-rel="panelPremises">Premissas<span class="rb-sub">o que sustenta cada cenário</span></button>
     <button class="rel-btn" data-rel="panelBacktest">Backtest e calibração<span class="rb-sub">o que 12 meses dizem — mensal</span></button>
-    <button class="rel-btn" data-rel="panelHistory">Histórico de decisões<span class="rb-sub">o que o sistema disse e quando</span></button>
-    <button class="rel-btn" data-rel="panelMemory">Memória e acurácia<span class="rb-sub">o que aconteceu depois</span></button>
-    <button class="rel-btn" data-rel="panelCaseEngine">Quem está acertando<span class="rb-sub">motor por motor, no seu uso</span></button>
     <button class="rel-btn" data-rel="relAjustes">Ajustar e conectar APIs<span class="rb-sub">chaves, valores manuais</span></button>
   </div>
 
@@ -963,7 +958,7 @@ const STORAGE_KEY = "seios_btc_v2";
 // fonte única da versão — usada no rodapé, no histórico e nos exports.
 // Muda toda vez que a fórmula de score/pesos muda, pra nunca misturar
 // decisões de regras diferentes como se fossem comparáveis.
-const BUILD_VERSION = "2026-08-14.66-cards";
+const BUILD_VERSION = "2026-08-14.67-fusao";
 
 // indicador padrão — auto = tenta buscar sozinho; manual = você preenche
 function ind(label, source, note){
@@ -2512,6 +2507,7 @@ async function refreshMarketData(){
     if(!snap) return;
     return preencherRetornos(snap.preco, snap.ts).then(function(){
       if(typeof renderPainelSerie === "function") renderPainelSerie();
+      if(typeof renderPainelAconteceu === "function") renderPainelAconteceu();
     });
   });
   if(typeof renderProxyChaveAviso === "function") renderProxyChaveAviso(); // atualiza o aviso se o proxy foi usado com chave nesta rodada
@@ -6832,8 +6828,13 @@ document.addEventListener("click", (e)=>{
       "color:var(--text-dim,#8a8);font-family:inherit;";
     caixa.appendChild(corpo);
 
-    virarCardRelatorio(caixa, "panelSerie", "Série point-in-time",
-      "o que o sistema viu, dia a dia");
+    // v67 — a série deixou de ser um card próprio: virou a FONTE do painel
+    // "O que já aconteceu". O bloco continua vivo (grava, exporta, detecta
+    // congelado), só não ocupa mais um botão na barra.
+    caixa.className = "panel rel-panel";
+    caixa.id = "panelSerie";
+    caixa.hidden = true;
+    (document.getElementById("deepDive") || document.body).appendChild(caixa);
     atualizar();
   }
 
@@ -6920,6 +6921,9 @@ document.addEventListener("click", (e)=>{
   }
 
   window.renderPainelSerie = atualizar;
+  // o painel fundido reaproveita estes dois comandos em vez de duplicá-los
+  window.copiarDiagnosticoSeios = copiarDiagnostico;
+  window.exportarSerieSeios = exportar;
 
   // o botão do topo é o mesmo comando do painel: a rotina diária não deveria
   // exigir rolar seis mil pixels até o rodapé
@@ -7351,6 +7355,159 @@ document.addEventListener("click", (e)=>{
       "laboratório — sala separada, não altera nada");
   }
 
+  if(document.readyState === "loading") document.addEventListener("DOMContentLoaded", montar);
+  else montar();
+})();
+
+
+/* =====================================================================
+   § O QUE JÁ ACONTECEU (v67) — fusão de quatro painéis numa fonte só
+   =====================================================================
+   Até aqui havia QUATRO painéis olhando o mesmo passado por recortes
+   diferentes: Histórico de decisões, Memória e acurácia, Quem está acertando
+   e Série point-in-time. Os três primeiros liam S.history; o quarto grava um
+   superconjunto muito mais rico — indicador por indicador, cobertura, falhas,
+   retornos — e nenhum deles o consultava. Quatro botões, duas verdades que
+   não conversavam.
+
+   Agora é um painel só, lendo a série. O ganho não é de espaço: é que
+   passa a ser possível perguntar por INDICADOR, não só por motor, e usando
+   retornos já gravados em 1, 3 e 30 dias.
+
+   Ainda não responde nada — 4 leituras não respondem. Mas cada linha aqui
+   mostra o caminho, não só o número: quantas observações, de que dias, com
+   que cobertura. Quando houver conclusão, ela virá auditável.
+   ===================================================================== */
+(function(){
+  let caixa, corpo;
+
+  function media(a){ return a.length ? a.reduce(function(x,y){return x+y;},0)/a.length : null; }
+  function fmt(v, casas){ return (v===null||v===undefined||Number.isNaN(v)) ? "—" : Number(v).toFixed(casas===undefined?2:casas); }
+
+  function montar(){
+    caixa = document.createElement("section");
+    caixa.innerHTML =
+      '<div class="panel-head"><div>' +
+      '<div class="panel-kicker">§ registro e avaliação</div>' +
+      '<h2 class="panel-title">O que já aconteceu</h2></div></div>' +
+      '<p class="panel-sub">Tudo aqui vem da série point-in-time — o que o sistema viu no instante da leitura, ' +
+      'com o retorno que veio depois. Não é simulação nem reconstrução.</p>';
+
+    const bar = document.createElement("div");
+    bar.style.cssText = "display:flex;gap:8px;flex-wrap:wrap;margin:10px 0;";
+    [["⧉ Copiar diagnóstico", function(){ if(window.copiarDiagnosticoSeios) window.copiarDiagnosticoSeios(); }],
+     ["⇩ Exportar a série (.csv)", function(){ if(window.exportarSerieSeios) window.exportarSerieSeios(); }]]
+      .forEach(function(par){
+        const b = document.createElement("button");
+        b.className = "small";
+        b.textContent = par[0];
+        b.onclick = par[1];
+        bar.appendChild(b);
+      });
+    caixa.appendChild(bar);
+
+    corpo = document.createElement("pre");
+    corpo.style.cssText = "white-space:pre-wrap;margin:10px 0 0;font-size:12px;line-height:1.55;" +
+      "color:var(--text-dim,#8a8);font-family:var(--font-mono,ui-monospace,monospace);";
+    caixa.appendChild(corpo);
+
+    virarCardRelatorio(caixa, "panelAconteceu", "O que já aconteceu",
+      "registro, acurácia e motor por motor");
+    atualizar();
+  }
+
+  async function atualizar(){
+    const snaps = await lerSnapshots();
+    if(!corpo) return;
+    if(!snaps.length){ corpo.textContent = "Nenhuma leitura gravada ainda."; return; }
+
+    const dias = new Set(snaps.map(function(s){ return s.ts.slice(0,10); })).size;
+    let t = "";
+
+    /* --- 1. registro --- */
+    t += "REGISTRO — últimas leituras\n";
+    snaps.slice(-12).reverse().forEach(function(s){
+      const r = s.retornos || {};
+      t += "  " + new Date(s.ts).toLocaleString("pt-BR").replace(",","") +
+           "  " + String(fmt(s.score,1)).padStart(6) +
+           "  " + String(s.rotulo||"—").padEnd(8) +
+           "  $" + (s.preco ? Math.round(s.preco).toLocaleString("en-US") : "—") +
+           "   1d " + fmt(r.d1,2) + "  3d " + fmt(r.d3,2) + "  30d " + fmt(r.d30,2) + "\n";
+    });
+    t += "  (retorno vazio = o prazo ainda não venceu)\n";
+
+    /* --- 2. por recomendação --- */
+    t += "\nPOR RECOMENDAÇÃO — o que veio depois\n";
+    const porAcao = {};
+    snaps.forEach(function(s){
+      const k = s.acao || s.rotulo || "—";
+      porAcao[k] = porAcao[k] || { d1:[], d3:[], d30:[], n:0 };
+      porAcao[k].n++;
+      ["d1","d3","d30"].forEach(function(h){
+        const v = s.retornos && s.retornos[h];
+        if(typeof v === "number") porAcao[k][h].push(v);
+      });
+    });
+    Object.keys(porAcao).forEach(function(k){
+      const g = porAcao[k];
+      t += "  " + k + " · " + g.n + " leitura(s)\n" +
+           "      1d " + fmt(media(g.d1)) + "% (n=" + g.d1.length + ")" +
+           "   3d " + fmt(media(g.d3)) + "% (n=" + g.d3.length + ")" +
+           "   30d " + fmt(media(g.d30)) + "% (n=" + g.d30.length + ")\n";
+    });
+
+    /* --- 3. motor por motor --- */
+    t += "\nMOTOR POR MOTOR — quando esteve bullish (≥15) vs bearish (≤−15)\n";
+    Object.keys(S.motors).forEach(function(mk){
+      const bull = [], bear = [];
+      snaps.forEach(function(s){
+        const c = s.composites && s.composites[mk];
+        const r = s.retornos && s.retornos.d1;
+        if(typeof c !== "number" || typeof r !== "number") return;
+        if(c >= 15) bull.push(r); else if(c <= -15) bear.push(r);
+      });
+      if(!bull.length && !bear.length) return;
+      const sp = (media(bull)!==null && media(bear)!==null) ? media(bull)-media(bear) : null;
+      t += "  " + S.motors[mk].label + ": bull " + fmt(media(bull)) + "% (n=" + bull.length + ")" +
+           " · bear " + fmt(media(bear)) + "% (n=" + bear.length + ")" +
+           (sp!==null ? " · spread " + fmt(sp) : "") + "\n";
+    });
+
+    /* --- 4. indicador por indicador — só a série permite --- */
+    t += "\nINDICADOR POR INDICADOR — o que S.history nunca guardou\n";
+    const chaves = {};
+    snaps.forEach(function(s){ Object.keys(s.indicadores||{}).forEach(function(k){ chaves[k]=1; }); });
+    const linhas = [];
+    Object.keys(chaves).forEach(function(k){
+      const bull = [], bear = [];
+      snaps.forEach(function(s){
+        const i = s.indicadores && s.indicadores[k];
+        const r = s.retornos && s.retornos.d1;
+        if(!i || typeof i.valor !== "number" || typeof r !== "number") return;
+        if(i.valor >= 15) bull.push(r); else if(i.valor <= -15) bear.push(r);
+      });
+      if(bull.length + bear.length < 1) return;
+      const sp = (media(bull)!==null && media(bear)!==null) ? media(bull)-media(bear) : null;
+      linhas.push({ k:k, n:bull.length+bear.length, sp:sp,
+        txt: "  " + k + ": bull " + fmt(media(bull)) + "% (n=" + bull.length + ")" +
+             " · bear " + fmt(media(bear)) + "% (n=" + bear.length + ")" +
+             (sp!==null ? " · spread " + fmt(sp) : "") });
+    });
+    linhas.sort(function(a,b){ return (b.sp===null?-99:b.sp) - (a.sp===null?-99:a.sp); });
+    linhas.forEach(function(l){ t += l.txt + "\n"; });
+    if(!linhas.length) t += "  (nenhum indicador com retorno vencido ainda)\n";
+
+    /* --- rodapé honesto --- */
+    const nef1 = snaps.filter(function(s){ return s.retornos && typeof s.retornos.d1 === "number"; }).length;
+    t += "\n────────\n" + snaps.length + " leitura(s) · " + dias + " dia(s) · " +
+         nef1 + " com retorno de 1 dia já vencido\n";
+    if(nef1 < 30) t += "AVISO: abaixo de ~30 observações nada aqui é evidência. É registro.\n";
+    t += "Para uma diferença de 55% vs 50% ser detectável, são necessárias ~777 observações independentes.\n";
+
+    corpo.textContent = t;
+  }
+
+  window.renderPainelAconteceu = atualizar;
   if(document.readyState === "loading") document.addEventListener("DOMContentLoaded", montar);
   else montar();
 })();

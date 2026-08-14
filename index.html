@@ -959,7 +959,7 @@ const STORAGE_KEY = "seios_btc_v2";
 // fonte única da versão — usada no rodapé, no histórico e nos exports.
 // Muda toda vez que a fórmula de score/pesos muda, pra nunca misturar
 // decisões de regras diferentes como se fossem comparáveis.
-const BUILD_VERSION = "2026-08-13.61-serie-diaria";
+const BUILD_VERSION = "2026-08-14.63-laboratorio";
 
 // indicador padrão — auto = tenta buscar sozinho; manual = você preenche
 function ind(label, source, note){
@@ -3023,6 +3023,84 @@ function indicadoresCongelados(snaps, minRepeticoes){
     if(vals.every(function(v){ return v === primeiro; })) out.push({ chave: k, valor: primeiro, leituras: min });
   });
   return out;
+}
+
+/* RELATÓRIO DE DIAGNÓSTICO (v62) — a leitura inteira em texto, para colar
+   numa conversa. Substitui a sequência de prints: além de ser um toque em vez
+   de nove, carrega o que a tela não mostra — nota de cada indicador, quais
+   fontes falharam, cobertura automática, concentração. Um print mostra o
+   resultado; isto mostra o resultado E o que o produziu. */
+function relatorioTexto(snap, snaps){
+  const L = [];
+  const num = function(v, casas){
+    if(v === null || v === undefined || Number.isNaN(v)) return "—";
+    return (casas === undefined) ? String(v) : Number(v).toFixed(casas);
+  };
+  const pct = function(v){ return (v === null || v === undefined) ? "—" : (v*100).toFixed(1) + "%"; };
+
+  L.push("SEIOS · DIAGNÓSTICO");
+  L.push("build " + snap.build);
+  L.push("leitura " + new Date(snap.ts).toLocaleString("pt-BR"));
+  L.push("BTC " + (snap.preco === null ? "—" : "$" + Number(snap.preco).toLocaleString("en-US")) +
+         " · 24h " + num(snap.variacao24h, 2) + "%");
+  L.push("");
+  L.push("VEREDITO: " + (snap.rotulo || "—") + " · " + (snap.acao || "—"));
+  L.push("score " + num(snap.score, 2) +
+         " · horizontes " + num(snap.horizontes.curto, 1) + " / " +
+         num(snap.horizontes.medio, 1) + " / " + num(snap.horizontes.longo, 1));
+  L.push("cobertura " + pct(snap.cobertura) +
+         " · coleta auto " + pct(snap.coberturaAuto) +
+         " · concentração " + pct(snap.concentracao));
+  if(snap.travadoPor) L.push("TRAVADO: " + snap.travadoPor);
+  L.push("");
+
+  L.push("MOTORES (score · peso efetivo)");
+  Object.keys(S.motors).forEach(function(mk){
+    const c = snap.composites[mk];
+    const w = snap.pesosEfetivos[mk];
+    L.push("  " + S.motors[mk].label + ": " +
+           (c === null || c === undefined ? "sem dado" : num(c, 2)) +
+           " · " + pct(w) + " (nominal " + (S.motors[mk].weight*100).toFixed(0) + "%)");
+  });
+  L.push("");
+
+  L.push("INDICADORES");
+  Object.keys(snap.indicadores).forEach(function(k){
+    const i = snap.indicadores[k];
+    let linha = "  " + k + ": " + (i.valor === null ? "—" : num(i.valor, 2));
+    if(i.vigente === null && i.valor !== null) linha += " [EXPIRADO, fora da conta]";
+    if(i.falhou) linha += " [FALHOU]";
+    if(i.saturado) linha += " [SATURADO]";
+    if(i.nota) linha += "  — " + i.nota;
+    L.push(linha);
+  });
+  L.push("");
+
+  if(snap.falhas && snap.falhas.length){
+    L.push("FALHAS NESTA RODADA (" + snap.falhas.length + ")");
+    snap.falhas.forEach(function(f){ L.push("  " + f); });
+    L.push("");
+  } else {
+    L.push("nenhuma falha nesta rodada");
+    L.push("");
+  }
+
+  if(snaps && snaps.length){
+    const dias = new Set(snaps.map(function(x){ return x.ts.slice(0,10); })).size;
+    L.push("SÉRIE: " + snaps.length + " leitura(s) · " + dias + " dia(s) · " +
+           ((dias/777)*100).toFixed(1) + "% de ~777");
+    const cong = indicadoresCongelados(snaps, 3);
+    if(cong.length){
+      L.push("sem variação em 3 leituras: " + cong.map(function(c){ return c.chave; }).join(", "));
+    }
+    if(snaps.length > 1){
+      const ant = snaps[snaps.length-2];
+      const d = snap.score - ant.score;
+      L.push("score na leitura anterior: " + num(ant.score,2) +
+             " (" + (d>=0?"+":"") + d.toFixed(2) + ")");
+    }
+  }
+  return L.join("\n");
 }
 
 function snapshotsParaCSV(snaps){
@@ -6600,6 +6678,14 @@ document.addEventListener("click", (e)=>{
       'Cada atualização grava uma foto imutável desta leitura — com o valor que a fonte deu no momento, ' +
       'as falhas que houve e a cobertura que havia. É a série que o backtest reconstruído não consegue produzir.</div>';
 
+    const bd = document.createElement("button");
+    bd.textContent = "⧉ COPIAR DIAGNÓSTICO (pra colar na conversa)";
+    bd.style.cssText = "display:block;width:100%;margin:6px 0;padding:14px;text-align:left;" +
+      "background:rgba(4,32,14,.8);color:var(--accent,#7f7);border:1px solid var(--line-soft,#2f7);" +
+      "border-radius:4px;font-family:inherit;font-size:13px;letter-spacing:.04em;";
+    bd.onclick = copiarDiagnostico;
+    caixa.appendChild(bd);
+
     const b = document.createElement("button");
     b.textContent = "⇩ EXPORTAR A SÉRIE (.CSV)";
     b.style.cssText = "display:block;width:100%;margin:6px 0;padding:14px;text-align:left;" +
@@ -6650,6 +6736,32 @@ document.addEventListener("click", (e)=>{
     corpo.textContent = txt;
   }
 
+  async function copiarDiagnostico(){
+    const snaps = await lerSnapshots();
+    let snap = snaps.length ? snaps[snaps.length-1] : null;
+    if(!snap){
+      try{ snap = montarSnapshot(null); }catch(e){
+        corpo.textContent = "Não consegui montar o diagnóstico. Rode uma atualização primeiro.";
+        return;
+      }
+    }
+    const txt = relatorioTexto(snap, snaps);
+    try{
+      await navigator.clipboard.writeText(txt);
+      corpo.textContent = "Diagnóstico copiado. É só colar na conversa.\n\n" + txt;
+    }catch(e){
+      // iOS bloqueia clipboard fora de gesto direto em alguns casos — cai para
+      // um campo selecionável, que sempre funciona
+      const ta = document.createElement("textarea");
+      ta.value = txt;
+      ta.style.cssText = "width:100%;height:220px;margin-top:10px;background:#020;color:#8f8;" +
+        "border:1px solid #2f7;font-family:inherit;font-size:11px;padding:8px;";
+      corpo.textContent = "Não consegui copiar automaticamente. Segure no texto abaixo, selecione tudo e copie:";
+      corpo.appendChild(ta);
+      ta.focus(); ta.select();
+    }
+  }
+
   async function exportar(){
     const snaps = await lerSnapshots();
     if(!snaps.length){ corpo.textContent = "Nada gravado ainda para exportar."; return; }
@@ -6662,6 +6774,383 @@ document.addEventListener("click", (e)=>{
   }
 
   window.renderPainelSerie = atualizar;
+
+  if(document.readyState === "loading") document.addEventListener("DOMContentLoaded", montar);
+  else montar();
+})();
+
+
+/* =====================================================================
+   § LABORATÓRIO HISTÓRICO (v63) — SALA SEPARADA
+   =====================================================================
+   Nada aqui toca em S, nos motores, nos pesos, no score ou no veredito. Só lê
+   séries públicas, calcula em variáveis locais e escreve num painel próprio.
+   Isso é deliberado: o laboratório existe para levantar hipóteses, e hipótese
+   levantada em dado revisado não pode ter direito de alterar o sistema vivo.
+   Quem decide mudar peso é o Jorge, depois, com a série point-in-time
+   confirmando — não este botão.
+
+   POR QUE O RESULTADO AQUI VALE MENOS DO QUE PARECE
+
+   1. Sobreposição. Retorno de 30 dias medido em dias consecutivos: duas
+      leituras vizinhas compartilham 29 dias de futuro. 500 dias de amostra não
+      são 500 observações — são ~17. Por isso reportamos N efetivo, não dias, e
+      por isso medimos também 1 e 3 dias, onde a independência é quase real.
+
+   2. Look-ahead do FRED. Para uma data passada, a API devolve o valor REVISADO
+      de hoje, não o que foi divulgado naquele dia. Todo bloco que usa FRED
+      carrega essa marca.
+
+   3. Garimpo. Testar muitas combinações contra pouca amostra sempre produz um
+      vencedor. Por isso testamos poucos blocos temáticos em vez de todas as
+      combinações possíveis, e por isso o número que vale é o da VALIDAÇÃO —
+      o pedaço final da série, que nenhum ajuste viu.
+
+   O que este laboratório faz bem é DESCARTAR. Um indicador que não mostra nada
+   em cinco anos, com dado revisado jogando a favor, dificilmente vai mostrar
+   algo point-in-time. Eliminar peso morto é conclusão segura; eleger vencedor
+   não é.
+   ===================================================================== */
+(function(){
+  const LAB = { rodando:false, dados:null };
+  let caixa, saida, botao;
+
+  function log(t){ if(saida) saida.textContent = t; }
+  function addLog(t){ if(saida) saida.textContent += "\n" + t; }
+
+  /* ---------- séries ---------- */
+
+  // Binance klines diários, paginado para trás. Preço e ouro (PAXG) vêm daqui:
+  // o CoinGecko gratuito corta em 365 dias, o Binance tem desde 2017 e não pede chave.
+  async function klinesDiarios(symbol, dias){
+    const out = [];
+    let fim = Date.now();
+    const alvo = Date.now() - dias*24*3600*1000;
+    for(let volta=0; volta<8 && fim > alvo; volta++){
+      const url = "https://api.binance.com/api/v3/klines?symbol=" + symbol +
+                  "&interval=1d&limit=1000&endTime=" + fim;
+      const res = await smartFetch(url);
+      if(!res.ok) throw new Error(symbol + " falhou (" + res.status + ")");
+      const rows = await res.json();
+      if(!rows.length) break;
+      rows.forEach(function(r){
+        out.push({ date: new Date(r[0]).toISOString().slice(0,10), close: parseFloat(r[4]) });
+      });
+      fim = rows[0][0] - 24*3600*1000;
+      if(rows.length < 1000) break;
+    }
+    const mapa = {};
+    out.forEach(function(o){ mapa[o.date] = o.close; });
+    return mapa;
+  }
+
+  async function fngHistorico(){
+    const res = await smartFetch("https://api.alternative.me/fng/?limit=0");
+    if(!res.ok) throw new Error("Fear & Greed falhou");
+    const j = await res.json();
+    const mapa = {};
+    (j.data || []).forEach(function(d){
+      mapa[new Date(parseInt(d.timestamp,10)*1000).toISOString().slice(0,10)] = parseFloat(d.value);
+    });
+    return mapa;
+  }
+
+  async function coinMetricsHistorico(){
+    const url = "https://community-api.coinmetrics.io/v4/timeseries/asset-metrics" +
+                "?assets=btc&metrics=CapMVRVCur,AdrActCnt&frequency=1d&page_size=10000";
+    const res = await smartFetch(url);
+    if(!res.ok) throw new Error("CoinMetrics falhou");
+    const j = await res.json();
+    const mvrv = {}, addr = {};
+    (j.data || []).forEach(function(r){
+      const d = String(r.time).slice(0,10);
+      if(r.CapMVRVCur !== undefined) mvrv[d] = parseFloat(r.CapMVRVCur);
+      if(r.AdrActCnt !== undefined) addr[d] = parseFloat(r.AdrActCnt);
+    });
+    return { mvrv: mvrv, addr: addr };
+  }
+
+  async function fredHistorico(serie, apiKey, inicio){
+    const url = "https://api.stlouisfed.org/fred/series/observations?series_id=" + serie +
+      "&api_key=" + encodeURIComponent(apiKey) + "&file_type=json&sort_order=asc" +
+      "&observation_start=" + inicio;
+    const res = await smartFetch(url);
+    if(!res.ok) throw new Error("FRED " + serie + " falhou");
+    const j = await res.json();
+    const mapa = {};
+    (j.observations || []).forEach(function(o){
+      const v = parseFloat(o.value);
+      if(!Number.isNaN(v)) mapa[o.date] = v;
+    });
+    return mapa;
+  }
+
+  /* ---------- utilidades ---------- */
+
+  function preencher(mapa, datas){ // carrega o último valor conhecido para frente
+    const out = {}; let ultimo = null;
+    datas.forEach(function(d){
+      if(mapa[d] !== undefined) ultimo = mapa[d];
+      out[d] = ultimo;
+    });
+    return out;
+  }
+
+  function variacaoPct(mapa, datas, janela){
+    const out = {};
+    datas.forEach(function(d, i){
+      const j = Math.max(0, i - janela);
+      const a = mapa[datas[j]], b = mapa[d];
+      out[d] = (a && b) ? ((b - a)/a)*100 : null;
+    });
+    return out;
+  }
+
+  function rsiDe(closes, periodo){
+    const out = [];
+    for(let i=0;i<closes.length;i++){
+      if(i < periodo){ out.push(null); continue; }
+      let g=0,p=0;
+      for(let k=i-periodo+1;k<=i;k++){
+        const d = closes[k]-closes[k-1];
+        if(d>=0) g+=d; else p-=d;
+      }
+      const rs = p===0 ? 100 : g/p;
+      out.push(100 - (100/(1+rs)));
+    }
+    return out;
+  }
+
+  const suave = function(x, meia){
+    if(x===null||x===undefined||Number.isNaN(x)) return null;
+    return 100*Math.tanh(x/meia);
+  };
+
+  // média dos indicadores disponíveis do bloco naquele dia
+  function scoreBloco(linha, chaves){
+    const vals = chaves.map(function(k){ return linha[k]; })
+                       .filter(function(v){ return v!==null && v!==undefined && !Number.isNaN(v); });
+    if(!vals.length) return null;
+    return vals.reduce(function(a,b){return a+b;},0)/vals.length;
+  }
+
+  /* ---------- avaliação ---------- */
+
+  // retorno futuro em h dias e o N EFETIVO: janelas sobrepostas não são
+  // observações independentes, então dividimos por h. É a diferença entre
+  // "14 dias" e "≈1 evento", que foi o que nos enganou no primeiro backtest.
+  function avaliar(linhas, chaveScore, h, limiar){
+    const bull = [], bear = [], todos = [];
+    for(let i=0;i<linhas.length-h;i++){
+      const r = ((linhas[i+h].preco - linhas[i].preco)/linhas[i].preco)*100;
+      todos.push(r);
+      const s = linhas[i][chaveScore];
+      if(s===null||s===undefined) continue;
+      if(s >= limiar) bull.push(r);
+      else if(s <= -limiar) bear.push(r);
+    }
+    const media = function(a){ return a.length ? a.reduce(function(x,y){return x+y;},0)/a.length : null; };
+    const subiu = function(a){ return a.length ? (a.filter(function(x){return x>0;}).length/a.length)*100 : null; };
+    return {
+      ref: media(todos), refN: todos.length,
+      bull: media(bull), bullN: bull.length, bullNef: Math.floor(bull.length/h), bullUp: subiu(bull),
+      bear: media(bear), bearN: bear.length, bearNef: Math.floor(bear.length/h), bearUp: subiu(bear),
+      spread: (media(bull)!==null && media(bear)!==null) ? media(bull)-media(bear) : null
+    };
+  }
+
+  /* ---------- rodada ---------- */
+
+  async function rodar(){
+    if(LAB.rodando) return;
+    LAB.rodando = true;
+    botao.disabled = true;
+    botao.textContent = "⏳ APRENDENDO…";
+    const DIAS = 1825; // ~5 anos
+    const faltando = [];
+
+    try{
+      log("Buscando preço diário (Binance, ~5 anos)…");
+      const precoMap = await klinesDiarios("BTCUSDT", DIAS);
+      const datas = Object.keys(precoMap).sort();
+      if(datas.length < 400) throw new Error("preço histórico insuficiente");
+      addLog("preço: " + datas.length + " dias (" + datas[0] + " → " + datas[datas.length-1] + ")");
+
+      let fng = {};
+      try{ fng = await fngHistorico(); addLog("Fear & Greed: " + Object.keys(fng).length + " dias"); }
+      catch(e){ faltando.push("Fear & Greed"); }
+
+      let cm = { mvrv:{}, addr:{} };
+      try{ cm = await coinMetricsHistorico(); addLog("CoinMetrics MVRV: " + Object.keys(cm.mvrv).length + " dias"); }
+      catch(e){ faltando.push("MVRV / endereços ativos"); }
+
+      let ouro = {};
+      try{ ouro = await klinesDiarios("PAXGUSDT", DIAS); addLog("ouro (PAXG): " + Object.keys(ouro).length + " dias"); }
+      catch(e){ faltando.push("ouro"); }
+
+      // FRED só entra com chave — e carrega look-ahead
+      const fredKey = (S.apiKeys && S.apiKeys.fred) || "";
+      let macro = null;
+      if(fredKey){
+        macro = {};
+        const inicio = datas[0];
+        const series = { juros:"DFF", dxy:"DTWEXBGS", curva:"T10Y2Y", sp500:"SP500", petroleo:"DCOILWTICO" };
+        for(const nome in series){
+          try{ macro[nome] = await fredHistorico(series[nome], fredKey, inicio); }
+          catch(e){ faltando.push("FRED " + series[nome]); }
+        }
+        addLog("FRED: " + Object.keys(macro).length + " série(s) — atenção: valores REVISADOS");
+      } else {
+        faltando.push("todo o bloco Macro e Ativos Globais (sem chave FRED)");
+      }
+
+      addLog("\nMontando a tabela diária…");
+
+      const closes = datas.map(function(d){ return precoMap[d]; });
+      const rsi = rsiDe(closes, 14);
+      const ma50 = closes.map(function(_,i){
+        if(i<50) return null;
+        let s=0; for(let k=i-49;k<=i;k++) s+=closes[k];
+        return s/50;
+      });
+
+      const fngF = preencher(fng, datas);
+      const mvrvF = preencher(cm.mvrv, datas);
+      const addrF = preencher(cm.addr, datas);
+      const ouroVar = variacaoPct(preencher(ouro, datas), datas, 90);
+      const mJuros = macro && macro.juros ? preencher(macro.juros, datas) : null;
+      const mDxy   = macro && macro.dxy   ? variacaoPct(preencher(macro.dxy, datas), datas, 90) : null;
+      const mCurva = macro && macro.curva ? preencher(macro.curva, datas) : null;
+      const mSp    = macro && macro.sp500 ? variacaoPct(preencher(macro.sp500, datas), datas, 90) : null;
+      const mOil   = macro && macro.petroleo ? variacaoPct(preencher(macro.petroleo, datas), datas, 90) : null;
+
+      const linhas = datas.map(function(d, i){
+        const l = { data:d, preco:closes[i] };
+        // mesmas transformações do sistema vivo, escala suave
+        l.i_rsi   = rsi[i]===null ? null : suave(-(rsi[i]-50), 25);
+        l.i_ma50  = ma50[i] ? suave(((closes[i]-ma50[i])/ma50[i])*100, 12) : null;
+        l.i_fng   = fngF[d]===null ? null : suave(-(fngF[d]-50), 25);
+        l.i_mvrv  = mvrvF[d]===null ? null : suave((2-mvrvF[d])*40, 40);
+        l.i_addr  = addrF[d]===null ? null : suave((addrF[d]-800000)/8000, 40);
+        l.i_ouro  = ouroVar[d]===null ? null : suave(ouroVar[d], 15);
+        l.i_juros = mJuros && mJuros[d]!==null ? suave(-(mJuros[d]-3), 2) : null;
+        l.i_dxy   = mDxy && mDxy[d]!==null ? suave(-mDxy[d], 5) : null;
+        l.i_curva = mCurva && mCurva[d]!==null ? suave(mCurva[d]*40, 40) : null;
+        l.i_sp    = mSp && mSp[d]!==null ? suave(mSp[d], 8) : null;
+        l.i_oil   = mOil && mOil[d]!==null ? suave(-mOil[d], 15) : null;
+        return l;
+      });
+
+      // blocos temáticos — poucos e limpos, não todas as combinações
+      const BLOCOS = [
+        { nome:"Técnico (RSI + MA50)",        chaves:["i_rsi","i_ma50"],            fred:false },
+        { nome:"Sentimento (F&G)",            chaves:["i_fng"],                     fred:false },
+        { nome:"On-chain (MVRV + endereços)", chaves:["i_mvrv","i_addr"],           fred:false },
+        { nome:"Ouro (var. 90d)",             chaves:["i_ouro"],                    fred:false },
+        { nome:"Macro (juros+DXY+curva)",     chaves:["i_juros","i_dxy","i_curva"], fred:true  },
+        { nome:"Ativos globais (SP500+óleo)", chaves:["i_sp","i_oil"],              fred:true  },
+        { nome:"TUDO junto",                  chaves:["i_rsi","i_ma50","i_fng","i_mvrv","i_addr","i_ouro","i_juros","i_dxy","i_curva","i_sp","i_oil"], fred:!!macro }
+      ];
+
+      BLOCOS.forEach(function(b, idx){
+        const k = "s" + idx;
+        b.chave = k;
+        linhas.forEach(function(l){ l[k] = scoreBloco(l, b.chaves); });
+      });
+
+      // corte temporal: 70% treino, 30% validação. A validação nunca foi
+      // olhada para escolher nada — é o único número que merece atenção.
+      const corte = Math.floor(linhas.length * 0.7);
+      const treino = linhas.slice(0, corte);
+      const valid  = linhas.slice(corte);
+
+      let txt = "LABORATÓRIO HISTÓRICO — " + datas.length + " dias\n" +
+        "treino: " + treino[0].data + " → " + treino[treino.length-1].data + " (" + treino.length + "d)\n" +
+        "validação: " + valid[0].data + " → " + valid[valid.length-1].data + " (" + valid.length + "d)\n";
+
+      if(faltando.length){
+        txt += "\nSEM SÉRIE HISTÓRICA (fora deste teste):\n  " + faltando.join("\n  ") +
+               "\n  Derivativos, funding, put/call, tom de notícias e fluxo de ETF não têm\n" +
+               "  história pública gratuita — nada aqui diz respeito a eles.\n";
+      }
+
+      [1,3,30].forEach(function(h){
+        txt += "\n───────── HORIZONTE " + h + " DIA" + (h>1?"S":"") + " ─────────\n";
+        const refV = avaliar(valid, "s0", h, 15).ref;
+        txt += "referência (qualquer dia, validação): " + refV.toFixed(2) + "%\n";
+        if(h===30) txt += "(N efetivo da validação ≈ " + Math.floor(valid.length/30) + " — leia com desconfiança)\n";
+        txt += "\n";
+
+        BLOCOS.forEach(function(b){
+          const t = avaliar(treino, b.chave, h, 15);
+          const v = avaliar(valid,  b.chave, h, 15);
+          if(v.bull===null && v.bear===null){ txt += b.nome + ": sem dados\n"; return; }
+          txt += b.nome + (b.fred ? " [look-ahead FRED]" : "") + "\n";
+          txt += "   treino    bull " + (t.bull===null?"—":t.bull.toFixed(2)+"%") +
+                 " · bear " + (t.bear===null?"—":t.bear.toFixed(2)+"%") +
+                 " · spread " + (t.spread===null?"—":t.spread.toFixed(2)) + "\n";
+          txt += "   VALIDAÇÃO bull " + (v.bull===null?"—":v.bull.toFixed(2)+"%") +
+                 " (Nef " + v.bullNef + ")" +
+                 " · bear " + (v.bear===null?"—":v.bear.toFixed(2)+"%") +
+                 " (Nef " + v.bearNef + ")" +
+                 " · spread " + (v.spread===null?"—":v.spread.toFixed(2)) + "\n";
+          if(v.spread!==null && t.spread!==null && (v.spread*t.spread < 0))
+            txt += "   ⚠ inverteu entre treino e validação — não sobreviveu fora da amostra\n";
+          txt += "\n";
+        });
+      });
+
+      txt += "\nCOMO LER: 'spread' é bull menos bear. Positivo e consistente entre\n" +
+             "treino e validação é o mínimo para um bloco merecer atenção. Nef é o\n" +
+             "número de observações independentes: abaixo de 30, é anedota.\n" +
+             "Nada aqui alterou o sistema vivo.";
+
+      log(txt);
+      LAB.dados = { linhas: linhas, blocos: BLOCOS };
+
+    }catch(e){
+      log("Não consegui completar: " + e.message +
+          "\n\nO sistema vivo não foi afetado.");
+    }finally{
+      LAB.rodando = false;
+      botao.disabled = false;
+      botao.textContent = "🧪 APRENDER COM O PASSADO";
+    }
+  }
+
+  /* ---------- painel ---------- */
+  function montar(){
+    caixa = document.createElement("div");
+    caixa.className = "wrap";
+    caixa.style.cssText = "position:relative;z-index:2;margin:20px auto 40px;padding:16px;" +
+      "border:1px dashed var(--line-soft,#2f7);border-radius:6px;background:#07050B;" +
+      "font-family:var(--font-mono,ui-monospace,Menlo,monospace);";
+    caixa.innerHTML =
+      '<div style="font-size:11px;letter-spacing:.14em;color:var(--text-faint,#6a6);margin-bottom:4px">' +
+      '§ LABORATÓRIO — SALA SEPARADA</div>' +
+      '<div style="font-size:16px;color:var(--text,#cfc);margin-bottom:10px">Aprender com o passado</div>' +
+      '<div style="font-size:12px;color:var(--text-dim,#8a8);line-height:1.5;margin-bottom:12px">' +
+      'Testa blocos de indicadores contra ~5 anos de preço real, separando treino de validação. ' +
+      'Serve para levantar hipóteses e descartar peso morto — <b>não altera score, peso nem veredito</b>. ' +
+      'O que vale é a linha de VALIDAÇÃO, e mesmo ela deve ser confirmada pela série diária antes de virar decisão.</div>';
+
+    botao = document.createElement("button");
+    botao.textContent = "🧪 APRENDER COM O PASSADO";
+    botao.style.cssText = "display:block;width:100%;margin:6px 0;padding:14px;text-align:left;" +
+      "background:rgba(20,8,40,.6);color:#b9f;border:1px solid #63c;border-radius:4px;" +
+      "font-family:inherit;font-size:13px;letter-spacing:.04em;";
+    botao.onclick = rodar;
+    caixa.appendChild(botao);
+
+    saida = document.createElement("pre");
+    saida.style.cssText = "white-space:pre-wrap;margin:12px 0 0;font-size:11px;line-height:1.5;" +
+      "color:var(--text-dim,#8a8);font-family:inherit;";
+    saida.textContent = "Leva 1–2 minutos. Busca preço, sentimento, on-chain e ouro; macro só com chave FRED.";
+    caixa.appendChild(saida);
+
+    const camada = document.querySelector('body > div[style*="z-index:1"]') || document.body;
+    camada.appendChild(caixa);
+  }
 
   if(document.readyState === "loading") document.addEventListener("DOMContentLoaded", montar);
   else montar();

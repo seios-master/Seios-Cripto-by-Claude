@@ -962,7 +962,7 @@ const STORAGE_KEY = "seios_btc_v2";
 // fonte única da versão — usada no rodapé, no histórico e nos exports.
 // Muda toda vez que a fórmula de score/pesos muda, pra nunca misturar
 // decisões de regras diferentes como se fossem comparáveis.
-const BUILD_VERSION = "2026-08-14.69-painel-e-marcos";
+const BUILD_VERSION = "2026-08-14.69.1-salvar";
 
 // indicador padrão — auto = tenta buscar sozinho; manual = você preenche
 function ind(label, source, note, excludeFromScore){
@@ -6624,18 +6624,41 @@ document.addEventListener("click", (e)=>{
   let modo = null, buffer = {}, congelado = null, faltando = [], estadoVivo = null;
 
   /* ---- guarda em IndexedDB (payload de 25+ chamadas não cabe no localStorage) ---- */
-  function abrirDB(cb){
-    const req = indexedDB.open("seios_fixture", 1);
+  function abrirDB(cb, onErro){
+    let req;
+    try{ req = indexedDB.open("seios_fixture", 1); }
+    catch(e){ (onErro || escrever)("IndexedDB indisponível: " + e.message); return; }
     req.onupgradeneeded = e => e.target.result.createObjectStore("fx");
     req.onsuccess = e => cb(e.target.result);
-    req.onerror = () => escrever("Não consegui abrir o armazenamento local.");
+    req.onerror = () => (onErro || escrever)("Não consegui abrir o armazenamento local.");
   }
-  function guardarFixture(obj, cb){
-    abrirDB(d => {
-      const t = d.transaction("fx","readwrite");
-      t.objectStore("fx").put(obj, "atual");
-      t.oncomplete = cb || function(){};
-    });
+  /* v69.1 — a versão anterior só reagia ao SUCESSO: se a transação falhasse ou
+     abortasse, oncomplete nunca disparava, o callback nunca era chamado e a
+     tela não mudava absolutamente nada. O usuário tocava em SALVAR e parecia
+     que o botão estava morto — sem erro, sem aviso, sem pista.
+     Ficou visível agora porque a fixture cresceu: além dos ~49 payloads, passou
+     a levar o estado de todos os indicadores. Qualquer falha de cota, de clone
+     ou de transação virava silêncio absoluto.
+     Agora todo caminho fala: sucesso, erro, aborto e exceção síncrona. */
+  function guardarFixture(obj, cb, onErro){
+    const falhou = function(motivo){
+      if(typeof onErro === "function") onErro(motivo);
+      else escrever("Não consegui salvar: " + motivo);
+    };
+    abrirDB(function(d){
+      let t;
+      try{
+        t = d.transaction("fx","readwrite");
+        t.objectStore("fx").put(obj, "atual");
+      }catch(e){
+        falhou(e.message + "\n\n(a foto pode ter ficado grande demais para o " +
+               "armazenamento deste navegador)");
+        return;
+      }
+      t.oncomplete = function(){ (cb || function(){})(); };
+      t.onerror    = function(){ falhou((t.error && t.error.message) || "erro na transação"); };
+      t.onabort    = function(){ falhou((t.error && t.error.message) || "transação abortada — provável falta de espaço"); };
+    }, falhou);
   }
   function lerFixture(cb){
     abrirDB(d => {
@@ -6780,7 +6803,9 @@ document.addEventListener("click", (e)=>{
           : "4 · SAIR DO MODO CONGELADO";
         b.style.cssText = "display:block;width:100%;margin:6px 0;padding:14px;text-align:left;" +
           "background:rgba(4,32,14,.8);color:var(--accent,#7f7);border:1px solid var(--line-soft,#2f7);" +
-          "border-radius:4px;font-family:var(--font-mono);font-size:13px;letter-spacing:.04em;";
+          "border-radius:4px;font-family:var(--font-mono);font-size:13px;letter-spacing:.04em;" +
+          // sem isto o iPad seleciona o texto do botão em vez de acionar
+          "cursor:pointer;-webkit-user-select:none;user-select:none;-webkit-tap-highlight-color:transparent;";
         b.onclick = par[1];
         botoes[n] = b;
         caixa.appendChild(b);
@@ -6826,6 +6851,10 @@ document.addEventListener("click", (e)=>{
     }
     const estado = lerEstado();
     const capturadas = Object.keys(buffer).length;
+    // feedback ANTES de tocar no banco: gravar é assíncrono e pode demorar,
+    // e sem isto o toque parece não ter sido registrado
+    botoes[1].textContent = "⏳ SALVANDO…";
+    escrever("Salvando " + capturadas + " chamadas + estado dos indicadores…");
     guardarFixture({
       build: BUILD_VERSION,
       capturadoEm: new DateOriginal().toISOString(),
@@ -6844,6 +6873,12 @@ document.addEventListener("click", (e)=>{
         "Baseline desta leitura:\n" + formatar(estado) +
         "\n\nConfira se batem com os relógios da tela.");
       verificarFixtureExistente();
+    }, function(motivo){
+      redesenhar();
+      escrever("✗ Falhou ao salvar.\n\n" + motivo +
+        "\n\nA gravação continua ativa — pode tentar de novo sem refazer a atualização.");
+      passo = "gravando";
+      redesenhar();
     });
   }
 

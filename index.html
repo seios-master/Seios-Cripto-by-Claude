@@ -959,7 +959,7 @@ const STORAGE_KEY = "seios_btc_v2";
 // fonte única da versão — usada no rodapé, no histórico e nos exports.
 // Muda toda vez que a fórmula de score/pesos muda, pra nunca misturar
 // decisões de regras diferentes como se fossem comparáveis.
-const BUILD_VERSION = "2026-08-13.60-trava-cobertura";
+const BUILD_VERSION = "2026-08-13.60.1-trava-corrigida";
 
 // indicador padrão — auto = tenta buscar sozinho; manual = você preenche
 function ind(label, source, note){
@@ -2820,12 +2820,33 @@ function coberturaAuto(){
 }
 
 function concentracaoMaxima(){
+  // pesosEfetivos() devolve {nominal, efetivo, vivo, fator} por motor, mais as
+  // chaves soltas _pesoVivo e _fator. A primeira versão desta função filtrou
+  // por typeof number e acabou comparando _pesoVivo com _fator — dois números
+  // que não são peso de motor nenhum. Dava 53% e o nome "_fator" na tela.
+  // Agora lê o campo .efetivo dos motores reais e ignora o resto.
   const pesos = pesosEfetivos();
-  const vals = Object.values(pesos).filter(v => typeof v === "number" && !Number.isNaN(v));
-  if(!vals.length) return 0;
-  const soma = vals.reduce((a,b)=>a+b, 0);
-  if(!soma) return 0;
-  return Math.max.apply(null, vals) / soma;
+  let maior = 0;
+  Object.keys(pesos).forEach(function(k){
+    if(k.charAt(0) === "_") return;
+    const p = pesos[k];
+    if(p && typeof p.efetivo === "number" && p.efetivo > maior) maior = p.efetivo;
+  });
+  return maior; // .efetivo já é fração de 1
+}
+
+function motorDominante(){
+  const pesos = pesosEfetivos();
+  let nome = "", maior = -1;
+  Object.keys(pesos).forEach(function(k){
+    if(k.charAt(0) === "_") return;
+    const p = pesos[k];
+    if(p && typeof p.efetivo === "number" && p.efetivo > maior){
+      maior = p.efetivo;
+      nome = (S.motors[k] && S.motors[k].label) || k;
+    }
+  });
+  return nome;
 }
 
 // motivo textual da trava, ou null se a leitura é utilizável
@@ -2837,10 +2858,7 @@ function motivoSemLeitura(ms){
     return `Só ${(auto*100).toFixed(0)}% das fontes automáticas responderam (mínimo ${(COLETA_AUTO_MINIMA*100).toFixed(0)}%). O que está na tela vem de poucas fontes.`;
   const conc = concentracaoMaxima();
   if(conc > CONCENTRACAO_MAXIMA){
-    const pesos = pesosEfetivos();
-    let dominante = "", maior = -1;
-    Object.entries(pesos).forEach(([k,v])=>{ if(v > maior){ maior = v; dominante = (S.motors[k] && S.motors[k].label) || k; } });
-    return `${dominante} está com ${(conc*100).toFixed(0)}% do peso efetivo (teto ${(CONCENTRACAO_MAXIMA*100).toFixed(0)}%). Com motores mudos, o score vira quase um motor só.`;
+    return `${motorDominante()} está com ${(conc*100).toFixed(0)}% do peso efetivo (teto ${(CONCENTRACAO_MAXIMA*100).toFixed(0)}%). Com motores mudos, o score vira quase um motor só.`;
   }
   return null;
 }
@@ -4316,8 +4334,13 @@ function computeDecision(){
     }
   }
 
-  if(ms.cobertura < COBERTURA_MINIMA){
-    reasoning.push(`Dados insuficientes: só ${(ms.cobertura*100).toFixed(0)}% dos indicadores estão preenchidos e vigentes (mínimo ${(COBERTURA_MINIMA*100).toFixed(0)}%). O peso com algum dado é ${(ms.completeness*100).toFixed(0)}%, mas isso conta o motor inteiro por um indicador só — não sustenta uma leitura.`);
+  /* v60.1 — o hero passou a travar por três critérios, mas computeDecision()
+     só conhecia a cobertura: a tela dizia SEM LEITURA e logo abaixo mantinha
+     "Observar", que é uma recomendação. Metade de uma trava é pior que trava
+     nenhuma. Agora o mesmo motivo governa o rótulo e a ação. */
+  const motivoTrava = motivoSemLeitura(ms);
+  if(motivoTrava){
+    reasoning.push(`Dados insuficientes: ${motivoTrava}`);
     return { action:"Aguardar confirmação", reasoning, leader:null, topFactors, allMotors };
   }
 

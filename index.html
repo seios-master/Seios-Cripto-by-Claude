@@ -959,7 +959,7 @@ const STORAGE_KEY = "seios_btc_v2";
 // fonte única da versão — usada no rodapé, no histórico e nos exports.
 // Muda toda vez que a fórmula de score/pesos muda, pra nunca misturar
 // decisões de regras diferentes como se fossem comparáveis.
-const BUILD_VERSION = "2026-08-13.59-escala-geo";
+const BUILD_VERSION = "2026-08-13.60-trava-cobertura";
 
 // indicador padrão — auto = tenta buscar sozinho; manual = você preenche
 function ind(label, source, note){
@@ -2779,6 +2779,72 @@ function pesosEfetivos(){
   return out;
 }
 
+/* =====================================================================
+   § SAÚDE DA LEITURA (v60) — duas medidas que faltavam
+   =====================================================================
+   COBERTURA_MINIMA existe desde antes, mas em 0,35 quase nunca dispara. Subir
+   o número não resolve: 8 dos indicadores são manuais e ficam vazios por
+   escolha, entram no denominador, e o teto prático da cobertura é ~70%. Exigir
+   80% travaria o sistema todo dia — e uma trava que sempre dispara acaba
+   desligada, o que é pior que não ter trava.
+
+   O que faltava eram duas perguntas diferentes:
+
+   coberturaAuto() — das fontes que o sistema busca SOZINHO, quantas
+   responderam? Manual vazio é escolha; auto vazio é falha. Só o segundo mede
+   saúde de coleta. Numa leitura boa fica acima de 90%; quando o FRED inteiro
+   não roda, despenca.
+
+   concentracaoMaxima() — depois da renormalização, qual o maior peso efetivo
+   de um motor? Na leitura das 20:37 o Macro sozinho estava com 54,9% do peso
+   (nominal 28%): o score era o Macro com um verniz de comitê. Um número
+   composto por um motor só não é um número composto.
+
+   Qualquer uma das duas fora da faixa e o sistema para de opinar. Ele continua
+   mostrando os motores e os pesos efetivos — só não converte isso em veredito.
+   ===================================================================== */
+const COLETA_AUTO_MINIMA = 0.70;   // abaixo disso, as fontes falharam demais
+const CONCENTRACAO_MAXIMA = 0.40;  // acima disso, um motor domina o composto
+
+function coberturaAuto(){
+  let vivos = 0, total = 0;
+  Object.entries(S.motors).forEach(function(par){
+    const mk = par[0], motor = par[1];
+    Object.keys(motor.indicators).forEach(function(ik){
+      if(motor.indicators[ik].source !== "auto") return;
+      total += motor.weight;
+      if(valorVigente(mk, ik) !== null) vivos += motor.weight;
+    });
+  });
+  return total > 0 ? vivos / total : 0;
+}
+
+function concentracaoMaxima(){
+  const pesos = pesosEfetivos();
+  const vals = Object.values(pesos).filter(v => typeof v === "number" && !Number.isNaN(v));
+  if(!vals.length) return 0;
+  const soma = vals.reduce((a,b)=>a+b, 0);
+  if(!soma) return 0;
+  return Math.max.apply(null, vals) / soma;
+}
+
+// motivo textual da trava, ou null se a leitura é utilizável
+function motivoSemLeitura(ms){
+  if(ms.cobertura < COBERTURA_MINIMA)
+    return `Cobertura de ${(ms.cobertura*100).toFixed(0)}% dos indicadores, abaixo do mínimo de ${(COBERTURA_MINIMA*100).toFixed(0)}%.`;
+  const auto = coberturaAuto();
+  if(auto < COLETA_AUTO_MINIMA)
+    return `Só ${(auto*100).toFixed(0)}% das fontes automáticas responderam (mínimo ${(COLETA_AUTO_MINIMA*100).toFixed(0)}%). O que está na tela vem de poucas fontes.`;
+  const conc = concentracaoMaxima();
+  if(conc > CONCENTRACAO_MAXIMA){
+    const pesos = pesosEfetivos();
+    let dominante = "", maior = -1;
+    Object.entries(pesos).forEach(([k,v])=>{ if(v > maior){ maior = v; dominante = (S.motors[k] && S.motors[k].label) || k; } });
+    return `${dominante} está com ${(conc*100).toFixed(0)}% do peso efetivo (teto ${(CONCENTRACAO_MAXIMA*100).toFixed(0)}%). Com motores mudos, o score vira quase um motor só.`;
+  }
+  return null;
+}
+
 function computeCobertura(){
   let coberto = 0, total = 0;
   Object.entries(S.motors).forEach(function(par){
@@ -3361,7 +3427,10 @@ function bucketAction(score, completeness, divergence, cobertura){
   // cobertura ausente (chamadas antigas): cai pra completeness, com o corte antigo
   const cob = (cobertura === undefined || cobertura === null) ? null : cobertura;
   const travaBaixa = cob === null ? (completeness < 0.5) : (cob < COBERTURA_MINIMA);
-  if(travaBaixa) return "Aguardar confirmação (dados insuficientes)";
+  // v60: coleta automática fraca ou motor dominante travam junto com a cobertura
+  const travaColeta = coberturaAuto() < COLETA_AUTO_MINIMA;
+  const travaConcentracao = concentracaoMaxima() > CONCENTRACAO_MAXIMA;
+  if(travaBaixa || travaColeta || travaConcentracao) return "Aguardar confirmação (dados insuficientes)";
   const discordam = divergence >= DIVERGENCIA_ALTA;
   // convicção máxima exige motores concordando — mesma régua dos dois lados
   if(score >= 40) return discordam ? "Entrar parcialmente" : "Reforçar";
@@ -5305,7 +5374,8 @@ function renderHero(){
      Com cobertura zero o score é 0, e 0 vira "Neutro" — uma leitura de aparência
      legítima construída sobre nada. É o pior tipo de erro de interface: parece
      informação. Abaixo da cobertura mínima o veredito passa a dizer o que é. */
-  const semLeitura = ms.cobertura < COBERTURA_MINIMA;
+  const motivoTrava = motivoSemLeitura(ms);
+  const semLeitura = motivoTrava !== null;
   const rotulo = semLeitura ? "Sem leitura" : scoreLabel(ms.score);
   const cor = semLeitura ? COLOR.faint
     : (ms.score >= 15 ? COLOR.teal : (ms.score <= -15 ? COLOR.brick : COLOR.gold));
@@ -5335,7 +5405,7 @@ function renderHero(){
         <h2 class="hero-verdict" style="color:${cor};">${esc(rotulo)}</h2>
         <div class="hero-action" style="color:${cor};">${esc(d.action)}</div>
         <p class="hero-line">${semLeitura
-          ? `Cobertura de apenas ${(ms.cobertura*100).toFixed(0)}% dos indicadores — abaixo do mínimo de ${(COBERTURA_MINIMA*100).toFixed(0)}%. Não há base para uma leitura. Clique em "Atualizar dados".`
+          ? esc(motivoTrava) + ' Os motores continuam abaixo, mas o sistema não converte isto num veredito. Atualize os dados para tentar de novo.'
           : esc(fraseDoEstado(ms, hs))}</p>
       </div>
       <div class="hero-side">
@@ -6185,6 +6255,7 @@ document.addEventListener("click", (e)=>{
     botao1 = criarBotao("1 · CONGELAR OS DADOS DE HOJE", iniciarGravacao);
     criarBotao("2 · RODAR COM OS DADOS CONGELADOS", iniciarReplay);
     criarBotao("3 · COMPARAR COM O CONGELADO", compararAgora);
+    criarBotao("4 · SAIR DO MODO CONGELADO", sairDoModo);
 
     saida = document.createElement("pre");
     saida.style.cssText = "white-space:pre-wrap;margin:12px 0 0;font-size:12px;line-height:1.5;" +
@@ -6257,6 +6328,14 @@ document.addEventListener("click", (e)=>{
         "\n\nAgora toque em ATUALIZAR DADOS DE MERCADO. Nada vai à internet — " +
         "tudo vem da foto.\n\nQuando terminar, volte e toque em 3.");
     });
+  }
+
+  function sairDoModo(){
+    modo = null; congelado = null; faltando = [];
+    soltarRelogio();
+    escrever("Modo congelado desligado. O relógio voltou ao normal e as próximas " +
+             "atualizações vão à internet de novo.\n\nA foto continua guardada — " +
+             "toque em 2 quando quiser usá-la outra vez.");
   }
 
   function compararAgora(){

@@ -962,7 +962,7 @@ const STORAGE_KEY = "seios_btc_v2";
 // fonte única da versão — usada no rodapé, no histórico e nos exports.
 // Muda toda vez que a fórmula de score/pesos muda, pra nunca misturar
 // decisões de regras diferentes como se fossem comparáveis.
-const BUILD_VERSION = "2026-08-14.69.2-idb";
+const BUILD_VERSION = "2026-08-14.69.3-localstorage";
 
 // indicador padrão — auto = tenta buscar sozinho; manual = você preenche
 function ind(label, source, note, excludeFromScore){
@@ -6631,64 +6631,64 @@ document.addEventListener("click", (e)=>{
      sempre. Foi exatamente o "SALVANDO…" eterno.
      Agora: uma conexão por operação, fechada sempre, e um prazo — porque uma
      promessa que nunca resolve é pior que um erro. */
-  function abrirDB(cb, onErro){
-    let req;
-    try{ req = indexedDB.open("seios_fixture", 1); }
-    catch(e){ (onErro || escrever)("IndexedDB indisponível: " + e.message); return; }
-    req.onupgradeneeded = e => e.target.result.createObjectStore("fx");
-    req.onsuccess = e => cb(e.target.result);
-    req.onerror = () => (onErro || escrever)("Não consegui abrir o armazenamento local.");
-    req.onblocked = () => (onErro || escrever)("O armazenamento está bloqueado por outra aba do SEIOS. Feche as outras e tente de novo.");
-  }
-  /* v69.1 — a versão anterior só reagia ao SUCESSO: se a transação falhasse ou
-     abortasse, oncomplete nunca disparava, o callback nunca era chamado e a
-     tela não mudava absolutamente nada. O usuário tocava em SALVAR e parecia
-     que o botão estava morto — sem erro, sem aviso, sem pista.
-     Ficou visível agora porque a fixture cresceu: além dos ~49 payloads, passou
-     a levar o estado de todos os indicadores. Qualquer falha de cota, de clone
-     ou de transação virava silêncio absoluto.
-     Agora todo caminho fala: sucesso, erro, aborto e exceção síncrona. */
+  /* ---- guarda da fixture: localStorage, não IndexedDB (v69.3) ----
+     Três tentativas com IndexedDB, três travamentos: a transação não completava,
+     não dava erro e não abortava — ficava pendurada, e o painel com "SALVANDO…"
+     eterno. Fechei conexões, tratei todos os eventos, pus prazo de 20s. Continuou.
+
+     O diagnóstico veio do próprio painel: a foto tem ~0,5 MB. Não é volume, não
+     é cota. É o IndexedDB do WebKit não resolvendo, e não há remendo que force
+     uma promessa a chegar.
+
+     localStorage é síncrono: ou grava e a linha seguinte executa, ou lança na
+     hora. Não existe estado "pendurado". O limite é ~5 MB por origem, dez vezes
+     o que precisamos — e se um dia estourar, o erro é explícito e tratável.
+     Menos elegante, e certo para o problema. */
+  const FIXTURE_KEY = "seios_fixture_v1";
+
   function guardarFixture(obj, cb, onErro){
-    let resolvido = false;
     const falhou = function(motivo){
-      if(resolvido) return; resolvido = true;
       if(typeof onErro === "function") onErro(motivo);
       else escrever("Não consegui salvar: " + motivo);
     };
-    const ok = function(){ if(resolvido) return; resolvido = true; (cb || function(){})(); };
-
-    // prazo: se em 20s a transação não deu sinal, ela não vai dar
-    const prazo = setTimeout(function(){
-      falhou("o armazenamento não respondeu em 20s.\n\n" +
-             "Costuma ser o Safari travando com muita coisa guardada. Tente: fechar\n" +
-             "outras abas do SEIOS, ou reabrir o app e repetir o congelamento.");
-    }, 20000);
-
-    abrirDB(function(d){
-      let t;
-      try{
-        t = d.transaction("fx","readwrite");
-        t.objectStore("fx").put(obj, "atual");
-      }catch(e){
-        clearTimeout(prazo); try{ d.close(); }catch(_){}
-        falhou(e.message + "\n\n(a foto pode ter ficado grande demais)");
-        return;
-      }
-      t.oncomplete = function(){ clearTimeout(prazo); try{ d.close(); }catch(_){} ok(); };
-      t.onerror    = function(){ clearTimeout(prazo); try{ d.close(); }catch(_){}
-                                 falhou((t.error && t.error.message) || "erro na transação"); };
-      t.onabort    = function(){ clearTimeout(prazo); try{ d.close(); }catch(_){}
-                                 falhou((t.error && t.error.message) || "transação abortada — provável falta de espaço"); };
-    }, function(m){ clearTimeout(prazo); falhou(m); });
+    let texto;
+    try{ texto = JSON.stringify(obj); }
+    catch(e){ falhou("não consegui serializar a foto: " + e.message); return; }
+    try{
+      localStorage.setItem(FIXTURE_KEY, texto);
+    }catch(e){
+      // QuotaExceededError é o caso real aqui: espaço do navegador cheio
+      falhou((e && e.name === "QuotaExceededError")
+        ? "o armazenamento deste navegador está cheio (" +
+          (texto.length/1048576).toFixed(1) + " MB não couberam).\n\n" +
+          "Exporte um backup e limpe dados antigos do Safari, ou apague a foto anterior."
+        : (e.message || "erro desconhecido ao gravar"));
+      return;
+    }
+    (cb || function(){})();
   }
+
   function lerFixture(cb){
-    abrirDB(function(d){
-      let r;
-      try{ r = d.transaction("fx","readonly").objectStore("fx").get("atual"); }
-      catch(e){ try{ d.close(); }catch(_){} cb(null); return; }
-      r.onsuccess = function(){ const v = r.result || null; try{ d.close(); }catch(_){} cb(v); };
-      r.onerror   = function(){ try{ d.close(); }catch(_){} cb(null); };
-    }, function(){ cb(null); });
+    let bruto = null;
+    try{ bruto = localStorage.getItem(FIXTURE_KEY); }catch(e){}
+    if(bruto){
+      try{ cb(JSON.parse(bruto)); return; }
+      catch(e){ /* corrompido: cai para a busca no banco antigo */ }
+    }
+    // compatibilidade: fotos gravadas até a v69.2 vivem no IndexedDB
+    try{
+      const req = indexedDB.open("seios_fixture", 1);
+      req.onupgradeneeded = function(e){ e.target.result.createObjectStore("fx"); };
+      req.onerror = function(){ cb(null); };
+      req.onsuccess = function(e){
+        const d = e.target.result;
+        try{
+          const r = d.transaction("fx","readonly").objectStore("fx").get("atual");
+          r.onsuccess = function(){ const v = r.result || null; try{ d.close(); }catch(_){} cb(v); };
+          r.onerror   = function(){ try{ d.close(); }catch(_){} cb(null); };
+        }catch(err){ try{ d.close(); }catch(_){} cb(null); }
+      };
+    }catch(e){ cb(null); }
   }
 
   /* ---- chave da chamada: tira cache-busting, senão o replay nunca casa ---- */
@@ -6885,8 +6885,7 @@ document.addEventListener("click", (e)=>{
         return a + ((buffer[k].corpo || "").length);
       }, 0) / 1048576;
     }catch(e){}
-    escrever("Salvando " + capturadas + " chamadas (~" + mb.toFixed(1) + " MB) + estado dos indicadores…" +
-             (mb > 8 ? "\n\n(a foto está grande — se travar, é isso)" : ""));
+    escrever("Salvando " + capturadas + " chamadas (~" + mb.toFixed(1) + " MB) + estado dos indicadores…");
     guardarFixture({
       build: BUILD_VERSION,
       capturadoEm: new DateOriginal().toISOString(),

@@ -631,6 +631,7 @@
     <button class="rel-btn" data-rel="relChanges">O que mudou<span class="rb-sub">desde a atualização anterior</span></button>
     <button class="rel-btn" data-rel="relHorizon">Leitura por prazo<span class="rb-sub">curto, médio e longo separados</span></button>
     <button class="rel-btn" data-rel="panelBacktest">Backtest e calibração<span class="rb-sub">o que 12 meses dizem — mensal</span></button>
+    <button class="rel-btn" data-rel="panelSerie">Série point-in-time<span class="rb-sub">o que está sendo acumulado</span></button>
     <button class="rel-btn" data-rel="relAjustes">Ajustar e conectar APIs<span class="rb-sub">chaves, valores manuais</span></button>
   </div>
 
@@ -712,6 +713,22 @@
   </section>
 
 
+
+  <!-- § SÉRIE POINT-IN-TIME -->
+  <section class="panel rel-panel" id="panelSerie" hidden>
+    <div class="panel-head">
+      <div>
+        <div class="panel-mark">§ Série point-in-time</div>
+        <h2 class="panel-title">O que está sendo acumulado</h2>
+      </div>
+      <div class="panel-desc">Cada coleta grava o número <strong>bruto</strong> de cada indicador, com a data a que ele se refere e a data em que o mercado poderia conhecê-lo. É essa separação que permite, mais tarde, testar o sistema sem que ele enxergue o futuro. Dado não coletado hoje não se recupera depois.</div>
+    </div>
+    <div style="display:flex;gap:8px;flex-wrap:wrap;">
+      <button class="primary" id="btnSerieRefresh">↻ Ler a série gravada</button>
+      <button class="ghost" id="btnSerieCsv">⇩ Série (.csv)</button>
+    </div>
+    <div id="serieResumo" style="margin-top:14px;"></div>
+  </section>
 
   <!-- § BACKTEST ENGINE -->
   <section class="panel rel-panel" id="panelBacktest" hidden>
@@ -962,7 +979,7 @@ const STORAGE_KEY = "seios_btc_v2";
 // fonte única da versão — usada no rodapé, no histórico e nos exports.
 // Muda toda vez que a fórmula de score/pesos muda, pra nunca misturar
 // decisões de regras diferentes como se fossem comparáveis.
-const BUILD_VERSION = "2026-08-14.78-ponto-zero";
+const BUILD_VERSION = "2026-08-15.79-lag-e-painel";
 /* v78: versão do MODELO separada da versão do BUILD. Mudança visual não é
    mudança de semântica: só sobe quando peso, fórmula, corte ou trava mudam.
    Toda observação gravada carrega as duas, pra que seis meses depois dê pra
@@ -1940,6 +1957,14 @@ function setFailed(motorKey, indKey){
      frequency       realtime · intraday · daily · weekly · monthly
      lagH            horas entre reference_at e available_at. É o que impede o
                      backtest de usar um CPI de julho numa decisão de julho.
+
+                     ATENÇÃO À CONVENÇÃO (corrigido na v79): o FRED carimba
+                     série mensal com o PRIMEIRO DIA do mês de referência. O
+                     lag tem que ser contado a partir daí, não do fim do mês —
+                     o que soma ~30 dias em relação à intuição. Na v78 o CPI
+                     de julho aparecia disponível em 14/07, antes de existir.
+                     available_at cedo demais É look-ahead; tarde demais só
+                     desperdiça informação. Na dúvida, generoso.
      horizon         curto · medio · longo — prazo do EFEITO, não da coleta
      transform       id na tabela NORMALIZACAO, ou a fórmula inline quando
                      ainda não foi migrada para lá
@@ -1949,8 +1974,8 @@ function setFailed(motorKey, indKey){
 const INDICATOR_SPECS = {
   // ---- Macro (FRED) ----
   "macro.juros":       { provider:"FRED", serie:"DFF",        rawUnit:"percentage_point", frequency:"daily",   lagH:24,  horizon:"longo", transform:"macro.juros",       family:"liquidez_condicoes" },
-  "macro.inflacao":    { provider:"FRED", serie:"CPIAUCSL",   rawUnit:"percentage_point", frequency:"monthly", lagH:312, horizon:"longo", transform:"macro.inflacao",    family:"liquidez_condicoes" },
-  "macro.liquidez":    { provider:"FRED", serie:"M2SL",       rawUnit:"percent",          frequency:"monthly", lagH:672, horizon:"longo", transform:"macro.liquidez",    family:"liquidez_condicoes" },
+  "macro.inflacao":    { provider:"FRED", serie:"CPIAUCSL",   rawUnit:"percentage_point", frequency:"monthly", lagH:1080, horizon:"longo", transform:"macro.inflacao",    family:"liquidez_condicoes" },
+  "macro.liquidez":    { provider:"FRED", serie:"M2SL",       rawUnit:"percent",          frequency:"monthly", lagH:1320, horizon:"longo", transform:"macro.liquidez",    family:"liquidez_condicoes" },
   "macro.dxy":         { provider:"FRED", serie:"DTWEXBGS",   rawUnit:"percent",          frequency:"daily",   lagH:24,  horizon:"longo", transform:"macro.dxy",         family:"cambial" },
   "macro.curva":       { provider:"FRED", serie:"T10Y2Y",     rawUnit:"percentage_point", frequency:"daily",   lagH:24,  horizon:"longo", transform:"macro.curva",       family:"liquidez_condicoes" },
 
@@ -2001,7 +2026,7 @@ const INDICATOR_SPECS = {
   "ativosGlobais.ouro":     { provider:"BinanceSpot", serie:"PAXG", rawUnit:"percent",          frequency:"realtime",lagH:0,   horizon:"longo", transform:"ativosGlobais.ouro",     family:"risk_appetite" },
   "ativosGlobais.euro":     { provider:"FRED", serie:"DEXUSEU",     rawUnit:"percent",          frequency:"daily",   lagH:24,  horizon:"longo", transform:"ativosGlobais.euro",     family:"cambial" },
   "ativosGlobais.sp500":    { provider:"FRED", serie:"SP500",       rawUnit:"percent",          frequency:"daily",   lagH:24,  horizon:"longo", transform:"ativosGlobais.sp500",    family:"risk_appetite" },
-  "ativosGlobais.cobre":    { provider:"FRED", serie:"PCOPPUSDM",   rawUnit:"percent",          frequency:"monthly", lagH:720, horizon:"longo", transform:"ativosGlobais.cobre",    family:"risk_appetite" },
+  "ativosGlobais.cobre":    { provider:"FRED", serie:"PCOPPUSDM",   rawUnit:"percent",          frequency:"monthly", lagH:1440, horizon:"longo", transform:"ativosGlobais.cobre",    family:"risk_appetite" },
   "ativosGlobais.vix":      { provider:"FRED", serie:"VIXCLS",      rawUnit:"index",            frequency:"daily",   lagH:24,  horizon:"curto", transform:"ativosGlobais.vix",      family:"risco_implicito" },
   "ativosGlobais.juros10a": { provider:"FRED", serie:"DGS10",       rawUnit:"percentage_point", frequency:"daily",   lagH:24,  horizon:"longo", transform:"ativosGlobais.juros10a", family:"liquidez_condicoes" }
 };
@@ -2522,8 +2547,14 @@ async function refreshMarketData(){
             leitura = `OI ${d24.pct>=0?"+":""}${d24.pct.toFixed(2)}% e preço ${varPreco24h>=0?"+":""}${varPreco24h.toFixed(2)}% — ambos de lado, sem sinal`;
           }
         }
+        /* v79: o OI não tem um bruto único — o score sai do CRUZAMENTO de três
+           grandezas. Grava a variação de OI como bruto principal e as outras
+           duas em componentes, senão a série guarda um score que ninguém
+           consegue recalcular depois. */
         setAuto("derivativos","openInterest", score === null ? null : clamp(score, -100, 100),
-          `${leitura}${d4 ? ` · 4h: ${d4.pct>=0?"+":""}${d4.pct.toFixed(2)}%` : ""}`);
+          `${leitura}${d4 ? ` · 4h: ${d4.pct>=0?"+":""}${d4.pct.toFixed(2)}%` : ""}`,
+          { bruto: d24.pct, componentes: { oiPct24h: d24.pct, precoPct24h: varPreco24h,
+                                           fundingScore: fundingScore, oiPct4h: d4 ? d4.pct : null } });
         results.ok.push("open interest");
         logDone(line, true, score === null ? "sem cruzamento (falta preço)" : `${d24.pct>=0?"+":""}${d24.pct.toFixed(2)}%/24h → score ${Math.round(score)}`);
       } else {
@@ -3346,6 +3377,8 @@ function registrarObservacao(motorKey, indKey, score, meta){
     available_at: disp.at,
     available_at_origem: disp.origem,
     observed_at: observedAt,
+    // v79: para indicadores cujo score nasce do cruzamento de várias grandezas
+    componentes: m.componentes || null,
     qualidade: m.qualidade || (m.bruto === undefined ? "sem_bruto" : "ok"),
     nota: m.nota || null,
     build: BUILD_VERSION,
@@ -6729,6 +6762,109 @@ document.getElementById("btnRefresh").addEventListener("click", refreshMarketDat
 document.getElementById("btnAutoScenario").addEventListener("click", generateAutoScenario);
 document.getElementById("btnRunBacktest").addEventListener("click", runBacktest);
 document.getElementById("btnRunScoreBacktest").addEventListener("click", runScoreBacktest);
+
+/* ---- painel da série point-in-time (v79) ---------------------------------
+   Lê o store de observações e responde, sem abrir JSON: quanto já existe,
+   desde quando, se teve buraco de coleta, e quantos indicadores ainda estão
+   gravando score sem bruto. */
+function resumirSerie(obs){
+  const porDia = {}, porProvedor = {}, porQualidade = {}, porIndicador = {};
+  obs.forEach(function(o){
+    const dia = (o.observed_at || "").slice(0,10);
+    porDia[dia] = (porDia[dia] || 0) + 1;
+    porProvedor[o.provider || "?"] = (porProvedor[o.provider || "?"] || 0) + 1;
+    porQualidade[o.qualidade || "?"] = (porQualidade[o.qualidade || "?"] || 0) + 1;
+    if(!porIndicador[o.indicador]) porIndicador[o.indicador] = { n:0, comBruto:0, ultimo:null };
+    const r = porIndicador[o.indicador];
+    r.n++;
+    if(o.bruto !== null && o.bruto !== undefined) r.comBruto++;
+    if(!r.ultimo || o.observed_at > r.ultimo) r.ultimo = o.observed_at;
+  });
+  const dias = Object.keys(porDia).sort();
+  const runs = {};
+  obs.forEach(function(o){ if(o.run_id) runs[o.run_id] = true; });
+  return { total: obs.length, dias, porDia, porProvedor, porQualidade, porIndicador,
+           runs: Object.keys(runs).length,
+           comBruto: obs.filter(o=>o.bruto !== null && o.bruto !== undefined).length };
+}
+
+// buracos: dias de calendário entre o primeiro e o último sem nenhuma coleta
+function diasSemColeta(dias){
+  if(dias.length < 2) return [];
+  const faltando = [];
+  const ini = new Date(dias[0] + "T00:00:00Z").getTime();
+  const fim = new Date(dias[dias.length-1] + "T00:00:00Z").getTime();
+  for(let t = ini; t <= fim; t += 86400000){
+    const d = new Date(t).toISOString().slice(0,10);
+    if(!dias.includes(d)) faltando.push(d);
+  }
+  return faltando;
+}
+
+async function renderSerie(){
+  const alvo = document.getElementById("serieResumo");
+  if(!alvo) return;
+  alvo.innerHTML = '<div style="font-family:var(--font-mono);font-size:11px;color:var(--text-faint);">lendo a série…</div>';
+  let obs = [];
+  try{ obs = await lerObservacoes(); }
+  catch(e){
+    alvo.innerHTML = `<div class="empty-state">Não consegui ler a série: ${esc(e.message)}</div>`;
+    return;
+  }
+  if(!obs.length){
+    alvo.innerHTML = '<div class="empty-state">Nenhuma observação gravada ainda. Rode uma atualização de mercado.</div>';
+    return;
+  }
+  const r = resumirSerie(obs);
+  const buracos = diasSemColeta(r.dias);
+  const semBruto = Object.entries(r.porIndicador).filter(function(p){ return p[1].comBruto === 0; });
+  const mono = "font-family:var(--font-mono);font-size:11px;";
+
+  const linhaDias = r.dias.map(function(d){
+    return `<span style="${mono}color:var(--text-faint);">${d.slice(5)} <strong style="color:var(--green);">${r.porDia[d]}</strong></span>`;
+  }).join(" · ");
+
+  const provs = Object.entries(r.porProvedor).sort(function(a,b){ return b[1]-a[1]; })
+    .map(function(p){ return `<span style="${mono}">${esc(p[0])} <strong>${p[1]}</strong></span>`; }).join(" · ");
+
+  alvo.innerHTML = `
+    <div style="${mono}font-size:13px;margin-bottom:10px;">
+      <strong style="color:var(--green);font-size:20px;">${r.total}</strong> observações ·
+      <strong>${Object.keys(r.porIndicador).length}</strong> indicadores ·
+      <strong>${r.runs}</strong> coletas ·
+      desde <strong>${r.dias[0]}</strong>
+    </div>
+    <div style="${mono}color:var(--text-faint);margin-bottom:10px;">
+      ${r.comBruto} de ${r.total} com valor bruto gravado (${Math.round(r.comBruto/r.total*100)}%) ·
+      qualidade: ${Object.entries(r.porQualidade).map(p=>`${esc(p[0])} ${p[1]}`).join(" · ")}
+    </div>
+    <h4 style="margin-top:14px;">Coleta por dia</h4>
+    <div style="line-height:2;">${linhaDias}</div>
+    ${buracos.length ? `<div style="${mono}color:var(--gold);margin-top:8px;">⚠ ${buracos.length} dia(s) sem nenhuma coleta: ${buracos.slice(0,8).join(" · ")}${buracos.length>8?" …":""}. Buraco na série não se preenche depois.</div>` : `<div style="${mono}color:var(--green);margin-top:8px;">✓ Nenhum dia sem coleta no intervalo.</div>`}
+    <h4 style="margin-top:14px;">Por provedor</h4>
+    <div style="line-height:2;">${provs}</div>
+    ${semBruto.length ? `<h4 style="margin-top:14px;">Ainda gravando só o score</h4><div style="${mono}color:var(--gold);">${semBruto.map(p=>esc(p[0])).join(" · ")} — o score é recalculável, o bruto não volta.</div>` : ""}
+  `;
+}
+
+document.getElementById("btnSerieRefresh").addEventListener("click", renderSerie);
+
+document.getElementById("btnSerieCsv").addEventListener("click", async function(){
+  let obs = [];
+  try{ obs = await lerObservacoes(); }catch(e){ alert("Não consegui ler a série: " + e.message); return; }
+  if(!obs.length){ alert("Nenhuma observação gravada ainda."); return; }
+  const cols = ["indicador","motor","bruto","score","unidade","provider","serie","frequencia",
+                "horizonte","familia","reference_at","available_at","available_at_origem",
+                "observed_at","qualidade","run_id","build","modelo"];
+  const linhas = [cols.join(";")].concat(obs.map(function(o){
+    return cols.map(function(c){
+      const v = o[c];
+      return v === null || v === undefined ? "" : String(v).replace(/;/g, ",").replace(/\r?\n/g, " ");
+    }).join(";");
+  }));
+  const blob = new Blob([linhas.join("\n")], { type:"text/csv;charset=utf-8" });
+  triggerDownloadWithFallback(blob, `seios-serie-${new Date().toISOString().slice(0,10)}.csv`);
+});
 
 document.getElementById("btnNewScenario").addEventListener("click", ()=>{
   const f = document.getElementById("formScenario");

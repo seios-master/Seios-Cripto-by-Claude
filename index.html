@@ -979,7 +979,7 @@ const STORAGE_KEY = "seios_btc_v2";
 // fonte única da versão — usada no rodapé, no histórico e nos exports.
 // Muda toda vez que a fórmula de score/pesos muda, pra nunca misturar
 // decisões de regras diferentes como se fossem comparáveis.
-const BUILD_VERSION = "2026-08-15.96-funding-em-percentil";
+const BUILD_VERSION = "2026-08-15.97-um-agregador-de-verdade";
 /* v78: versão do MODELO separada da versão do BUILD. Mudança visual não é
    mudança de semântica: só sobe quando peso, fórmula, corte ou trava mudam.
    Toda observação gravada carrega as duas, pra que seis meses depois dê pra
@@ -5375,18 +5375,77 @@ async function fetchCoinbaseHistoricalCandles(){
   return data.map(c=>({ date: new Date(c[0]*1000).toISOString().slice(0,10), close:Number(c[4]) }));
 }
 
-// mesma matemática de ponderação do sistema ao vivo (computeMarketState),
-// mas recebendo composites de uma data histórica em vez do estado atual
-function aggregateScore(composites){
-  let weightedSum = 0, weightUsed = 0;
-  Object.entries(S.motors).forEach(([key,motor])=>{
-    const c = composites[key];
-    if(c !== null && c !== undefined){
-      weightedSum += c*motor.weight;
-      weightUsed += motor.weight;
+/* VETOR CANÔNICO HISTÓRICO (v97) — o backtest passa a rodar O MODELO DO VIVO.
+   Até aqui existia `aggregateScore(composites)`: composto do motor × peso do
+   motor, dividido pelo peso dos motores PRESENTES. É o m1, o modelo que a v92
+   removeu do caminho vivo — e que continuou aqui, sozinho, produzindo todos os
+   números que a tela do laboratório mostra.
+
+   As duas auditorias apontaram exatamente isto como achado nº 1, e a memória do
+   projeto registrava como resolvido na v92. Não estava: a v92 trocou o vivo e
+   deixou o histórico. Consequência: as linhas "Entrar parcialmente −4,6%",
+   "Reduzir −13,4%" e todo o veredito de que o sistema não bate comprar e segurar
+   foram medidos com uma matemática que o sistema não usa mais.
+
+   A diferença não é cosmética. O m1 redistribui o peso do que falta entre quem
+   está presente; o m2/m5 deixa a ausência no denominador e amortece o score na
+   direção de zero. Com ~50% de cobertura reconstruível, o backtest vinha
+   exibindo scores sistematicamente MAIORES em módulo do que o sistema vivo
+   produziria com os mesmos dados — e classificando mais dias fora de "Observar"
+   por causa disso.
+
+   `valores` é o mapa "motor.indicador" → score daquele dia. Os indicadores que
+   o histórico não alcança simplesmente não aparecem — e continuam no
+   denominador, como no vivo. Mesmos pesos fixos por indicador, mesmo teto de
+   motor por translação, mesmos tetos de família, mesmo piso de renormalização. */
+function vetorCanonicoHistorico(valores){
+  const itens = [], nominais = [];
+
+  Object.entries(S.motors).forEach(function(par){
+    const mk = par[0], motor = par[1];
+
+    if(mk === "eventos"){
+      // sem fonte histórica gratuita: entra só como massa NÃO observada
+      nominais.push({ id:"eventos.composto", motor:mk, indicador:"composto",
+                      familia:"eventos_exogenos", peso: motor.weight });
+      return;
     }
+
+    const votantes = indicadoresVotantes(mk);
+    if(!votantes.length) return;
+    const pesoInd = motor.weight / votantes.length;
+
+    const presentes = votantes.filter(function(ik){
+      return Number.isFinite(valores[mk + "." + ik]);
+    });
+    let ajuste = 0;
+    if(presentes.length){
+      const bruto = presentes.reduce(function(a,ik){ return a + valores[mk + "." + ik]; }, 0) / presentes.length;
+      ajuste = aplicarTetoPuro(mk, bruto) - bruto;
+    }
+
+    votantes.forEach(function(ik){
+      const fam = familiaDoIndicador(mk, ik);
+      nominais.push({ id: mk+"."+ik, motor:mk, indicador:ik, familia:fam, peso:pesoInd });
+      const v = valores[mk + "." + ik];
+      if(Number.isFinite(v)) itens.push({ id: mk+"."+ik, motor:mk, indicador:ik,
+                                          familia:fam, valor: v + ajuste, peso:pesoInd });
+    });
   });
-  return { score: weightUsed>0 ? weightedSum/weightUsed : 0, completeness: weightUsed };
+
+  const massaFamilia = {};
+  nominais.forEach(function(n){ massaFamilia[n.familia] = (massaFamilia[n.familia] || 0) + n.peso; });
+  const fator = {};
+  Object.keys(massaFamilia).forEach(function(f){
+    const teto = FAMILIA_TETO[f];
+    fator[f] = (teto && massaFamilia[f] > teto) ? teto / massaFamilia[f] : 1;
+  });
+  nominais.forEach(function(n){ n.peso *= fator[n.familia]; });
+  itens.forEach(function(i){ i.peso *= fator[i.familia]; });
+
+  const massaTotal = nominais.reduce(function(a,n){ return a + n.peso; }, 0);
+  const massaObservada = itens.reduce(function(a,i){ return a + i.peso; }, 0);
+  return { itens, nominais, massaTotal, massaObservada, massaFamilia, fatorFamilia: fator };
 }
 // mesmo cálculo do score, mas excluindo um motor — usado no contrafactual
 // "sem esse motor, o score iria pra onde" no Decision Engine
@@ -5408,20 +5467,11 @@ function scoreSemMotor(excludeKey, vetor){
   }).score;
 }
 
-// assinatura antiga mantida para o backtest, que ainda passa compostos por
-// motor. O caminho vivo usa scoreSemMotor().
-function scoreWithoutMotor(composites, excludeKey){
-  let weightedSum = 0, weightUsed = 0;
-  Object.entries(S.motors).forEach(([key,motor])=>{
-    if(key === excludeKey) return;
-    const c = composites[key];
-    if(c !== null && c !== undefined){
-      weightedSum += c*motor.weight;
-      weightUsed += motor.weight;
-    }
-  });
-  return weightUsed>0 ? weightedSum/weightUsed : 0;
-}
+/* `scoreWithoutMotor` foi removida na v97 junto com `aggregateScore`. Estava
+   sem nenhum chamador desde a v92 — código morto do modelo antigo, esperando
+   alguém chamar por engano. Apagar é a única forma de garantir que a segunda
+   matemática não volte: enquanto a função existe, ela é uma tentação a uma
+   linha de distância. O caminho vivo usa `scoreSemMotor()`. */
 // mesma fórmula ponderada do ao vivo — se o backtest medisse divergência de um
 // jeito e o sistema de outro, o corte de "short vs. sair" testaria outra coisa
 function computeDivergence(composites){
@@ -5644,8 +5694,14 @@ async function runScoreBacktest(){
        Isto NÃO autoriza mudar peso. Autoriza formular hipótese pra testar
        fora da amostra, quando houver amostra. */
     const indBuckets = {};
+    /* mapa do dia: os MESMOS valores que já iam para a calibração por
+       indicador agora também alimentam o vetor canônico. Um valor, dois usos —
+       não há cálculo novo aqui, e é por isso que não pode divergir. */
+    let valoresDia = {};
+
     function registraIndicador(id, valor, fwd){
       if(valor === null || valor === undefined || !Number.isFinite(valor)) return;
+      if(id.indexOf("⚗") === -1) valoresDia[id] = valor;   // laboratório não vota
       if(!indBuckets[id]) indBuckets[id] = { bull: [], bear: [], n: 0 };
       indBuckets[id].n++;
       if(valor >= 15) indBuckets[id].bull.push(fwd);
@@ -5659,6 +5715,7 @@ async function runScoreBacktest(){
     let acaoAnterior = null; // v77: histerese precisa de memória entre os dias
     for(let i=50; i<closes.length-forwardDays; i++){
       const date = dates[i];
+      valoresDia = {};   // o dia não herda o dia anterior
 
       const rsi = rsiAtIndex(closes, i, 14);
       const sma = smaAtIndex(closes, i, 50);
@@ -5791,7 +5848,13 @@ async function runScoreBacktest(){
       }
 
       const composites = { macro, institucional, onchain, derivativos, tecnico, sentimento, ativosGlobais, geopolitico, eventos:null };
-      const { score, completeness } = aggregateScore(composites);
+      /* v97 — UM agregador. O mesmo `agregarCanonico` do vivo, alimentado pelo
+         vetor histórico. `completeness` deixa de ser "peso dos motores
+         presentes" (que dava 100% com um indicador só por motor) e passa a ser
+         massa observada sobre massa total: a cobertura de verdade. */
+      const agHist = agregarCanonico(vetorCanonicoHistorico(valoresDia));
+      const score = agHist.score;
+      const completeness = agHist.massaTotal > 0 ? agHist.massaObservada / agHist.massaTotal : 0;
       const divergence = computeDivergence(composites);
       // no backtest a cobertura de indicador não é reconstituível dia a dia
       // (não há histórico por indicador), então passa null e a função cai

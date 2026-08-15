@@ -795,7 +795,7 @@
 
 <footer class="wrap">
   <div style="font-family:var(--font-mono);font-size:10px;color:var(--copper);margin-bottom:8px;">build <span id="buildVersionFooter">—</span> — se essa linha não aparecer no seu arquivo, você está num arquivo antigo, baixe o mais recente</div>
-  SEIOS CRIPTO — instrumento local. Os dados ficam salvos apenas neste navegador: estado e histórico recente em localStorage, histórico antigo em IndexedDB. Nada é enviado para nenhum servidor — exceto as consultas ao FRED, que passam pela rota /api/fred deste próprio domínio, e, se você ligar a opção, as chamadas com chave que passam por proxy CORS público. Fontes: CoinGecko (preço e histórico diário) · Binance (funding, open interest, long/short, taker, livro, médias semanais) · Alternative.me (Fear &amp; Greed) · CoinMetrics (MVRV) · mempool.space (hash rate) · Deribit (put/call) · FRED (macro e ativos globais, via /api/fred) · GDELT (tom de notícias) · CryptoQuant (opcional, requer chave). Este instrumento não é recomendação de investimento.
+  SEIOS CRIPTO — instrumento local. Os dados ficam salvos apenas neste navegador: estado e histórico recente em localStorage, histórico antigo em IndexedDB. Nada é enviado para nenhum servidor — exceto as consultas ao FRED e ao GDELT, que passam pelas rotas /api/fred e /api/gdelt deste próprio domínio, e, se você ligar a opção, as chamadas com chave que passam por proxy CORS público. Fontes: CoinGecko (preço e histórico diário) · Binance (funding, open interest, long/short, taker, livro, médias semanais) · Alternative.me (Fear &amp; Greed) · CoinMetrics (MVRV) · mempool.space (hash rate) · Deribit (put/call) · FRED (macro e ativos globais, via /api/fred) · GDELT (tom de notícias) · CryptoQuant (opcional, requer chave). Este instrumento não é recomendação de investimento.
 </footer>
 
 <script>
@@ -979,7 +979,7 @@ const STORAGE_KEY = "seios_btc_v2";
 // fonte única da versão — usada no rodapé, no histórico e nos exports.
 // Muda toda vez que a fórmula de score/pesos muda, pra nunca misturar
 // decisões de regras diferentes como se fossem comparáveis.
-const BUILD_VERSION = "2026-08-15.97-um-agregador-de-verdade";
+const BUILD_VERSION = "2026-08-15.98-gdelt-proprio";
 /* v78: versão do MODELO separada da versão do BUILD. Mudança visual não é
    mudança de semântica: só sobe quando peso, fórmula, corte ou trava mudam.
    Toda observação gravada carrega as duas, pra que seis meses depois dê pra
@@ -1307,6 +1307,7 @@ const STATUS_SEM_RETRY = [400, 401, 403, 404, 451];
    morria por causa da MINHA proteção, não por causa da API.
    Cada fonte declara o prazo que a natureza dela pede. */
 const TIMEOUT_POR_FONTE = [
+  { padrao: /^\/api\/gdelt/i,       direto: 50000, proxy: 50000 }, // rota própria: o servidor espera o GDELT (45s) e ainda responde
   { padrao: /gdeltproject\.org/i,   direto: 30000, proxy: 40000 }, // varredura global de notícias
   { padrao: /coinmetrics\.io/i,     direto: 15000, proxy: 20000 }, // séries longas
   { padrao: /^\/api\/fred/i,        direto: 25000, proxy: 25000 }, // proxy próprio: soma partida a frio da Vercel + FRED
@@ -1595,9 +1596,25 @@ async function comSegundaChance(fn, esperaMs){
   }
 }
 
+/* v98 — O GDELT PASSA A TER ROTA PRÓPRIA.
+   Era a última fonte que dependia INTEIRAMENTE de proxy CORS público:
+   `api.gdeltproject.org` não devolve cabeçalho de origem cruzada, então a
+   tentativa direta do Safari falha SEMPRE — é o "Load failed" do log — e a
+   chamada só se salvava se algum intermediário público respondesse. Quando
+   eles engasgam, caem dois motores de uma vez: Geopolítico pelo tom e
+   Eventos pelo volume, 10% do peso nominal.
+
+   Não era instabilidade do GDELT. Era a mesma doença que a v89 curou no
+   FRED, e a mesma cura: o servidor busca, o navegador consulta a própria
+   origem. A query mora no servidor (`api/gdelt.js`), não aqui — rota que
+   aceita busca livre do cliente é proxy aberto para qualquer um.
+
+   Se a rota não existir (arquivo aberto local, GitHub Pages), o erro é
+   legível e o indicador morre declarado, em vez de morrer calado. */
+const GDELT_ROTA = "/api/gdelt";
+
 async function fetchGdeltTone(){
-  const query = encodeURIComponent('(war OR conflict OR invasion OR sanctions OR "military strike" OR terrorism OR coup)');
-  const url = `https://api.gdeltproject.org/api/v2/doc/doc?query=${query}&mode=timelinetone&format=json&timespan=3d`;
+  const url = `${GDELT_ROTA}?mode=timelinetone&timespan=3d&set=geo`;
   const res = await smartFetch(url);
   if(!res.ok) throw new Error("GDELT falhou (" + res.status + ")");
   const data = await readGdeltJson(res);
@@ -1616,8 +1633,7 @@ async function fetchGdeltTone(){
 // agora comparado ao normal dos últimos dias, não SE é notícia boa ou ruim.
 // É essa ideia de "aceleração" que o texto sobre motores geopolíticos trouxe.
 async function fetchGdeltVolumeSpike(){
-  const query = encodeURIComponent('(war OR conflict OR invasion OR sanctions OR "military strike" OR terrorism OR coup OR crash OR collapse OR default OR emergency)');
-  const url = `https://api.gdeltproject.org/api/v2/doc/doc?query=${query}&mode=timelinevolraw&format=json&timespan=14d`;
+  const url = `${GDELT_ROTA}?mode=timelinevolraw&timespan=14d&set=crise`;
   const res = await smartFetch(url);
   if(!res.ok) throw new Error("GDELT volume falhou (" + res.status + ")");
   const data = await readGdeltJson(res);
@@ -5712,6 +5728,12 @@ async function runScoreBacktest(){
        expandido honesto: no dia N ele só conhece os N−1 dias anteriores. */
     const fundingAnteriores = [];
 
+    /* v98 — o replay passa a guardar a própria cobertura e a amplitude do
+       score. Sem isso, a tabela de recomendação vira uma linha só ("Observar,
+       285 dias") sem dizer POR QUE — e quem lê entende que o sistema manda
+       observar, quando o que houve foi o teste não alcançar os cortes. */
+    const coberturaReplay = [], scoresReplay = [];
+
     let acaoAnterior = null; // v77: histerese precisa de memória entre os dias
     for(let i=50; i<closes.length-forwardDays; i++){
       const date = dates[i];
@@ -5855,6 +5877,8 @@ async function runScoreBacktest(){
       const agHist = agregarCanonico(vetorCanonicoHistorico(valoresDia));
       const score = agHist.score;
       const completeness = agHist.massaTotal > 0 ? agHist.massaObservada / agHist.massaTotal : 0;
+      coberturaReplay.push(completeness);
+      scoresReplay.push(score);
       const divergence = computeDivergence(composites);
       // no backtest a cobertura de indicador não é reconstituível dia a dia
       // (não há histórico por indicador), então passa null e a função cai
@@ -5970,6 +5994,50 @@ async function runScoreBacktest(){
           `).join("")}
         </tbody>
       </table>
+
+      ${(function(){
+        /* v98 — DIMENSÃO NÃO TESTADA, dita em voz alta.
+           A auditoria pediu por escrito: trava que não é reconstruível
+           historicamente deve APARECER como não testada, não ser substituída
+           por uma completude generosa. A v97 tirou a completude generosa; esta
+           parte diz o que sobrou. */
+        if(!coberturaReplay.length) return "";
+        const ord = coberturaReplay.slice().sort(function(a,b){ return a-b; });
+        const med = ord[Math.floor(ord.length/2)];
+        const maxAbs = scoresReplay.reduce(function(a,s){ return Math.max(a, Math.abs(s)); }, 0);
+        const CORTES = [
+          { v: 40,  rot: "Reforçar (≥ +40)" },
+          { v: 15,  rot: "Entrar parcialmente (≥ +15)" },
+          { v: 15,  rot: "Reduzir (≤ −15)" },
+          { v: 55,  rot: "Sair / viés vendido (≤ −55)" }
+        ];
+        const foraDoAlcance = CORTES.filter(function(c){ return maxAbs < c.v; });
+        if(!foraDoAlcance.length) return "";
+        return `
+          <div style="border:1px solid var(--brick);background:rgba(60,10,10,.35);border-radius:4px;padding:14px 16px;margin:18px 0;font-family:var(--font-mono);font-size:11px;line-height:1.65;color:var(--text,#cfc);">
+            <strong style="color:var(--brick);">⚠ DIMENSÃO NÃO TESTADA — a escada de ação está fora do alcance deste replay.</strong><br><br>
+            O maior score em módulo produzido em ${scoresReplay.length} dias foi
+            <strong>${maxAbs.toFixed(1)}</strong>. Os cortes que o sistema usa para decidir
+            (${foraDoAlcance.map(function(c){ return c.rot; }).join(" · ")})
+            <strong>nunca foram atingidos</strong>, então o teste não tem uma única ocorrência deles para medir.
+            A linha "Observar" acima não é uma descoberta sobre o mercado: é o teste dizendo que,
+            com os dados que consegue reconstruir, o sistema nunca teria saído de Observar.<br><br>
+            O motivo é cobertura: a massa de indicadores reconstruível dia a dia foi de
+            <strong>${(med*100).toFixed(0)}%</strong> na mediana
+            (mínimo ${(ord[0]*100).toFixed(0)}% · máximo ${(ord[ord.length-1]*100).toFixed(0)}%).
+            O modelo deixa a ausência no denominador e amortece o score na direção de zero — de propósito,
+            porque dado ausente não é evidência de neutralidade. Com metade da massa faltando,
+            o amortecimento sozinho impede o score de chegar aos cortes.<br><br>
+            <strong>O que isto invalida:</strong> conclusões anteriores sobre "Reduzir acertou" ou
+            "Entrar parcialmente bateu a referência" foram medidas com o agregador antigo, que
+            redistribuía o peso ausente entre os presentes e inflava o score. Elas não sobrevivem
+            a esta correção e não devem ser citadas.<br>
+            <strong>O que isto NÃO significa:</strong> não é evidência de que o sistema erra. É
+            ausência de teste. A resposta é mais fonte histórica reconstruível — ou coleta ao vivo
+            até a própria série ter tamanho —, não afrouxar o modelo para o teste caber.
+          </div>
+        `;
+      })()}
 
       <div style="font-family:var(--font-mono);font-size:10px;color:var(--text-faint);text-transform:uppercase;letter-spacing:.06em;margin:20px 0 10px;border-top:1px solid var(--line-soft);padding-top:16px;">
         Calibração por INDICADOR — o motor é o problema ou é alguém dentro dele?

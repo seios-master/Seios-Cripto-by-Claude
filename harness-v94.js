@@ -37,6 +37,9 @@ function semComentarios(t){
 let API;
 try{
   API = new Function([
+    'const MODEL_VERSION = "m5-2026-08-15";',
+    fonteDe("snapshotDoModeloAtual"),
+    fonteDe("separarPorModelo"),
     fonteDe("contagemDaSerie"),
     fonteDe("maturarRetornos"),
     fonteDe("precoMaisProximoDe"),
@@ -55,6 +58,7 @@ function serieDeLeituras(n, precos){
   const out = [];
   for(let i = 0; i < n; i++){
     out.push({ ts: new Date(base + i*H8).toISOString(),
+               modelo: "m5-2026-08-15",
                preco: precos ? precos[i] : 100 + i,
                retornos: {}, retornosMeta: {} });
   }
@@ -107,10 +111,43 @@ t("série vazia não estoura e devolve zeros", ()=>{
 });
 
 t("nada é aceito sem `prox` numérico — undefined e null não contam", ()=>{
-  const s = [{ ts:"2026-08-01T09:00:00Z", preco:100, retornos:{ prox: null } },
-             { ts:"2026-08-01T17:00:00Z", preco:101, retornos:{} },
-             { ts:"2026-08-02T01:00:00Z", preco:102, retornos:{ prox: 0.5 } }];
+  const M = "m5-2026-08-15";
+  const s = [{ ts:"2026-08-01T09:00:00Z", modelo:M, preco:100, retornos:{ prox: null } },
+             { ts:"2026-08-01T17:00:00Z", modelo:M, preco:101, retornos:{} },
+             { ts:"2026-08-02T01:00:00Z", modelo:M, preco:102, retornos:{ prox: 0.5 } }];
   eq(API.contagemDaSerie(s).independentes, 1, "janelas:");
+});
+
+console.log("\nBLOCO A2 — leitura de modelo anterior não conta como progresso");
+
+t("leitura de modelo antigo fica FORA da contagem, e é reportada à parte", ()=>{
+  const s = serieDeLeituras(6);
+  API.maturarRetornos(s, 200, Date.parse(s[5].ts) + 3600e3);
+  s[0].modelo = "m4-2026-08-15";
+  s[1].modelo = "m4-2026-08-15";
+  const c = API.contagemDaSerie(s);
+  eq(c.leituras, 4, "leituras sob o modelo atual:");
+  eq(c.legado, 2, "leituras de modelo anterior:");
+  // 4 leituras sob o modelo atual, mas a última ainda não fechou janela: 3
+  eq(c.independentes, 3, "janelas do modelo atual:");
+});
+
+t("a contagem NÃO depende de o chamador lembrar de filtrar", ()=>{
+  // o mesmo conjunto, já filtrado pelo chamador, dá o mesmo número
+  const s = serieDeLeituras(6);
+  API.maturarRetornos(s, 200, Date.parse(s[5].ts) + 3600e3);
+  s[0].modelo = "m4-2026-08-15";
+  const bruto = API.contagemDaSerie(s);
+  const filtrado = API.contagemDaSerie(s.filter(x=>x.modelo === "m5-2026-08-15"));
+  eq(bruto.independentes, filtrado.independentes, "filtrar duas vezes muda o número:");
+});
+
+t("todas de modelo anterior: zero progresso, e o diagnóstico não some", ()=>{
+  const s = serieDeLeituras(4);
+  API.maturarRetornos(s, 200, Date.parse(s[3].ts) + 3600e3);
+  s.forEach(x=> x.modelo = "m3-2026-08-15");
+  const c = API.contagemDaSerie(s);
+  eq(c.leituras, 0, "leituras:"); eq(c.independentes, 0, "janelas:"); eq(c.legado, 4, "legado:");
 });
 
 console.log("\nBLOCO B — o retorno até a próxima leitura (o `ret8h`)");

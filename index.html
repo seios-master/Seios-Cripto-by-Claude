@@ -979,7 +979,7 @@ const STORAGE_KEY = "seios_btc_v2";
 // fonte única da versão — usada no rodapé, no histórico e nos exports.
 // Muda toda vez que a fórmula de score/pesos muda, pra nunca misturar
 // decisões de regras diferentes como se fossem comparáveis.
-const BUILD_VERSION = "2026-08-15.94-uma-contagem";
+const BUILD_VERSION = "2026-08-15.94.1-contagem-por-modelo";
 /* v78: versão do MODELO separada da versão do BUILD. Mudança visual não é
    mudança de semântica: só sobe quando peso, fórmula, corte ou trava mudam.
    Toda observação gravada carrega as duas, pra que seis meses depois dê pra
@@ -4140,7 +4140,8 @@ function relatorioTexto(snap, snaps){
   if(snaps && snaps.length){
     const cont = contagemDaSerie(snaps);
     const dias = cont.dias;
-    L.push("SÉRIE: " + cont.leituras + " leitura(s) · " + dias + " dia(s)");
+    L.push("SÉRIE: " + cont.leituras + " leitura(s) sob " + MODEL_VERSION + " · " + dias + " dia(s)" +
+           (cont.legado ? " · " + cont.legado + " de modelo anterior, fora da contagem" : ""));
     L.push("OBSERVAÇÕES INDEPENDENTES: " + cont.independentes + " · " +
            cont.pctDoAlvo.toFixed(1) + "% de ~777" +
            (cont.comD1 !== cont.independentes
@@ -4222,7 +4223,19 @@ function precoMaisProximoDe(snaps, alvoMs, toleranciaH){
    Duas verdades discordando na mesma tela, e a mais otimista aparecendo no
    lugar mais visível. Agora existe uma função; os três leem dela. */
 function contagemDaSerie(snaps){
-  const lista = Array.isArray(snaps) ? snaps : [];
+  /* v94.1 — a v94 acertou a UNIDADE (janela independente) e errou a POPULAÇÃO:
+     contava leituras de modelo anterior como progresso. Na primeira rodada, o
+     cabeçalho dizia "1 janela independente" (só o modelo atual) e o diagnóstico
+     dizia "5" (tudo). Duas contagens discordando na mesma tela — exatamente o
+     defeito que a v94 existia para remover, reaparecendo um andar acima.
+
+     O bump de modelo existe porque leitura de outro modelo não é comparável.
+     Se ela não entra na média, não pode entrar na contagem rumo às 777. E o
+     filtro mora AQUI, não em cada chamador: chamador que precisa lembrar de
+     filtrar é chamador que vai esquecer. */
+  const todas = Array.isArray(snaps) ? snaps : [];
+  const grupos = separarPorModelo(todas);
+  const lista = grupos.atual;
   const temNum = function(s, k){ return s && s.retornos && typeof s.retornos[k] === "number"; };
   const independentes = lista.filter(function(s){ return temNum(s, "prox"); }).length;
   return {
@@ -4232,6 +4245,7 @@ function contagemDaSerie(snaps){
     comD1: lista.filter(function(s){ return temNum(s, "d1"); }).length,
     diasComD1: new Set(lista.filter(function(s){ return temNum(s, "d1"); })
                            .map(function(s){ return String(s.ts || "").slice(0,10); })).size,
+    legado: grupos.legado.length,
     alvo: 777,
     pctDoAlvo: (independentes / 777) * 100
   };
@@ -9227,7 +9241,8 @@ document.addEventListener("click", (e)=>{
       { n: 777, o: "detectar um edge fino (55% vs 50%)" }
     ];
     const proximo = MARCOS.find(function(m){ return obsInd < m.n; }) || MARCOS[MARCOS.length-1];
-    txt += "\njanelas independentes (de uma leitura à seguinte): " + obsInd + "\n";
+    txt += "\njanelas independentes (de uma leitura à seguinte): " + obsInd +
+           (obsCont.legado ? "   [" + obsCont.legado + " leitura(s) de modelo anterior não contam]" : "") + "\n";
     MARCOS.forEach(function(m){
       const marca = obsInd >= m.n ? "✓" : (m === proximo ? "→" : " ");
       txt += "  " + marca + " " + String(m.n).padStart(3) + " · " + m.o +

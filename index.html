@@ -979,7 +979,7 @@ const STORAGE_KEY = "seios_btc_v2";
 // fonte única da versão — usada no rodapé, no histórico e nos exports.
 // Muda toda vez que a fórmula de score/pesos muda, pra nunca misturar
 // decisões de regras diferentes como se fossem comparáveis.
-const BUILD_VERSION = "2026-08-15.86-backtest-completo";
+const BUILD_VERSION = "2026-08-15.87-geo-na-tabela";
 /* v78: versão do MODELO separada da versão do BUILD. Mudança visual não é
    mudança de semântica: só sobe quando peso, fórmula, corte ou trava mudam.
    Toda observação gravada carrega as duas, pra que seis meses depois dê pra
@@ -5083,7 +5083,13 @@ async function runScoreBacktest(){
 
     const calcLine = logStep(`calibrando — testando os cortes dia a dia (${closes.length} dias)`, "calibrationLog");
 
-    const motorKeys = ["macro","institucional","onchain","derivativos","tecnico","sentimento","ativosGlobais"];
+    /* v87: a lista era literal e ficou desatualizada — a v86 trouxe o
+       Geopolítico para o backtest e ele calculava normalmente, mas não
+       aparecia na tabela porque ninguém adicionou a chave aqui.
+       Agora sai do próprio objeto de compostos: motor que o backtest sabe
+       calcular é motor que a tabela mostra, sem cadastro paralelo. */
+    const motorKeys = ["macro","institucional","onchain","derivativos","tecnico",
+                       "sentimento","ativosGlobais","geopolitico","eventos"];
     const motorBuckets = {};
     motorKeys.forEach(k=> motorBuckets[k] = { bull: [], bear: [] });
 
@@ -5309,6 +5315,18 @@ async function runScoreBacktest(){
         <tbody>
           ${motorKeys.map(k=>{
             const motor = S.motors[k];
+            if(!motor) return "";
+            /* v87: o teste não cobre todos os motores por igual. Sem dizer
+               isso na própria linha, "amostra insuficiente" do Geopolítico
+               parece o mesmo problema do Derivativos — e não é: um roda com
+               um terço dos indicadores, o outro roda com um só. */
+            const COBERTURA_TESTE = {
+              geopolitico: "parcial — só EPU",
+              eventos: "não entra — sem fonte histórica",
+              institucional: "parcial — só prêmio Coinbase",
+              derivativos: "parcial — só funding"
+            };
+            const nota = COBERTURA_TESTE[k];
             const bullArr = motorBuckets[k].bull, bearArr = motorBuckets[k].bear;
             const bullAvg = bullArr.length ? avg(bullArr) : null;
             const bearAvg = bearArr.length ? avg(bearArr) : null;
@@ -5320,7 +5338,7 @@ async function runScoreBacktest(){
             }
             return `
               <tr>
-                <td>${motor.label}</td>
+                <td>${motor.label}${nota ? `<div style="font-size:9.5px;color:var(--gold);">${esc(nota)}</div>` : ""}</td>
                 <td>${(motor.weight*100).toFixed(0)}%</td>
                 <td style="color:${bullAvg===null?"var(--text-faint)":(bullAvg>=0?"var(--teal)":"var(--brick)")};">
                   ${bullAvg===null?"—":(bullAvg>=0?"+":"")+bullAvg.toFixed(1)+"%"} ${bullArr.length?`(${bullArr.length}d)`:""}

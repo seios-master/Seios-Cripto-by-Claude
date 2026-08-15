@@ -979,7 +979,7 @@ const STORAGE_KEY = "seios_btc_v2";
 // fonte única da versão — usada no rodapé, no histórico e nos exports.
 // Muda toda vez que a fórmula de score/pesos muda, pra nunca misturar
 // decisões de regras diferentes como se fossem comparáveis.
-const BUILD_VERSION = "2026-08-15.95-distribuicao-do-funding";
+const BUILD_VERSION = "2026-08-15.96-funding-em-percentil";
 /* v78: versão do MODELO separada da versão do BUILD. Mudança visual não é
    mudança de semântica: só sobe quando peso, fórmula, corte ou trava mudam.
    Toda observação gravada carrega as duas, pra que seis meses depois dê pra
@@ -1874,6 +1874,42 @@ async function fetchFredSeries(seriesId, limit){
    Não alcançar é FALHA, não janela curta em silêncio: uma série que só volta 40
    dias não mede momentum de 90, e chamar isso de 90 é o erro que esta função
    existe para corrigir. */
+/* PERCENTIL EXPANDIDO, PONTO NO TEMPO (v96)
+   A distribuição do funding medida na v95 é inequívoca: em 167 dias, ZERO
+   cruzaram |score| 15, e o máximo do período deu 9,8. Um indicador que carrega
+   ~3% do peso efetivo e nunca sai de ±10 não é "sem sinal" — é uma âncora
+   puxando o score para zero, com a informação que existe (a taxa varia 2,5×
+   entre a mediana e o máximo) jogada fora pela escala.
+
+   A tentação é reescalar para a distribuição recente. Isso é uma armadilha
+   conhecida: 167 dias de mercado sem alavancagem viram a régua, e um funding
+   de 0,0098% — economicamente ~1% ao ano, um mercado calmo — passaria a
+   pontuar 90, "extremo". Seria fabricar amplitude onde não há significado
+   econômico, o erro do EPU ao contrário.
+
+   Não sabemos qual das duas leituras prediz: a absoluta (custo de carrego) ou
+   a relativa (desvio da própria norma recente). Então a relativa NÃO entra no
+   score. Entra como variável de laboratório, medida contra o mesmo retorno
+   futuro que a absoluta, lado a lado na mesma tabela. A regra de promoção de
+   fonte nova, aplicada a uma régua nova.
+
+   `anteriores` são apenas os valores conhecidos ANTES da data avaliada — o
+   passado não consulta o presente, nem quando o presente é só um percentil. */
+function percentilExpandido(valor, anteriores, minimo){
+  if(!Array.isArray(anteriores) || anteriores.length < (minimo || 60)) return null;
+  if(!Number.isFinite(valor)) return null;
+  let abaixo = 0;
+  for(let i = 0; i < anteriores.length; i++) if(anteriores[i] < valor) abaixo++;
+  return abaixo / anteriores.length;   // 0 a 1
+}
+
+/* rank em [0,1] vira score de −100 a +100, com a MESMA leitura contrária da
+   escala absoluta: funding alto = manada comprada = risco = score negativo. */
+function scoreDoPercentil(rank){
+  if(rank === null || rank === undefined) return null;
+  return (0.5 - rank) * 200;
+}
+
 function janelaCalendario(obs, dias){
   if(!obs || !obs.length) throw new Error("janela: série vazia");
   const alvo = new Date(obs[0].date + "T00:00:00Z");
@@ -5616,6 +5652,10 @@ async function runScoreBacktest(){
       else if(valor <= -15) indBuckets[id].bear.push(fwd);
     }
 
+    /* acumula as taxas já vistas, em ordem de data — é o que torna o percentil
+       expandido honesto: no dia N ele só conhece os N−1 dias anteriores. */
+    const fundingAnteriores = [];
+
     let acaoAnterior = null; // v77: histerese precisa de memória entre os dias
     for(let i=50; i<closes.length-forwardDays; i++){
       const date = dates[i];
@@ -5636,6 +5676,14 @@ async function runScoreBacktest(){
       const fr = fundingMap[date];
       const derivativos = fr !== undefined ? norm("derivativos.funding", fr) : null;
       if(fr !== undefined) sourcesUsed.add("Derivativos (funding)");
+
+      /* v96 — a mesma taxa, régua relativa. Só entra na tabela de calibração;
+         não toca no composto de Derivativos nem no score do dia. */
+      let fundingPct = null;
+      if(fr !== undefined){
+        fundingPct = scoreDoPercentil(percentilExpandido(fr, fundingAnteriores, 60));
+        fundingAnteriores.push(fr);
+      }
 
       // on-chain — mesma composição do motor ao vivo: hash rate + MVRV + NUPL + endereços ativos
       const hrScore = hashrateScoreAtDate(hashSeries, date);
@@ -5722,6 +5770,7 @@ async function runScoreBacktest(){
         if(sma !== null) registraIndicador("tecnico.mediaMovel", clamp(((closes[i]-sma)/sma*100)*8,-100,100), fwdInd);
         registraIndicador("sentimento.fearGreed", sentimento, fwdInd);
         registraIndicador("derivativos.funding", derivativos, fwdInd);
+        registraIndicador("funding_percentil ⚗", fundingPct, fwdInd);
         registraIndicador("institucional.coinbasePremium", institucional, fwdInd);
         if(hrScore !== null) registraIndicador("onchain.hashrate", hrScore, fwdInd);
         if(addrScore !== null) registraIndicador("onchain.activeAddresses", addrScore, fwdInd);
@@ -5863,6 +5912,11 @@ async function runScoreBacktest(){
         Calibração por INDICADOR — o motor é o problema ou é alguém dentro dele?
       </div>
       <div style="font-family:var(--font-mono);font-size:10.5px;color:var(--text-faint);margin-bottom:10px;">
+        A linha marcada com <strong>⚗</strong> é variável de <strong>laboratório</strong>: não vota no score,
+        não tem peso, e existe só para ser comparada com a versão que vota. <code>funding_percentil</code> é a
+        mesma taxa da linha <code>funding</code>, lida como posição na própria distribuição passada (percentil
+        expandido, mínimo de 60 dias, sem olhar um único dia à frente) em vez de nível absoluto.
+        Se ela separar e a absoluta não, a escala é o problema — não o indicador.<br><br>
         Cada indicador isolado, contra o mesmo retorno futuro. Um motor pode parecer "sem sinal"
         quando na verdade tem dois indicadores fortes se cancelando — e as duas situações pedem
         tratamento oposto. <strong>Isto não autoriza mudar peso:</strong> é o passado recente, num

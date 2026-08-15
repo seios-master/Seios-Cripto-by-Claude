@@ -979,7 +979,7 @@ const STORAGE_KEY = "seios_btc_v2";
 // fonte única da versão — usada no rodapé, no histórico e nos exports.
 // Muda toda vez que a fórmula de score/pesos muda, pra nunca misturar
 // decisões de regras diferentes como se fossem comparáveis.
-const BUILD_VERSION = "2026-08-15.93-janela-calendario";
+const BUILD_VERSION = "2026-08-15.94-uma-contagem";
 /* v78: versão do MODELO separada da versão do BUILD. Mudança visual não é
    mudança de semântica: só sobe quando peso, fórmula, corte ou trava mudam.
    Toda observação gravada carrega as duas, pra que seis meses depois dê pra
@@ -4104,7 +4104,12 @@ function relatorioTexto(snap, snaps){
   Object.keys(snap.indicadores).forEach(function(k){
     const i = snap.indicadores[k];
     let linha = "  " + k + ": " + (i.valor === null ? "—" : num(i.valor, 2));
-    if(i.vigente === null && i.valor !== null) linha += " [EXPIRADO, fora da conta]";
+    /* v94 — desde a v91, `vigente === null` significa DUAS coisas: venceu ou a
+       fonte caiu. O diagnóstico carimbava "EXPIRADO" nos dois casos, e o GDELT
+       apareceu como expirado com trinta minutos de idade. "Falhou e expirado
+       são estados distintos" é princípio testado no `frescorDoIndicador` desde
+       a v91 — e vazava aqui, no texto que eu leio para decidir. */
+    if(i.vigente === null && i.valor !== null && !i.falhou) linha += " [EXPIRADO, fora da conta]";
     if(i.falhou){
       // v69 — "[FALHOU]" sozinho não distingue tropeço de agora de fonte morta
       // há meio dia. Com a idade, dá para ver na hora se o valor que está
@@ -4115,7 +4120,7 @@ function relatorioTexto(snap, snaps){
         idade = h < 1 ? " · valor de " + Math.round(h*60) + "min atrás"
                       : " · valor de " + h.toFixed(1) + "h atrás";
       }
-      linha += " [FALHOU" + idade + "]";
+      linha += " [FALHOU, fora da conta" + idade + "]";
     }
     if(i.saturado) linha += " [SATURADO]";
     if(i.nota) linha += "  — " + i.nota;
@@ -4133,9 +4138,14 @@ function relatorioTexto(snap, snaps){
   }
 
   if(snaps && snaps.length){
-    const dias = new Set(snaps.map(function(x){ return x.ts.slice(0,10); })).size;
-    L.push("SÉRIE: " + snaps.length + " leitura(s) · " + dias + " dia(s) · " +
-           ((dias/777)*100).toFixed(1) + "% de ~777");
+    const cont = contagemDaSerie(snaps);
+    const dias = cont.dias;
+    L.push("SÉRIE: " + cont.leituras + " leitura(s) · " + dias + " dia(s)");
+    L.push("OBSERVAÇÕES INDEPENDENTES: " + cont.independentes + " · " +
+           cont.pctDoAlvo.toFixed(1) + "% de ~777" +
+           (cont.comD1 !== cont.independentes
+              ? "  (" + cont.comD1 + " com desfecho de 24h — janelas sobrepostas, não contam)"
+              : ""));
     const cong = indicadoresCongelados(snaps, 3);
     if(cong.length){
       L.push("sem variação em 3 dias: " + cong.map(function(c){ return c.chave; }).join(", "));
@@ -4195,6 +4205,36 @@ function precoMaisProximoDe(snaps, alvoMs, toleranciaH){
   });
   if(!melhor || menorDist > toleranciaH*3600e3) return null;
   return { preco: melhor.preco, ts: melhor.ts, distanciaH: menorDist/3600e3 };
+}
+
+/* UMA CONTAGEM DE OBSERVAÇÕES, TRÊS LEITORES (v94)
+   O `ret8h` — retorno de uma leitura à seguinte — existe desde a v81, com o
+   nome `retornos.prox`, e é ele que produz observação INDEPENDENTE: janelas que
+   não compartilham futuro. O que faltava não era gravá-lo; era CONTAR por ele.
+
+   Três lugares contavam progresso, e cada um contava outra coisa:
+     · o diagnóstico dividia DIAS por 777 — dia não é observação;
+     · o painel da série media os marcos por `d1`, e ainda escrevia "3 leituras
+       por dia ≈ 3 observações/dia", que é exatamente o erro que o `prox` foi
+       criado para corrigir: três leituras com retorno de 24 h compartilham 2/3
+       do mesmo futuro;
+     · só o rodapé do "O que já aconteceu" contava `prox`.
+   Duas verdades discordando na mesma tela, e a mais otimista aparecendo no
+   lugar mais visível. Agora existe uma função; os três leem dela. */
+function contagemDaSerie(snaps){
+  const lista = Array.isArray(snaps) ? snaps : [];
+  const temNum = function(s, k){ return s && s.retornos && typeof s.retornos[k] === "number"; };
+  const independentes = lista.filter(function(s){ return temNum(s, "prox"); }).length;
+  return {
+    leituras: lista.length,
+    dias: new Set(lista.map(function(s){ return String(s.ts || "").slice(0,10); })).size,
+    independentes: independentes,
+    comD1: lista.filter(function(s){ return temNum(s, "d1"); }).length,
+    diasComD1: new Set(lista.filter(function(s){ return temNum(s, "d1"); })
+                           .map(function(s){ return String(s.ts || "").slice(0,10); })).size,
+    alvo: 777,
+    pctDoAlvo: (independentes / 777) * 100
+  };
 }
 
 /* miolo puro: recebe a série ordenada e devolve quem mudou. Sem IndexedDB,
@@ -9174,20 +9214,28 @@ document.addEventListener("click", (e)=>{
        horizonte de 30 dias, mas vale quase 1 inteira no de 1 dia — que é
        justamente o que gravamos desde o v64. As perguntas têm marcos
        diferentes, e mostrar só o mais distante desanima sem informar. */
-    const obs1d = snaps.filter(function(s){ return s.retornos && typeof s.retornos.d1 === "number"; }).length;
+    /* v94 — os marcos passaram a medir JANELAS INDEPENDENTES (`prox`), não
+       leituras com desfecho de 24 h. Com três leituras por dia, o segundo
+       número é ~3× o primeiro: contá-lo como amostra antecipa em meses a
+       sensação de ter dado suficiente. O de 24 h continua na tela, dito pelo
+       que é. */
+    const obsCont = contagemDaSerie(snaps);
+    const obsInd = obsCont.independentes;
     const MARCOS = [
       { n: 40,  o: "distinguir indicador invertido de ruído" },
       { n: 130, o: "detectar um edge grande (60% vs 50%)" },
       { n: 777, o: "detectar um edge fino (55% vs 50%)" }
     ];
-    const proximo = MARCOS.find(function(m){ return obs1d < m.n; }) || MARCOS[MARCOS.length-1];
-    txt += "\nleituras com desfecho de 1 dia já apurado: " + obs1d + "\n";
+    const proximo = MARCOS.find(function(m){ return obsInd < m.n; }) || MARCOS[MARCOS.length-1];
+    txt += "\njanelas independentes (de uma leitura à seguinte): " + obsInd + "\n";
     MARCOS.forEach(function(m){
-      const marca = obs1d >= m.n ? "✓" : (m === proximo ? "→" : " ");
+      const marca = obsInd >= m.n ? "✓" : (m === proximo ? "→" : " ");
       txt += "  " + marca + " " + String(m.n).padStart(3) + " · " + m.o +
-             (m === proximo ? "  (faltam " + (m.n - obs1d) + ")" : "") + "\n";
+             (m === proximo ? "  (faltam " + (m.n - obsInd) + ")" : "") + "\n";
     });
-    txt += "3 leituras por dia ≈ 3 observações/dia neste horizonte.\n";
+    txt += "cada leitura vira uma janela quando a SEGUINTE chega — 3 leituras/dia ≈ 3 janelas/dia.\n" +
+           "leituras com desfecho de 24h: " + obsCont.comD1 +
+           " — janelas sobrepostas (2/3 do mesmo futuro), não somam amostra.\n";
 
     const congelados = indicadoresCongelados(snaps, 3);
     if(congelados.length){
@@ -9881,14 +9929,14 @@ document.addEventListener("click", (e)=>{
     if(!linhas.length) t += "  (nenhum indicador com retorno vencido ainda)\n";
 
     /* --- rodapé honesto --- */
-    const vencidas = snaps.filter(function(s){ return s.retornos && typeof s.retornos.d1 === "number"; });
-    const nef1 = vencidas.length;
-    const diasVencidos = new Set(vencidas.map(function(s){ return s.ts.slice(0,10); })).size;
+    const obsCont = contagemDaSerie(snaps);
+    const nef1 = obsCont.comD1;
+    const diasVencidos = obsCont.diasComD1;
     /* v81: a contagem que importa é a de janelas NÃO sobrepostas. Três leituras
        por dia com retorno de 24h compartilham 2/3 do futuro — contá-las como
        três observações infla a amostra em três vezes e antecipa em anos a
        sensação de ter dado suficiente. */
-    const comProx = snaps.filter(function(s){ return s.retornos && typeof s.retornos.prox === "number"; });
+    const comProx = { length: obsCont.independentes };
     const origens = { janela:0, reconstruido:0, perdido:0 };
     snaps.forEach(function(s){
       ["d1","d3","d30"].forEach(function(k){

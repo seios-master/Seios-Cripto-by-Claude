@@ -979,12 +979,12 @@ const STORAGE_KEY = "seios_btc_v2";
 // fonte única da versão — usada no rodapé, no histórico e nos exports.
 // Muda toda vez que a fórmula de score/pesos muda, pra nunca misturar
 // decisões de regras diferentes como se fossem comparáveis.
-const BUILD_VERSION = "2026-08-15.92.1-render-isolado";
+const BUILD_VERSION = "2026-08-15.93-janela-calendario";
 /* v78: versão do MODELO separada da versão do BUILD. Mudança visual não é
    mudança de semântica: só sobe quando peso, fórmula, corte ou trava mudam.
    Toda observação gravada carrega as duas, pra que seis meses depois dê pra
    saber sob qual regra aquela leitura foi produzida. */
-const MODEL_VERSION = "m4-2026-08-15";
+const MODEL_VERSION = "m5-2026-08-15";
 
 // indicador padrão — auto = tenta buscar sozinho; manual = você preenche
 function ind(label, source, note, excludeFromScore){
@@ -1859,6 +1859,50 @@ async function fetchFredSeries(seriesId, limit){
   return obs; // obs[0] = mais recente
 }
 
+/* JANELA DE CALENDÁRIO AO VIVO (v93) — o defeito de granularidade, terceira aparição.
+   `obs[obs.length-1]` é o registro mais ANTIGO do lote pedido, não o ponto de 90
+   dias atrás. Como o lote era fixo em 95 registros e as séries do FRED têm
+   cadências diferentes — DFF e o EPU diário publicam sete dias por semana; DXY,
+   WTI, euro, S&P e DGS10 só em dias úteis — o mesmo rótulo "~90d" media ~95 dias
+   numa série e ~133 noutra. E nenhuma das duas media o que o backtest mede: lá o
+   `indiceDiasAtras()` já escolhe por calendário desde a correção do look-ahead.
+   Vivo e histórico comparavam grandezas diferentes com o mesmo nome.
+
+   Aqui `obs` vem DESC (obs[0] = mais recente), ao contrário do backtest. O
+   critério é o mesmo: o primeiro ponto com data <= (data mais recente − dias).
+
+   Não alcançar é FALHA, não janela curta em silêncio: uma série que só volta 40
+   dias não mede momentum de 90, e chamar isso de 90 é o erro que esta função
+   existe para corrigir. */
+function janelaCalendario(obs, dias){
+  if(!obs || !obs.length) throw new Error("janela: série vazia");
+  const alvo = new Date(obs[0].date + "T00:00:00Z");
+  alvo.setUTCDate(alvo.getUTCDate() - dias);
+  const alvoStr = alvo.toISOString().slice(0,10);
+  const doLote = obs[obs.length-1];
+  let ponto = null;
+  for(let i = 0; i < obs.length; i++){
+    if(obs[i].date <= alvoStr){ ponto = obs[i]; break; }
+  }
+  if(!ponto) throw new Error("série não alcança " + dias + " dias (só " +
+                            diasEntreDatas(doLote.date, obs[0].date) + "d no lote)");
+  return {
+    ponto: ponto,
+    dias: diasEntreDatas(ponto.date, obs[0].date),
+    doLote: doLote,
+    diasDoLote: diasEntreDatas(doLote.date, obs[0].date)
+  };
+}
+function diasEntreDatas(a, b){
+  return Math.round((Date.parse(b + "T00:00:00Z") - Date.parse(a + "T00:00:00Z")) / 86400000);
+}
+/* O antes/depois que vai para o log da coleta. O score muda nesta build em sete
+   indicadores votantes; mudar em silêncio é o que o projeto não faz. */
+function comparaJanela(j, novo, antigo, un){
+  const f = function(v){ return (v>=0?"+":"") + v.toFixed(un === "pp" ? 2 : 1) + (un === "pp" ? "pp" : "%"); };
+  return f(novo) + " em " + j.dias + "d (antes " + f(antigo) + " em " + j.diasDoLote + "d)";
+}
+
 function clamp(v,min,max){ return Math.max(min, Math.min(max, v)); }
 
 // escapa texto antes de ir pro innerHTML. Tudo que o usuário digita (título de
@@ -2417,11 +2461,13 @@ async function refreshMarketData(){
     { const line = logStep("consultando juros — Fed Funds (FRED)");
       try{ // Fed Funds Rate diário — sobe = aperto monetário = baixista
         const obs = await fetchFredSeries("DFF", 95);
-        const latest = obs[0].value, past = obs[obs.length-1].value;
-        const delta = latest - past;
-        setAuto("macro","juros", norm("macro.juros", delta), `Fed Funds ${latest.toFixed(2)}% (${delta>=0?"+":""}${delta.toFixed(2)}pp em ~90d)`, { bruto: delta, referenceAt: obs[0].date });
+        const j = janelaCalendario(obs, 90);
+        const latest = obs[0].value;
+        const delta = latest - j.ponto.value;
+        const deltaAntes = latest - j.doLote.value;
+        setAuto("macro","juros", norm("macro.juros", delta), `Fed Funds ${latest.toFixed(2)}% (${delta>=0?"+":""}${delta.toFixed(2)}pp em ${j.dias}d)`, { bruto: delta, referenceAt: obs[0].date });
         results.ok.push("juros (FRED)");
-        logDone(line, true, `${latest.toFixed(2)}%`);
+        logDone(line, true, `${latest.toFixed(2)}% · ${comparaJanela(j, delta, deltaAntes, "pp")}`);
       }catch(e){ setFailed("macro","juros", e && e.message); results.fail.push("juros (FRED)"); logDone(line, false, e.message); }
     }
     await sleep(400);
@@ -2457,11 +2503,13 @@ async function refreshMarketData(){
     { const line = logStep("consultando dólar — DXY (FRED)");
       try{ // dólar ponderado — dólar mais forte tende a pressionar BTC pra baixo
         const obs = await fetchFredSeries("DTWEXBGS", 95);
-        const latest = obs[0].value, past = obs[obs.length-1].value;
+        const j = janelaCalendario(obs, 90);
+        const latest = obs[0].value, past = j.ponto.value;
         const pct = ((latest-past)/past)*100;
-        setAuto("macro","dxy", norm("macro.dxy", pct), `dólar ${pct>=0?"+":""}${pct.toFixed(1)}% em ~90d`, { bruto: pct, referenceAt: obs[0].date });
+        const pctAntes = j.doLote.value ? ((latest-j.doLote.value)/j.doLote.value)*100 : 0;
+        setAuto("macro","dxy", norm("macro.dxy", pct), `dólar amplo (DTWEXBGS) ${pct>=0?"+":""}${pct.toFixed(1)}% em ${j.dias}d`, { bruto: pct, referenceAt: obs[0].date });
         results.ok.push("dxy (FRED)");
-        logDone(line, true, `${pct>=0?"+":""}${pct.toFixed(1)}%`);
+        logDone(line, true, comparaJanela(j, pct, pctAntes, "%"));
       }catch(e){ setFailed("macro","dxy", e && e.message); results.fail.push("dxy (FRED)"); logDone(line, false, e.message); }
     }
     await sleep(400);
@@ -2480,16 +2528,18 @@ async function refreshMarketData(){
     { const line = logStep("consultando incerteza de política econômica — EPU (FRED)");
       try{ // EPU subindo = mais incerteza = viés levemente baixista pra ativos de risco
         const obs = await fetchFredSeries("USEPUINDXD", 95);
-        const latest = obs[0].value, past = obs[obs.length-1].value;
+        const j = janelaCalendario(obs, 90);
+        const latest = obs[0].value, past = j.ponto.value;
         const pct = past ? ((latest-past)/past)*100 : 0;
+        const pctAntes = j.doLote.value ? ((latest-j.doLote.value)/j.doLote.value)*100 : 0;
         // ESCALA — o multiplicador linear *3 saturava com 33% de variação, e o
         // índice de incerteza oscila mais que isso rotineiramente (varia entre
         // ~50 e ~300). Na prática o indicador vivia grudado no teto: deixava de
         // ser medida e virava constante. escalaSuave() nunca satura de fato —
         // 40% de variação dá ~66, 100% dá ~96, e continua respondendo depois.
-        setAuto("geopolitico","epu", norm("geopolitico.epu", pct), `EPU ${latest.toFixed(0)} (${pct>=0?"+":""}${pct.toFixed(1)}% em ~90d)`, { bruto: pct, referenceAt: obs[0].date });
+        setAuto("geopolitico","epu", norm("geopolitico.epu", pct), `EPU ${latest.toFixed(0)} (${pct>=0?"+":""}${pct.toFixed(1)}% em ${j.dias}d)`, { bruto: pct, referenceAt: obs[0].date });
         results.ok.push("epu (FRED)");
-        logDone(line, true, latest.toFixed(0));
+        logDone(line, true, `${latest.toFixed(0)} · ${comparaJanela(j, pct, pctAntes, "%")}`);
       }catch(e){ setFailed("geopolitico","epu", e && e.message); results.fail.push("epu (FRED)"); logDone(line, false, e.message); }
     }
 
@@ -2500,11 +2550,13 @@ async function refreshMarketData(){
         // pesquisa histórica: o Fed citou o petróleo do conflito no Irã
         // como motivo de segurar juros em mar/2026)
         const obs = await fetchFredSeries("DCOILWTICO", 95);
-        const latest = obs[0].value, past = obs[obs.length-1].value;
+        const j = janelaCalendario(obs, 90);
+        const latest = obs[0].value, past = j.ponto.value;
         const pct = past ? ((latest-past)/past)*100 : 0;
-        setAuto("ativosGlobais","petroleo", norm("ativosGlobais.petroleo", pct), `$${latest.toFixed(0)}/barril (${pct>=0?"+":""}${pct.toFixed(1)}% em ~90d)`, { bruto: pct, referenceAt: obs[0].date });
+        const pctAntes = j.doLote.value ? ((latest-j.doLote.value)/j.doLote.value)*100 : 0;
+        setAuto("ativosGlobais","petroleo", norm("ativosGlobais.petroleo", pct), `$${latest.toFixed(0)}/barril (${pct>=0?"+":""}${pct.toFixed(1)}% em ${j.dias}d)`, { bruto: pct, referenceAt: obs[0].date });
         results.ok.push("petroleo (FRED)");
-        logDone(line, true, `$${latest.toFixed(0)}`);
+        logDone(line, true, `$${latest.toFixed(0)} · ${comparaJanela(j, pct, pctAntes, "%")}`);
       }catch(e){ setFailed("ativosGlobais","petroleo", e && e.message); results.fail.push("petroleo (FRED)"); logDone(line, false, e.message); }
     }
 
@@ -2513,11 +2565,13 @@ async function refreshMarketData(){
       try{ // euro subindo = dólar mais fraco = geralmente risco-on (espelha
         // a lógica do DXY, só que olhando o par específico, não a cesta)
         const obs = await fetchFredSeries("DEXUSEU", 95);
-        const latest = obs[0].value, past = obs[obs.length-1].value;
+        const j = janelaCalendario(obs, 90);
+        const latest = obs[0].value, past = j.ponto.value;
         const pct = past ? ((latest-past)/past)*100 : 0;
-        setAuto("ativosGlobais","euro", norm("ativosGlobais.euro", pct), `€/US$ ${latest.toFixed(3)} (${pct>=0?"+":""}${pct.toFixed(1)}% em ~90d)`, { bruto: pct, referenceAt: obs[0].date });
+        const pctAntes = j.doLote.value ? ((latest-j.doLote.value)/j.doLote.value)*100 : 0;
+        setAuto("ativosGlobais","euro", norm("ativosGlobais.euro", pct), `€/US$ ${latest.toFixed(3)} (${pct>=0?"+":""}${pct.toFixed(1)}% em ${j.dias}d)`, { bruto: pct, referenceAt: obs[0].date });
         results.ok.push("euro (FRED)");
-        logDone(line, true, latest.toFixed(3));
+        logDone(line, true, `${latest.toFixed(3)} · ${comparaJanela(j, pct, pctAntes, "%")}`);
       }catch(e){ setFailed("ativosGlobais","euro", e && e.message); results.fail.push("euro (FRED)"); logDone(line, false, e.message); }
     }
 
@@ -2526,11 +2580,13 @@ async function refreshMarketData(){
       try{ // correlação BTC-Nasdaq/S&P documentada em ~0,78 na pesquisa
         // histórica — é o indicador com base empírica mais forte dos 4 novos
         const obs = await fetchFredSeries("SP500", 95);
-        const latest = obs[0].value, past = obs[obs.length-1].value;
+        const j = janelaCalendario(obs, 90);
+        const latest = obs[0].value, past = j.ponto.value;
         const pct = past ? ((latest-past)/past)*100 : 0;
-        setAuto("ativosGlobais","sp500", norm("ativosGlobais.sp500", pct), `${latest.toFixed(0)} pts (${pct>=0?"+":""}${pct.toFixed(1)}% em ~90d)`, { bruto: pct, referenceAt: obs[0].date });
+        const pctAntes = j.doLote.value ? ((latest-j.doLote.value)/j.doLote.value)*100 : 0;
+        setAuto("ativosGlobais","sp500", norm("ativosGlobais.sp500", pct), `${latest.toFixed(0)} pts (${pct>=0?"+":""}${pct.toFixed(1)}% em ${j.dias}d)`, { bruto: pct, referenceAt: obs[0].date });
         results.ok.push("sp500 (FRED)");
-        logDone(line, true, latest.toFixed(0));
+        logDone(line, true, `${latest.toFixed(0)} · ${comparaJanela(j, pct, pctAntes, "%")}`);
       }catch(e){ setFailed("ativosGlobais","sp500", e && e.message); results.fail.push("sp500 (FRED)"); logDone(line, false, e.message); }
     }
 
@@ -2586,10 +2642,12 @@ async function refreshMarketData(){
       try{ // rendimento subindo = mais concorrência de capital contra ativos
         // de risco, mesma lógica já usada pro Fed Funds Rate (DFF)
         const obs = await fetchFredSeries("DGS10", 95);
-        const latest = obs[0].value, past = obs[obs.length-1].value;
-        setAuto("ativosGlobais","juros10a", norm("ativosGlobais.juros10a", latest-past), `${latest.toFixed(2)}% (${(latest-past)>=0?"+":""}${(latest-past).toFixed(2)}pp em ~90d)`, { bruto: latest-past, referenceAt: obs[0].date });
+        const j = janelaCalendario(obs, 90);
+        const latest = obs[0].value, past = j.ponto.value;
+        const delta = latest - past, deltaAntes = latest - j.doLote.value;
+        setAuto("ativosGlobais","juros10a", norm("ativosGlobais.juros10a", delta), `${latest.toFixed(2)}% (${delta>=0?"+":""}${delta.toFixed(2)}pp em ${j.dias}d)`, { bruto: delta, referenceAt: obs[0].date });
         results.ok.push("treasury10a (FRED)");
-        logDone(line, true, latest.toFixed(2)+"%");
+        logDone(line, true, `${latest.toFixed(2)}% · ${comparaJanela(j, delta, deltaAntes, "pp")}`);
       }catch(e){ setFailed("ativosGlobais","juros10a", e && e.message); results.fail.push("treasury10a (FRED)"); logDone(line, false, e.message); }
     }
   }
@@ -3724,12 +3782,14 @@ async function coletarSensoresExploratorios(){
   { const line = logStep("sensor: juro real 10 anos (FRED DFII10)");
     try{
       const obs = await fetchFredSeries("DFII10", 95);
-      const atual = obs[0], antigo = obs[obs.length-1];
+      const j = janelaCalendario(obs, 90);
+      const atual = obs[0], antigo = j.ponto;
+      const delta = atual.value - antigo.value;
       registrarObservacao("sensor","juroReal10a", null, { bruto: atual.value, referenceAt: atual.date });
       registrarObservacao("sensor","juroReal10aD90", null,
-        { bruto: atual.value - antigo.value, referenceAt: atual.date });
+        { bruto: delta, referenceAt: atual.date });
       gravados.push("juro real");
-      logDone(line, true, `${atual.value.toFixed(2)}% real`);
+      logDone(line, true, `${atual.value.toFixed(2)}% real · ${comparaJanela(j, delta, atual.value - j.doLote.value, "pp")}`);
     }catch(e){
       registrarObservacao("sensor","juroReal10a", null, { qualidade:"falhou" });
       logDone(line, false, e.message);

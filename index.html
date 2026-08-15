@@ -979,7 +979,7 @@ const STORAGE_KEY = "seios_btc_v2";
 // fonte única da versão — usada no rodapé, no histórico e nos exports.
 // Muda toda vez que a fórmula de score/pesos muda, pra nunca misturar
 // decisões de regras diferentes como se fossem comparáveis.
-const BUILD_VERSION = "2026-08-15.84-vintage-medido";
+const BUILD_VERSION = "2026-08-15.85-reverte-consulta";
 /* v78: versão do MODELO separada da versão do BUILD. Mudança visual não é
    mudança de semântica: só sobe quando peso, fórmula, corte ou trava mudam.
    Toda observação gravada carrega as duas, pra que seis meses depois dê pra
@@ -4529,16 +4529,29 @@ function fredRealtime(startDate){
    — chutes razoáveis que erram quando o calendário do BLS varia. Agora a data
    real de divulgação de cada observação vem junto com ela.
 
-   Também corrigido: a consulta combinava `output_type=4` com um intervalo de
-   realtime, e essa combinação é o motivo provável de o SP500 cair no fallback
-   e aparecer como "sem vintage". Divulgação inicial não precisa de janela de
-   realtime — pedir as duas coisas juntas confunde a API. */
+   REVERTIDO NA v85 — e vale ficar escrito. A v84 removeu o intervalo de
+   realtime da consulta, com a hipótese de que ele é que fazia o SP500 cair no
+   fallback. O teste real desmentiu: sem o intervalo, DFF, T10Y2Y e CPIAUCSL
+   pararam de carregar ("Load failed"), o Macro perdeu três dos cinco
+   indicadores, e ZERO observações vieram com data real de publicação — contra
+   o resultado anterior de 8/8 séries carregando.
+
+   O parâmetro não era o problema; era o que fazia o vintage funcionar. Eu
+   tratei uma correlação ("SP500 falha e a consulta tem essa combinação") como
+   causa, que é o erro que este sistema inteiro existe pra evitar. E o banco de
+   provas não pega essa classe: chamada de rede não roda nele.
+
+   A consulta volta ao que era. O que a v84 trouxe de bom fica: a leitura do
+   `realtime_start` quando ele vem, e a contagem de medido vs. estimado — que
+   agora medem o comportamento real em vez de um que eu supus. */
 async function fetchFredSeriesRange(seriesId, apiKey, startDate){
   const base = `https://api.stlouisfed.org/fred/series/observations?series_id=${seriesId}&api_key=${encodeURIComponent(apiKey)}&file_type=json&sort_order=asc&observation_start=${startDate}`;
 
   let comVintage = true;
   let data = await (async ()=>{
-    const res = await smartFetch(base + "&output_type=4");
+    // v85: consulta restaurada — o intervalo de realtime volta, porque sem ele
+    // três séries deixam de carregar e nenhuma traz data de publicação
+    const res = await smartFetch(base + fredRealtime(startDate) + "&output_type=4");
     if(!res.ok) throw new Error("FRED falhou: " + seriesId);
     return res.json();
   })();
@@ -5322,7 +5335,7 @@ async function runScoreBacktest(){
         return `<div style="margin:14px 0;padding:12px 16px;border:1px solid var(--brick);background:var(--brick-soft);font-family:var(--font-mono);font-size:11.5px;color:var(--brick);line-height:1.5;">
           ${frac >= 0.2 ? `⚠ <strong>${nGate} de ${total} dias (${(frac*100).toFixed(0)}%) caíram em "dados insuficientes".</strong> Quando essa fatia é grande, as outras linhas não estão medindo acerto do sistema — estão medindo o outro pedaço do calendário. Trate os números como não conclusivos até algum motor voltar.<br>` : ""}
           ${semVintage.length ? `⚠ Sem vintage (divulgação inicial) em: ${esc(semVintage.join(", "))}. Estas séries entraram com o valor REVISADO de hoje — look-ahead residual.<br>` : ""}
-          ${(VINTAGE_USO.medido + VINTAGE_USO.estimado) ? `📅 Data de divulgação: ${VINTAGE_USO.medido} observação(ões) com a data REAL informada pelo FRED · ${VINTAGE_USO.estimado} com defasagem estimada. ${Object.keys(VINTAGE_USO.series).length ? "Por série: " + esc(Object.keys(VINTAGE_USO.series).map(k=>k+" "+VINTAGE_USO.series[k]).join(" · ")) + "." : ""} O estimado erra quando o calendário de divulgação varia; o medido não erra.<br>` : ""}
+          ${(VINTAGE_USO.medido + VINTAGE_USO.estimado) ? `📅 Data de divulgação: ${VINTAGE_USO.medido} observação(ões) com a data REAL informada pelo FRED · ${VINTAGE_USO.estimado} com defasagem estimada${VINTAGE_USO.medido === 0 ? " (nenhuma veio com data real — o FRED não devolveu realtime_start nesta consulta)" : ""}. ${Object.keys(VINTAGE_USO.series).length ? "Por série: " + esc(Object.keys(VINTAGE_USO.series).map(k=>k+" "+VINTAGE_USO.series[k]).join(" · ")) + "." : ""} O estimado erra quando o calendário de divulgação varia; o medido não erra.<br>` : ""}
           ${FRED_DIAG.falhou.length ? `⚠ <strong>Séries do FRED que FALHARAM e ficaram fora do teste:</strong> ${esc(FRED_DIAG.falhou.map(f=>f.id+" — "+f.motivo).join(" · "))}. O motor correspondente rodou incompleto ou não rodou.` : ""}
         </div>`;
       })()}

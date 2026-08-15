@@ -623,10 +623,15 @@
   <div class="rel-title">Relatórios — abra o que quiser, feche depois</div>
   <div class="rel-bar" id="relBar">
     <button class="rel-btn" data-rel="panelDecision">Por que essa recomendação<span class="rb-sub">o raciocínio, fator por fator</span></button>
+    <button class="rel-btn" data-rel="panelScenarios">Cenários<span class="rb-sub">as teses e os gatilhos que as confirmam</span></button>
+    <button class="rel-btn" data-rel="panelPremises">Premissas<span class="rb-sub">o que sustenta cada cenário</span></button>
     <button class="rel-btn" data-rel="relChanges">O que mudou<span class="rb-sub">desde a atualização anterior</span></button>
     <button class="rel-btn" data-rel="relHorizon">Leitura por prazo<span class="rb-sub">curto, médio e longo separados</span></button>
     <button class="rel-btn" data-rel="panelBacktest">Backtest e calibração<span class="rb-sub">o que 12 meses dizem — mensal</span></button>
     <button class="rel-btn" data-rel="panelSerie">Série point-in-time<span class="rb-sub">o que está sendo acumulado</span></button>
+    <button class="rel-btn" data-rel="panelHistory">Histórico de decisões<span class="rb-sub">registro que se resolve sozinho</span></button>
+    <button class="rel-btn" data-rel="panelMemory">Memória consultável<span class="rb-sub">o que houve quando o sistema disse isto antes</span></button>
+    <button class="rel-btn" data-rel="panelCaseEngine">Case Engine<span class="rb-sub">quem acerta, motor por motor, no seu uso real</span></button>
     <button class="rel-btn" data-rel="relAjustes">Ajustar e conectar APIs<span class="rb-sub">chaves, valores manuais</span></button>
   </div>
 
@@ -974,7 +979,7 @@ const STORAGE_KEY = "seios_btc_v2";
 // fonte única da versão — usada no rodapé, no histórico e nos exports.
 // Muda toda vez que a fórmula de score/pesos muda, pra nunca misturar
 // decisões de regras diferentes como se fossem comparáveis.
-const BUILD_VERSION = "2026-08-15.91-voto-morre-com-a-fonte";
+const BUILD_VERSION = "2026-08-15.91.1-portas";
 /* v78: versão do MODELO separada da versão do BUILD. Mudança visual não é
    mudança de semântica: só sobe quando peso, fórmula, corte ou trava mudam.
    Toda observação gravada carrega as duas, pra que seis meses depois dê pra
@@ -4224,6 +4229,61 @@ async function restaurarSerie(lista){
    página, e a rolagem voltou a ficar gigante. Agora entram no mesmo grid de
    RELATÓRIOS, com a mesma mecânica: um aberto por vez, toca de novo e fecha.
    Reaproveita a lógica que já existe em vez de criar um segundo sistema. */
+/* =====================================================================
+   § TODA PORTA TEM PAINEL, TODO PAINEL TEM PORTA (v91.1)
+   =====================================================================
+   A v67 fundiu treze painéis em oito e reescreveu a barra de botões à mão.
+   Cinco painéis ficaram para trás — Cenários, Premissas, Histórico, Memória
+   e Case Engine. Continuaram no HTML, montados, com listeners ativos,
+   gravando dados. Simplesmente não havia como chegar até eles. Ficaram
+   assim de 14 a 15 de agosto, e só apareceram porque o usuário foi procurar
+   um botão que eu afirmei existir.
+
+   Nenhuma das verificações que eu rodava pegava isso: a sintaxe estava
+   correta, os ids não se repetiam no HTML, as divs fechavam. O defeito não
+   é de código — é de alcance. Código perfeito que ninguém consegue executar.
+
+   Duas defesas, porque uma só não basta:
+
+   1. `checa-paineis.js`, estático, roda na build e quebra se um painel ficar
+      sem botão ou um botão sem painel. É o teste de verdade.
+
+   2. Esta função, em execução. Se um painel escapar assim mesmo, ela cria a
+      porta sozinha, com o próprio título do painel como rótulo e uma marca
+      dizendo que a porta foi improvisada. O modo de falha deixa de ser
+      "recurso invisível" e passa a ser "botão com nome feio" — que se vê e
+      se conserta. Falhar visível é o ponto. */
+function garantirPortas(){
+  const barra = document.getElementById("relBar");
+  if(!barra) return;
+  const criadas = [];
+
+  document.querySelectorAll("section.rel-panel").forEach(function(sec){
+    if(!sec.id) return;
+    if(barra.querySelector('.rel-btn[data-rel="' + sec.id + '"]')) return;
+    const titulo = (sec.querySelector(".panel-title") || {}).textContent || sec.id;
+    const b = document.createElement("button");
+    b.className = "rel-btn";
+    b.dataset.rel = sec.id;
+    b.innerHTML = esc(titulo.trim().slice(0, 60)) +
+      '<span class="rb-sub" style="color:var(--gold);">porta criada automaticamente — avise</span>';
+    barra.appendChild(b);
+    criadas.push(sec.id);
+  });
+
+  // botão que aponta pro vazio some: clique morto engana mais que ausência
+  const mortos = [];
+  barra.querySelectorAll(".rel-btn[data-rel]").forEach(function(b){
+    if(!document.getElementById(b.dataset.rel)){ mortos.push(b.dataset.rel); b.remove(); }
+  });
+
+  if(criadas.length || mortos.length){
+    console.warn("[SEIOS] barra de relatórios inconsistente —",
+                 "painéis sem botão:", criadas, "· botões sem painel:", mortos);
+  }
+  return { criadas: criadas, mortos: mortos };
+}
+
 function virarCardRelatorio(caixa, id, titulo, subtitulo){
   caixa.className = "panel rel-panel";
   caixa.id = id;
@@ -8298,6 +8358,15 @@ document.getElementById("buildVersionFooter").textContent = BUILD_VERSION;
 // atualização de dados
 recarregarEspelhoDoArquivo().then(qtd=>{ if(qtd && qtd.length) renderAll(); });
 
+/* v91.1: duas passadas. A primeira pega os painéis do HTML estático; a
+   segunda, depois da fila de tarefas, pega os que blocos assíncronos criam
+   por virarCardRelatorio() — que já nascem com botão, mas o custo de
+   conferir de novo é zero e o custo de não conferir foi um dia inteiro de
+   recurso invisível. */
+garantirPortas();
+setTimeout(garantirPortas, 0);
+setTimeout(garantirPortas, 2000);
+
 /* A atualização automática de 30 em 30 minutos foi REMOVIDA.
    Ela contradizia o próprio funcionamento do sistema: o registro de decisão
    tem trava de 6h, então a auto-atualização gravava até 4 registros por dia —
@@ -8794,11 +8863,19 @@ document.addEventListener("click", (e)=>{
       "color:var(--text-dim,#8a8);font-family:inherit;";
     caixa.appendChild(corpo);
 
-    // v67 — a série deixou de ser um card próprio: virou a FONTE do painel
-    // "O que já aconteceu". O bloco continua vivo (grava, exporta, detecta
-    // congelado), só não ocupa mais um botão na barra.
-    caixa.className = "panel rel-panel";
-    caixa.id = "panelSerie";
+    /* v67 — a série deixou de ser um card próprio: virou a FONTE do painel
+       "O que já aconteceu". O bloco continua vivo (grava, exporta, detecta
+       congelado), só não ocupa mais um botão na barra.
+
+       v91.1 — mas ele recebia `id="panelSerie"`, que já pertencia a uma
+       <section> do HTML estático. Dois elementos com o mesmo id:
+       getElementById devolve só o primeiro, então o botão "Série
+       point-in-time" abria o painel estático e ESTE bloco ficou inalcançável.
+       Id duplicado criado por JS não aparece na varredura de `id="..."` do
+       HTML — foi assim que passou. Agora tem nome próprio e sai da classe
+       rel-panel, porque ele não é um relatório: é fonte de dados. */
+    caixa.className = "panel";
+    caixa.id = "panelSerieInterno";
     caixa.hidden = true;
     (document.getElementById("deepDive") || document.body).appendChild(caixa);
     atualizar();

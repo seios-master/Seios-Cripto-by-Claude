@@ -566,13 +566,8 @@
       <summary style="cursor:pointer;font-family:var(--font-mono);font-size:11px;color:var(--copper);text-transform:uppercase;letter-spacing:.08em;padding:10px 0;border-top:1px solid var(--line-soft);">▸ Ajustar manualmente / conectar APIs</summary>
       <div style="padding-top:12px;">
         <div id="integrationsPanel" style="margin-bottom:16px;padding:12px 14px;border:1px solid var(--line-soft);background:var(--bg-alt);">
-          <div style="font-family:var(--font-mono);font-size:10.5px;color:var(--teal);text-transform:uppercase;letter-spacing:.06em;margin-bottom:8px;">🔑 Integração FRED (GRATUITA — governo dos EUA) — ativa Macro inteiro sozinho: juros, inflação, M2, dólar, curva de juros</div>
-          <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:10px;">
-            <input type="password" id="fredApiKeyInput" placeholder="cole sua chave gratuita aqui" style="flex:1;min-width:220px;background:var(--panel);border:1px solid var(--line-soft);color:var(--text);padding:8px 10px;font-size:12.5px;border-radius:2px;">
-            <button class="small" id="btnSaveFredKey">Salvar</button>
-            <span id="fredKeyStatus" style="font-family:var(--font-mono);font-size:10.5px;color:var(--text-faint);"></span>
-          </div>
-          <div style="font-size:10.5px;color:var(--text-faint);margin-bottom:14px;">Pegue a sua grátis, em 30 segundos, em <strong>fredaccount.stlouisfed.org</strong> — só um e-mail, ativa na hora, sem cartão de crédito.</div>
+          <div style="font-family:var(--font-mono);font-size:10.5px;color:var(--teal);text-transform:uppercase;letter-spacing:.06em;margin-bottom:8px;">✓ FRED — conectado pelo servidor, sem chave sua</div>
+          <div style="font-size:10.5px;color:var(--text-faint);margin-bottom:14px;">O Macro (28% do peso), Ativos Globais e o Geopolítico leem o FRED através de <strong>/api/fred</strong>, uma rota deste mesmo domínio. A chave fica no servidor e não passa pelo seu navegador nem por intermediário nenhum. <strong>Você não precisa fazer nada aqui.</strong><br><span id="fredKeyStatus" style="font-family:var(--font-mono);"></span></div>
 
           <div style="font-family:var(--font-mono);font-size:10.5px;color:var(--teal);text-transform:uppercase;letter-spacing:.06em;margin-bottom:8px;border-top:1px solid var(--line-soft);padding-top:12px;">🔑 Integração CoinGecko Pro (opcional, plano Basic $35/mês) — preço e histórico diário mais confiáveis, sem limite de chamadas. As médias de 200/100/50 semanas NÃO dependem disso: vêm da Binance, de graça.</div>
           <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:6px;">
@@ -592,7 +587,7 @@
             <label style="display:flex;gap:8px;align-items:flex-start;cursor:pointer;font-size:11px;color:var(--text-dim);">
               <input type="checkbox" id="chkProxyComChave" style="margin-top:2px;flex-shrink:0;">
               <span><strong style="color:var(--gold);">Permitir proxy CORS em chamadas que levam chave de API.</strong>
-              O FRED não aceita chamada direta do navegador — a única forma de ler Macro (28% do peso) é passar a URL, <em>com a chave dentro</em>, por um intermediário público (allorigins.win / corsproxy.io). Quem opera esse intermediário consegue ler a chave. Desligado, as chamadas com chave só vão direto: CoinGecko Pro continua funcionando, FRED e CryptoQuant provavelmente falham.</span>
+              Vale apenas para o <strong>CryptoQuant</strong>: ele não aceita chamada direta do navegador, e a única saída é passar a URL — <em>com a chave dentro</em> — por um intermediário público (allorigins.win / corsproxy.io), cujo operador consegue ler a chave. O FRED não depende mais disto: desde a v89 ele passa pelo servidor próprio deste domínio. Desligado, o CoinGecko Pro continua funcionando e só o CryptoQuant falha.</span>
             </label>
             <div id="proxyChaveAviso" style="font-family:var(--font-mono);font-size:10px;color:var(--text-faint);margin-top:8px;"></div>
           </div>
@@ -795,7 +790,7 @@
 
 <footer class="wrap">
   <div style="font-family:var(--font-mono);font-size:10px;color:var(--copper);margin-bottom:8px;">build <span id="buildVersionFooter">—</span> — se essa linha não aparecer no seu arquivo, você está num arquivo antigo, baixe o mais recente</div>
-  SEIOS CRIPTO — instrumento local. Os dados ficam salvos apenas neste navegador: estado e histórico recente em localStorage, histórico antigo em IndexedDB. Nada é enviado para nenhum servidor — exceto, se você ligar a opção, as chamadas com chave que passam por proxy CORS. Fontes: CoinGecko (preço e histórico diário) · Binance (funding, open interest, long/short, taker, livro, médias semanais) · Alternative.me (Fear &amp; Greed) · CoinMetrics (MVRV) · mempool.space (hash rate) · Deribit (put/call) · FRED (macro e ativos globais, requer chave) · GDELT (tom de notícias) · CryptoQuant (opcional, requer chave). Este instrumento não é recomendação de investimento.
+  SEIOS CRIPTO — instrumento local. Os dados ficam salvos apenas neste navegador: estado e histórico recente em localStorage, histórico antigo em IndexedDB. Nada é enviado para nenhum servidor — exceto as consultas ao FRED, que passam pela rota /api/fred deste próprio domínio, e, se você ligar a opção, as chamadas com chave que passam por proxy CORS público. Fontes: CoinGecko (preço e histórico diário) · Binance (funding, open interest, long/short, taker, livro, médias semanais) · Alternative.me (Fear &amp; Greed) · CoinMetrics (MVRV) · mempool.space (hash rate) · Deribit (put/call) · FRED (macro e ativos globais, via /api/fred) · GDELT (tom de notícias) · CryptoQuant (opcional, requer chave). Este instrumento não é recomendação de investimento.
 </footer>
 
 <script>
@@ -979,7 +974,7 @@ const STORAGE_KEY = "seios_btc_v2";
 // fonte única da versão — usada no rodapé, no histórico e nos exports.
 // Muda toda vez que a fórmula de score/pesos muda, pra nunca misturar
 // decisões de regras diferentes como se fossem comparáveis.
-const BUILD_VERSION = "2026-08-15.88-por-indicador";
+const BUILD_VERSION = "2026-08-15.89-proxy-proprio";
 /* v78: versão do MODELO separada da versão do BUILD. Mudança visual não é
    mudança de semântica: só sobe quando peso, fórmula, corte ou trava mudam.
    Toda observação gravada carrega as duas, pra que seis meses depois dê pra
@@ -1011,9 +1006,10 @@ function defaultState(){
     apiKeys: { cryptoquant:"", fred:"", coingecko:"" }, // ficam só no seu navegador, nunca são enviadas a mim
     lastExportAt: null,
     lastCalibratedAt: null,
-    // o FRED não manda cabeçalho CORS, então a única forma de ler macro
-    // (28% do peso) direto do navegador é passando por um proxy público —
-    // e a URL do FRED leva a chave junto. Desligado por padrão: você decide.
+    /* v89: o FRED saiu daqui. Ele agora passa pelo /api/fred deste mesmo
+       domínio, que roda no servidor e guarda a chave lá — nenhuma chave do
+       FRED atravessa navegador nem intermediário. Este consentimento continua
+       existindo só para o CryptoQuant, que ainda depende de proxy público. */
     permitirProxyComChave: false,
     proxyUsadoComChave: false,
     arquivamentoFalhou: false,
@@ -1306,7 +1302,8 @@ const STATUS_SEM_RETRY = [400, 401, 403, 404, 451];
 const TIMEOUT_POR_FONTE = [
   { padrao: /gdeltproject\.org/i,   direto: 30000, proxy: 40000 }, // varredura global de notícias
   { padrao: /coinmetrics\.io/i,     direto: 15000, proxy: 20000 }, // séries longas
-  { padrao: /stlouisfed\.org/i,     direto: 15000, proxy: 20000 }, // FRED sempre via proxy
+  { padrao: /^\/api\/fred/i,        direto: 25000, proxy: 25000 }, // proxy próprio: soma partida a frio da Vercel + FRED
+  { padrao: /stlouisfed\.org/i,     direto: 15000, proxy: 20000 }, // legado: chamada direta, se algum dia voltar a existir
   { padrao: /coingecko\.com/i,      direto: 15000, proxy: 20000 }, // 365 dias de histórico
 ];
 
@@ -1338,6 +1335,12 @@ async function smartFetchOnce(url, opts){
   try{
     const res = await fetchComPrazo(url, prazosDe(url).direto);
     if(res.ok) return res;
+    if(urlProprioServidor(url)){
+      // mesma origem: não há proxy que salve, e o motivo importa
+      const e = erroRotaPropria(url, res.status);
+      e.semRetry = STATUS_SEM_RETRY.includes(res.status);
+      throw e;
+    }
     if(STATUS_SEM_RETRY.includes(res.status)){
       const e = new Error("status " + res.status + " (definitivo, sem nova tentativa)");
       e.semRetry = true;
@@ -1346,6 +1349,11 @@ async function smartFetchOnce(url, opts){
     throw new Error("status " + res.status);
   }catch(directErr){
     if(directErr && directErr.semRetry) throw directErr;
+    if(urlProprioServidor(url)){
+      // mesma origem não tem proxy alternativo; devolve o erro real, não um
+      // aviso sobre chave de API que aqui não faz sentido nenhum
+      throw directErr;
+    }
     if(!permiteProxy){
       // URL com chave de API e proxy não autorizado — falha aqui de propósito,
       // em vez de entregar a credencial pra um intermediário de terceiro
@@ -1370,13 +1378,35 @@ function urlTemSegredo(url){
   return /[?&](api_key|x_cg_pro_api_key|apikey|token)=/i.test(url);
 }
 
+/* v89: rota do próprio servidor (/api/...). Mandar isso para o allorigins
+   produziria lixo — ele receberia um caminho relativo sem domínio. Além
+   disso, mesma origem não tem CORS: se falhou, falhou de verdade, e
+   insistir por um intermediário só esconde o problema. */
+function urlProprioServidor(url){
+  return typeof url === "string" && url.charAt(0) === "/";
+}
+
+/* 404 numa rota própria quase sempre significa uma coisa só: o SEIOS foi
+   aberto fora da Vercel (GitHub Pages, arquivo local), onde não existe
+   servidor para responder. Sem esta mensagem, o Macro morre calado. */
+function erroRotaPropria(url, status){
+  if(status === 404){
+    return new Error("rota " + url.split("?")[0] + " não existe neste endereço — "
+      + "o SEIOS precisa rodar na Vercel (seios-cripto-by-claude.vercel.app) "
+      + "para o proxy do FRED funcionar");
+  }
+  return new Error("status " + status + " em " + url.split("?")[0]);
+}
+
 // tenta direto, depois os dois proxies CORS em sequência; se tudo falhar
 // (comum sob rajada de chamadas seguidas, não é a fonte "quebrada"), espera
 // e tenta a sequência inteira mais uma vez antes de desistir de verdade
 async function smartFetch(url){
   // chamadas com chave só passam por proxy se você tiver ligado a opção;
   // chamadas sem chave (preço, funding, hash rate...) seguem como sempre
-  const opts = urlTemSegredo(url) ? { allowProxy: !!S.permitirProxyComChave } : undefined;
+  const opts = urlProprioServidor(url)
+    ? { allowProxy: false }
+    : (urlTemSegredo(url) ? { allowProxy: !!S.permitirProxyComChave } : undefined);
   try{
     return await smartFetchOnce(url, opts);
   }catch(firstErr){
@@ -1746,11 +1776,47 @@ async function fetchCryptoQuantSeries(path, apiKey, limit){
   return serieCryptoQuantOrdenada(rows); // [{date,value}] em ordem crescente
 }
 
-/* --- FRED (Federal Reserve Economic Data, St. Louis Fed) — gratuito, chave
-   instantânea em fredaccount.stlouisfed.org. Retorna observações mais
-   recentes primeiro; ignora pontos ausentes (marcados como "."). --- */
-async function fetchFredSeries(seriesId, apiKey, limit){
-  const url = `https://api.stlouisfed.org/fred/series/observations?series_id=${seriesId}&api_key=${encodeURIComponent(apiKey)}&file_type=json&sort_order=desc&limit=${limit}`;
+/* =====================================================================
+   § FRED — PROXY PRÓPRIO (v89)
+   =====================================================================
+   Até a v88 o navegador chamava api.stlouisfed.org direto. O FRED não manda
+   cabeçalho CORS, então isso nunca funcionava de primeira: caía sempre num
+   intermediário público gratuito (allorigins.win / corsproxy.io) levando a
+   chave de API dentro da URL. Dois defeitos, um de cada natureza:
+
+     · privacidade — quem opera o intermediário lê a chave;
+     · confiabilidade — serviço grátis compartilhado engasga sob carga, e foi
+       provavelmente ele quem derrubou o SP500 em 3 de 6 backtests num sábado.
+
+   Agora existe /api/fred neste mesmo domínio (arquivo api/fred.js, roda na
+   Vercel). A chamada vira servidor→servidor, onde CORS não existe, a chave
+   vive como variável de ambiente e nunca chega ao navegador. O servidor só
+   aceita as séries de uma lista fixa, então o endpoint não vira proxy aberto.
+
+   ESTA É A ÚNICA FUNÇÃO QUE MONTA URL DO FRED. Os três chamadores
+   (leitura ao vivo, backtest com vintage, proxy backtest) passam por aqui.
+   Antes eram três construções independentes da mesma coisa — exatamente o
+   tipo de duplicação que faz live e histórico divergirem sem ninguém ver. */
+const FRED_ROTA = "/api/fred";
+
+function fredUrl(params){
+  const q = new URLSearchParams();
+  q.set("series_id", params.series_id);
+  // file_type=json é implícito no servidor; não mandamos api_key nunca
+  if(params.observation_start) q.set("observation_start", params.observation_start);
+  if(params.realtime_start)    q.set("realtime_start",    params.realtime_start);
+  if(params.realtime_end)      q.set("realtime_end",      params.realtime_end);
+  if(params.output_type)       q.set("output_type",       String(params.output_type));
+  if(params.sort_order)        q.set("sort_order",        params.sort_order);
+  if(params.limit)             q.set("limit",             String(params.limit));
+  return FRED_ROTA + "?" + q.toString();
+}
+
+/* --- FRED — leitura ao vivo. Retorna observações mais recentes primeiro;
+   ignora pontos ausentes (marcados como "."). Não recebe mais chave: ela
+   vive no servidor. --- */
+async function fetchFredSeries(seriesId, limit){
+  const url = fredUrl({ series_id: seriesId, sort_order: "desc", limit: limit });
   const res = await smartFetch(url);
   if(!res.ok) throw new Error("FRED falhou: " + seriesId + " (" + res.status + ")");
   const data = await res.json();
@@ -2231,14 +2297,16 @@ async function refreshMarketData(){
 
   try{
 
-  // FRED adiantado — roda primeiro, antes das outras ~15 chamadas, pra pegar
-  // o proxy de CORS "fresco". Macro (28% do peso) é o motor mais importante,
-  // por isso tem prioridade quando o proxy gratuito começa a engasgar sob uso.
-  if(S.apiKeys.fred){
+  /* FRED adiantado — roda primeiro, antes das outras ~15 chamadas. A razão
+     original (pegar o proxy público "fresco") morreu na v89: agora é servidor
+     próprio, sem fila compartilhada. A prioridade fica porque Macro vale 28%
+     do peso e é o que mais dói perder se a rodada for interrompida.
+     Sem portão de chave: /api/fred não pede nada ao usuário. */
+  {
     await sleep(300);
     { const line = logStep("consultando juros — Fed Funds (FRED)");
       try{ // Fed Funds Rate diário — sobe = aperto monetário = baixista
-        const obs = await fetchFredSeries("DFF", S.apiKeys.fred, 95);
+        const obs = await fetchFredSeries("DFF", 95);
         const latest = obs[0].value, past = obs[obs.length-1].value;
         const delta = latest - past;
         setAuto("macro","juros", norm("macro.juros", delta), `Fed Funds ${latest.toFixed(2)}% (${delta>=0?"+":""}${delta.toFixed(2)}pp em ~90d)`, { bruto: delta, referenceAt: obs[0].date });
@@ -2252,7 +2320,7 @@ async function refreshMarketData(){
       try{ // CPI — compara inflação YoY de agora com a de ~3 meses atrás; acelerando = baixista
         // pede 20 (margem de segurança) em vez de 16 — se algum mês vier "." (ausente)
         // e for filtrado, ainda sobra o suficiente pra acessar obs[15] sem quebrar
-        const obs = await fetchFredSeries("CPIAUCSL", S.apiKeys.fred, 20);
+        const obs = await fetchFredSeries("CPIAUCSL", 20);
         if(obs.length < 16) throw new Error(`CPI: só ${obs.length} meses válidos retornados (precisa de 16)`);
         const yoyNow = (obs[0].value / obs[12].value - 1) * 100;
         const yoyPast = (obs[3].value / obs[15].value - 1) * 100;
@@ -2266,7 +2334,7 @@ async function refreshMarketData(){
 
     { const line = logStep("consultando liquidez — M2 (FRED)");
       try{ // M2 — crescimento YoY da oferta monetária; mais liquidez = bullish (correlação documentada)
-        const obs = await fetchFredSeries("M2SL", S.apiKeys.fred, 16);
+        const obs = await fetchFredSeries("M2SL", 16);
         if(obs.length < 13) throw new Error(`M2: só ${obs.length} meses válidos retornados (precisa de 13)`);
         const yoy = (obs[0].value / obs[12].value - 1) * 100;
         setAuto("macro","liquidez", norm("macro.liquidez", yoy), `M2 YoY ${yoy>=0?"+":""}${yoy.toFixed(1)}%`, { bruto: yoy, referenceAt: obs[0].date });
@@ -2278,7 +2346,7 @@ async function refreshMarketData(){
 
     { const line = logStep("consultando dólar — DXY (FRED)");
       try{ // dólar ponderado — dólar mais forte tende a pressionar BTC pra baixo
-        const obs = await fetchFredSeries("DTWEXBGS", S.apiKeys.fred, 95);
+        const obs = await fetchFredSeries("DTWEXBGS", 95);
         const latest = obs[0].value, past = obs[obs.length-1].value;
         const pct = ((latest-past)/past)*100;
         setAuto("macro","dxy", norm("macro.dxy", pct), `dólar ${pct>=0?"+":""}${pct.toFixed(1)}% em ~90d`, { bruto: pct, referenceAt: obs[0].date });
@@ -2290,7 +2358,7 @@ async function refreshMarketData(){
 
     { const line = logStep("consultando curva de juros — 10y-2y (FRED)");
       try{ // spread 10y-2y — invertido (negativo) sinaliza estresse macro
-        const obs = await fetchFredSeries("T10Y2Y", S.apiKeys.fred, 5);
+        const obs = await fetchFredSeries("T10Y2Y", 5);
         const spread = obs[0].value;
         setAuto("macro","curva", norm("macro.curva", spread), `spread 10y-2y ${spread>=0?"+":""}${spread.toFixed(2)}pp`, { bruto: spread, referenceAt: obs[0].date });
         results.ok.push("curva de juros (FRED)");
@@ -2301,7 +2369,7 @@ async function refreshMarketData(){
 
     { const line = logStep("consultando incerteza de política econômica — EPU (FRED)");
       try{ // EPU subindo = mais incerteza = viés levemente baixista pra ativos de risco
-        const obs = await fetchFredSeries("USEPUINDXD", S.apiKeys.fred, 95);
+        const obs = await fetchFredSeries("USEPUINDXD", 95);
         const latest = obs[0].value, past = obs[obs.length-1].value;
         const pct = past ? ((latest-past)/past)*100 : 0;
         // ESCALA — o multiplicador linear *3 saturava com 33% de variação, e o
@@ -2321,7 +2389,7 @@ async function refreshMarketData(){
       try{ // petróleo subindo = risco de choque inflacionário (confirmado na
         // pesquisa histórica: o Fed citou o petróleo do conflito no Irã
         // como motivo de segurar juros em mar/2026)
-        const obs = await fetchFredSeries("DCOILWTICO", S.apiKeys.fred, 95);
+        const obs = await fetchFredSeries("DCOILWTICO", 95);
         const latest = obs[0].value, past = obs[obs.length-1].value;
         const pct = past ? ((latest-past)/past)*100 : 0;
         setAuto("ativosGlobais","petroleo", norm("ativosGlobais.petroleo", pct), `$${latest.toFixed(0)}/barril (${pct>=0?"+":""}${pct.toFixed(1)}% em ~90d)`, { bruto: pct, referenceAt: obs[0].date });
@@ -2334,7 +2402,7 @@ async function refreshMarketData(){
     { const line = logStep("consultando euro/dólar — momentum 90d (FRED)");
       try{ // euro subindo = dólar mais fraco = geralmente risco-on (espelha
         // a lógica do DXY, só que olhando o par específico, não a cesta)
-        const obs = await fetchFredSeries("DEXUSEU", S.apiKeys.fred, 95);
+        const obs = await fetchFredSeries("DEXUSEU", 95);
         const latest = obs[0].value, past = obs[obs.length-1].value;
         const pct = past ? ((latest-past)/past)*100 : 0;
         setAuto("ativosGlobais","euro", norm("ativosGlobais.euro", pct), `€/US$ ${latest.toFixed(3)} (${pct>=0?"+":""}${pct.toFixed(1)}% em ~90d)`, { bruto: pct, referenceAt: obs[0].date });
@@ -2347,7 +2415,7 @@ async function refreshMarketData(){
     { const line = logStep("consultando S&P 500 — momentum 90d (FRED)");
       try{ // correlação BTC-Nasdaq/S&P documentada em ~0,78 na pesquisa
         // histórica — é o indicador com base empírica mais forte dos 4 novos
-        const obs = await fetchFredSeries("SP500", S.apiKeys.fred, 95);
+        const obs = await fetchFredSeries("SP500", 95);
         const latest = obs[0].value, past = obs[obs.length-1].value;
         const pct = past ? ((latest-past)/past)*100 : 0;
         setAuto("ativosGlobais","sp500", norm("ativosGlobais.sp500", pct), `${latest.toFixed(0)} pts (${pct>=0?"+":""}${pct.toFixed(1)}% em ~90d)`, { bruto: pct, referenceAt: obs[0].date });
@@ -2382,7 +2450,7 @@ async function refreshMarketData(){
     { const line = logStep("consultando cobre — momentum mensal (FRED)");
       try{ // cobre é mensal, não diário — compara mês mais recente com ~3
         // meses atrás, mesmo padrão já usado pra inflação/liquidez
-        const obs = await fetchFredSeries("PCOPPUSDM", S.apiKeys.fred, 6);
+        const obs = await fetchFredSeries("PCOPPUSDM", 6);
         const latest = obs[0].value, past = obs[Math.min(3, obs.length-1)].value;
         const pct = past ? ((latest-past)/past)*100 : 0;
         setAuto("ativosGlobais","cobre", norm("ativosGlobais.cobre", pct), `$${latest.toFixed(0)}/ton (${pct>=0?"+":""}${pct.toFixed(1)}% em ~3 meses) — demanda industrial em alta = bullish`, { bruto: pct, referenceAt: obs[0].date });
@@ -2395,7 +2463,7 @@ async function refreshMarketData(){
     { const line = logStep("consultando VIX — índice de medo tradicional (FRED)");
       try{ // VIX é mais sobre NÍVEL que sobre variação — abaixo de 18 é
         // complacência (bullish), acima é medo crescente (bearish)
-        const obs = await fetchFredSeries("VIXCLS", S.apiKeys.fred, 5);
+        const obs = await fetchFredSeries("VIXCLS", 5);
         const latest = obs[0].value;
         setAuto("ativosGlobais","vix", norm("ativosGlobais.vix", latest), `VIX ${latest.toFixed(1)}`, { bruto: latest, referenceAt: obs[0].date });
         results.ok.push("vix (FRED)");
@@ -2407,7 +2475,7 @@ async function refreshMarketData(){
     { const line = logStep("consultando Treasury 10 anos — nível (FRED)");
       try{ // rendimento subindo = mais concorrência de capital contra ativos
         // de risco, mesma lógica já usada pro Fed Funds Rate (DFF)
-        const obs = await fetchFredSeries("DGS10", S.apiKeys.fred, 95);
+        const obs = await fetchFredSeries("DGS10", 95);
         const latest = obs[0].value, past = obs[obs.length-1].value;
         setAuto("ativosGlobais","juros10a", norm("ativosGlobais.juros10a", latest-past), `${latest.toFixed(2)}% (${(latest-past)>=0?"+":""}${(latest-past).toFixed(2)}pp em ~90d)`, { bruto: latest-past, referenceAt: obs[0].date });
         results.ok.push("treasury10a (FRED)");
@@ -3519,16 +3587,11 @@ async function coletarSensoresExploratorios(){
     }
   }
 
-  if(!S.apiKeys.fred){
-    logFinal("sensores de juro real e liquidez líquida precisam da chave do FRED");
-    return gravados;
-  }
-
   // 2) Juro real de 10 anos — custo de oportunidade mais direto que o yield nominal
   await sleep(300);
   { const line = logStep("sensor: juro real 10 anos (FRED DFII10)");
     try{
-      const obs = await fetchFredSeries("DFII10", S.apiKeys.fred, 95);
+      const obs = await fetchFredSeries("DFII10", 95);
       const atual = obs[0], antigo = obs[obs.length-1];
       registrarObservacao("sensor","juroReal10a", null, { bruto: atual.value, referenceAt: atual.date });
       registrarObservacao("sensor","juroReal10aD90", null,
@@ -3550,9 +3613,9 @@ async function coletarSensoresExploratorios(){
   { const line = logStep("sensor: liquidez líquida (WALCL − TGA − RRP)");
     try{
       const [walcl, tga, rrp] = await Promise.all([
-        fetchFredSeries("WALCL", S.apiKeys.fred, 40),
-        fetchFredSeries("WTREGEN", S.apiKeys.fred, 40),
-        fetchFredSeries("RRPONTSYD", S.apiKeys.fred, 60)
+        fetchFredSeries("WALCL", 40),
+        fetchFredSeries("WTREGEN", 40),
+        fetchFredSeries("RRPONTSYD", 60)
       ]);
       // WALCL e WTREGEN vêm em milhões; RRPONTSYD em bilhões
       const liquida = function(i){
@@ -4518,8 +4581,13 @@ function hashrateScoreAtDate(series, dateStr){
 // pedidas. Começar em 1776 fazia o FRED devolver décadas de vintages para
 // séries diárias — payload enorme, candidato a estourar o prazo de 15s e cair
 // no catch silencioso. Começa junto com a janela de observação.
+/* v89: realtime_end deixa de ser 9999-12-31 e passa a ser a data de hoje.
+   Motivo: 9999-12-31 nunca foi testado contra o proxy próprio, e a data de
+   hoje foi — devolveu realtime_start real, linha a linha. Semanticamente é o
+   mesmo pedido, porque não existe vintage no futuro. Não estou trocando por
+   elegância: estou trocando o não-verificado pelo verificado. */
 function fredRealtime(startDate){
-  return `&realtime_start=${startDate}&realtime_end=9999-12-31`;
+  return { realtime_start: startDate, realtime_end: new Date().toISOString().slice(0,10) };
 }
 
 /* =====================================================================
@@ -4550,14 +4618,15 @@ function fredRealtime(startDate){
    A consulta volta ao que era. O que a v84 trouxe de bom fica: a leitura do
    `realtime_start` quando ele vem, e a contagem de medido vs. estimado — que
    agora medem o comportamento real em vez de um que eu supus. */
-async function fetchFredSeriesRange(seriesId, apiKey, startDate){
-  const base = `https://api.stlouisfed.org/fred/series/observations?series_id=${seriesId}&api_key=${encodeURIComponent(apiKey)}&file_type=json&sort_order=asc&observation_start=${startDate}`;
+async function fetchFredSeriesRange(seriesId, startDate){
+  const comum = { series_id: seriesId, sort_order: "asc", observation_start: startDate };
+  const rt = fredRealtime(startDate);
 
   let comVintage = true;
   let data = await (async ()=>{
     // v85: consulta restaurada — o intervalo de realtime volta, porque sem ele
     // três séries deixam de carregar e nenhuma traz data de publicação
-    const res = await smartFetch(base + fredRealtime(startDate) + "&output_type=4");
+    const res = await smartFetch(fredUrl(Object.assign({}, comum, rt, { output_type: 4 })));
     if(!res.ok) throw new Error("FRED falhou: " + seriesId);
     return res.json();
   })();
@@ -4565,7 +4634,7 @@ async function fetchFredSeriesRange(seriesId, apiKey, startDate){
   const uteis = (data.observations || []).filter(o=>o.value !== "." && Number.isFinite(Number(o.value)));
   if(uteis.length < 10){
     // vintage não veio utilizável — cai para a série corrente e registra o fato
-    const res2 = await smartFetch(base);
+    const res2 = await smartFetch(fredUrl(comum));
     if(!res2.ok) throw new Error("FRED falhou: " + seriesId);
     data = await res2.json();
     comVintage = false;
@@ -4644,7 +4713,7 @@ function fredRegistra(seriesId, erro){
   else if(!FRED_DIAG.ok.includes(seriesId)) FRED_DIAG.ok.push(seriesId);
 }
 
-async function fetchMacroHistoryMaps(apiKey){
+async function fetchMacroHistoryMaps(){
   FRED_DIAG.ok = []; FRED_DIAG.falhou = [];
   VINTAGE_USO.medido = 0; VINTAGE_USO.estimado = 0; VINTAGE_USO.series = {};
   const startDaily = new Date(Date.now() - 400*24*3600*1000).toISOString().slice(0,10);
@@ -4654,7 +4723,7 @@ async function fetchMacroHistoryMaps(apiKey){
   const maps = {};
 
   try{
-    const obs = await fetchFredSeriesRange("DFF", apiKey, startDaily);
+    const obs = await fetchFredSeriesRange("DFF", startDaily);
     fredRegistra("DFF", null);
     maps.juros = {};
     maps.jurosRaw = {}; // valor bruto (%), pra testar por faixa depois — não só o score já transformado
@@ -4666,7 +4735,7 @@ async function fetchMacroHistoryMaps(apiKey){
   }catch(e){ fredRegistra("DFF", e); }
 
   try{
-    const obs = await fetchFredSeriesRange("DTWEXBGS", apiKey, startDaily);
+    const obs = await fetchFredSeriesRange("DTWEXBGS", startDaily);
     fredRegistra("DTWEXBGS", null);
     maps.dxy = {};
     maps.dxyRaw = {};
@@ -4679,14 +4748,14 @@ async function fetchMacroHistoryMaps(apiKey){
   }catch(e){ fredRegistra("DTWEXBGS", e); }
 
   try{
-    const obs = await fetchFredSeriesRange("T10Y2Y", apiKey, startDaily);
+    const obs = await fetchFredSeriesRange("T10Y2Y", startDaily);
     fredRegistra("T10Y2Y", null);
     maps.curva = {};
     obs.forEach(o=>{ maps.curva[o.date] = norm("macro.curva", o.value); });
   }catch(e){ fredRegistra("T10Y2Y", e); }
 
   try{
-    const obs = await fetchFredSeriesRange("CPIAUCSL", apiKey, startMonthly);
+    const obs = await fetchFredSeriesRange("CPIAUCSL", startMonthly);
     fredRegistra("CPIAUCSL", null);
     maps.inflacao = {};
     maps.inflacaoRaw = {};
@@ -4703,7 +4772,7 @@ async function fetchMacroHistoryMaps(apiKey){
   }catch(e){ fredRegistra("CPIAUCSL", e); }
 
   try{
-    const obs = await fetchFredSeriesRange("M2SL", apiKey, startMonthly);
+    const obs = await fetchFredSeriesRange("M2SL", startMonthly);
     fredRegistra("M2SL", null);
     maps.liquidez = {};
     for(let idx=12; idx<obs.length; idx++){
@@ -4718,7 +4787,7 @@ async function fetchMacroHistoryMaps(apiKey){
   // Ativos Globais — mesmo padrão de momentum 90d, com valor bruto separado
   // pra alimentar a tabela de "Regime macro histórico" (testar por faixa)
   try{
-    const obs = await fetchFredSeriesRange("DCOILWTICO", apiKey, startDaily);
+    const obs = await fetchFredSeriesRange("DCOILWTICO", startDaily);
     fredRegistra("DCOILWTICO", null);
     maps.petroleoRaw = {};
     obs.forEach((o,idx)=>{
@@ -4729,7 +4798,7 @@ async function fetchMacroHistoryMaps(apiKey){
   }catch(e){ fredRegistra("DCOILWTICO", e); }
 
   try{
-    const obs = await fetchFredSeriesRange("DEXUSEU", apiKey, startDaily);
+    const obs = await fetchFredSeriesRange("DEXUSEU", startDaily);
     fredRegistra("DEXUSEU", null);
     maps.euroRaw = {};
     obs.forEach((o,idx)=>{
@@ -4740,7 +4809,7 @@ async function fetchMacroHistoryMaps(apiKey){
   }catch(e){ fredRegistra("DEXUSEU", e); }
 
   try{
-    const obs = await fetchFredSeriesRange("SP500", apiKey, startDaily);
+    const obs = await fetchFredSeriesRange("SP500", startDaily);
     fredRegistra("SP500", null);
     maps.sp500Raw = {};
     obs.forEach((o,idx)=>{
@@ -4759,7 +4828,7 @@ async function fetchMacroHistoryMaps(apiKey){
      Eventos continua fora: não há fonte histórica gratuita de GDELT com 12
      meses utilizáveis. Fica declarado, não disfarçado. */
   try{
-    const obs = await fetchFredSeriesRange("PCOPPUSDM", apiKey, startMonthly);
+    const obs = await fetchFredSeriesRange("PCOPPUSDM", startMonthly);
     fredRegistra("PCOPPUSDM", null);
     maps.cobreRaw = {};
     for(let idx=3; idx<obs.length; idx++){
@@ -4772,14 +4841,14 @@ async function fetchMacroHistoryMaps(apiKey){
   }catch(e){ fredRegistra("PCOPPUSDM", e); }
 
   try{
-    const obs = await fetchFredSeriesRange("VIXCLS", apiKey, startDaily);
+    const obs = await fetchFredSeriesRange("VIXCLS", startDaily);
     fredRegistra("VIXCLS", null);
     maps.vixRaw = {};
     obs.forEach(o=>{ maps.vixRaw[o.date] = o.value; }); // nível, não variação
   }catch(e){ fredRegistra("VIXCLS", e); }
 
   try{
-    const obs = await fetchFredSeriesRange("DGS10", apiKey, startDaily);
+    const obs = await fetchFredSeriesRange("DGS10", startDaily);
     fredRegistra("DGS10", null);
     maps.juros10aRaw = {};
     obs.forEach((o,idx)=>{
@@ -4789,7 +4858,7 @@ async function fetchMacroHistoryMaps(apiKey){
   }catch(e){ fredRegistra("DGS10", e); }
 
   try{
-    const obs = await fetchFredSeriesRange("USEPUINDXD", apiKey, startDaily);
+    const obs = await fetchFredSeriesRange("USEPUINDXD", startDaily);
     fredRegistra("USEPUINDXD", null);
     maps.epuRaw = {};
     obs.forEach((o,idx)=>{
@@ -5035,9 +5104,9 @@ async function runScoreBacktest(){
     await sleep(200);
 
     let macroMaps = {};
-    if(S.apiKeys.fred){
+    {
       line = logStep("consultando macro histórico — Fed/CPI/M2/DXY/curva/cobre/VIX/10a/EPU (FRED)", "calibrationLog");
-      macroMaps = await fetchMacroHistoryMaps(S.apiKeys.fred).catch(()=>({}));
+      macroMaps = await fetchMacroHistoryMaps().catch(()=>({}));
       logDone(line, FRED_DIAG.ok.length>0,
         `${FRED_DIAG.ok.length}/8 séries: ${FRED_DIAG.ok.join(", ")}` +
         (FRED_DIAG.falhou.length ? ` · FALHOU: ${FRED_DIAG.falhou.map(f=>f.id+" ("+f.motivo+")").join(", ")}` : ""),
@@ -7321,18 +7390,19 @@ function renderCqKeyStatus(){
   status.textContent = S.apiKeys.cryptoquant ? "✓ chave salva" : "sem chave — MVRV e netflow ficam manuais";
   status.style.color = S.apiKeys.cryptoquant ? "var(--teal)" : "var(--text-faint)";
 }
+/* v89: o campo de chave do FRED saiu da tela. O que sobrou aqui é um aviso
+   único e importante — se o SEIOS não estiver rodando na Vercel, /api/fred
+   não existe e o Macro morre sem dizer por quê. Melhor avisar antes. */
 function renderFredKeyStatus(){
   const status = document.getElementById("fredKeyStatus");
   if(!status) return;
-  if(S.apiKeys.fred && !S.permitirProxyComChave){
-    // o FRED só responde via proxy; sem o consentimento ligado, a chave salva
-    // não adianta nada — melhor dizer isso aqui do que deixar Macro falhar calado
-    status.textContent = "✓ chave salva — mas o FRED precisa do proxy (marque a caixa abaixo)";
+  const naVercel = /vercel\.app$/i.test(location.hostname) || location.hostname === "localhost";
+  if(!naVercel && location.protocol !== "file:"){
+    status.textContent = "⚠ este endereço (" + location.hostname + ") não tem servidor — abra pelo domínio da Vercel ou o FRED não responde";
     status.style.color = "var(--gold)";
     return;
   }
-  status.textContent = S.apiKeys.fred ? "✓ chave salva" : "sem chave — motor Macro fica manual";
-  status.style.color = S.apiKeys.fred ? "var(--teal)" : "var(--text-faint)";
+  status.textContent = "";
 }
 
 function renderCgKeyStatus(){
@@ -7341,15 +7411,6 @@ function renderCgKeyStatus(){
   status.textContent = S.apiKeys.coingecko ? "✓ chave paga salva — usando plano Pro" : "sem chave — usando plano grátis";
   status.style.color = S.apiKeys.coingecko ? "var(--teal)" : "var(--text-faint)";
 }
-document.getElementById("btnSaveFredKey").addEventListener("click", ()=>{
-  const input = document.getElementById("fredApiKeyInput");
-  S.apiKeys.fred = input.value.trim();
-  saveState();
-  renderFredKeyStatus();
-  input.value = "";
-  input.placeholder = S.apiKeys.fred ? "chave salva (oculta)" : "cole sua chave gratuita aqui";
-  if(S.apiKeys.fred) refreshMarketData().catch(()=>{});
-});
 renderFredKeyStatus();
 renderCgKeyStatus();
 
@@ -8679,10 +8740,8 @@ document.addEventListener("click", (e)=>{
     return { mvrv: mvrv, addr: addr };
   }
 
-  async function fredHistorico(serie, apiKey, inicio){
-    const url = "https://api.stlouisfed.org/fred/series/observations?series_id=" + serie +
-      "&api_key=" + encodeURIComponent(apiKey) + "&file_type=json&sort_order=asc" +
-      "&observation_start=" + inicio;
+  async function fredHistorico(serie, inicio){
+    const url = fredUrl({ series_id: serie, sort_order: "asc", observation_start: inicio });
     const res = await smartFetch(url);
     if(!res.ok) throw new Error("FRED " + serie + " falhou");
     const j = await res.json();
@@ -8806,10 +8865,10 @@ document.addEventListener("click", (e)=>{
       try{ ouro = await klinesDiarios("PAXGUSDT", DIAS); passoOk("ouro — PAXG/USDT (Binance)", Object.keys(ouro).length + " dias"); }
       catch(e){ passoFalhou("ouro — PAXG/USDT (Binance)", e.message); faltando.push("ouro"); }
 
-      // FRED só entra com chave — e carrega look-ahead
-      const fredKey = (S.apiKeys && S.apiKeys.fred) || "";
+      // FRED entra sempre (v89: proxy próprio, sem chave do usuário) — e
+      // carrega look-ahead, porque aqui não há vintage
       let macro = null;
-      if(fredKey){
+      {
         macro = {};
         const inicio = datas[0];
         const series = { juros:"DFF", dxy:"DTWEXBGS", curva:"T10Y2Y", sp500:"SP500", petroleo:"DCOILWTICO" };
@@ -8822,7 +8881,7 @@ document.addEventListener("click", (e)=>{
           // ao FRED. Pausa entre elas + uma segunda tentativa.
           for(let tent=0; tent<2 && !feito; tent++){
             try{
-              macro[nome] = await fredHistorico(series[nome], fredKey, inicio);
+              macro[nome] = await fredHistorico(series[nome], inicio);
               passoOk(rotulo, Object.keys(macro[nome]).length + " obs");
               feito = true;
             }catch(e){
@@ -8832,9 +8891,6 @@ document.addEventListener("click", (e)=>{
           }
           await respiro(600);
         }
-      } else {
-        addLog("› FRED × pulado — sem chave configurada");
-        faltando.push("todo o bloco Macro e Ativos Globais (sem chave FRED)");
       }
 
       addLog("\n› montando a tabela diária e avaliando os blocos…");

@@ -979,7 +979,7 @@ const STORAGE_KEY = "seios_btc_v2";
 // fonte única da versão — usada no rodapé, no histórico e nos exports.
 // Muda toda vez que a fórmula de score/pesos muda, pra nunca misturar
 // decisões de regras diferentes como se fossem comparáveis.
-const BUILD_VERSION = "2026-08-15.94.1-contagem-por-modelo";
+const BUILD_VERSION = "2026-08-15.95-distribuicao-do-funding";
 /* v78: versão do MODELO separada da versão do BUILD. Mudança visual não é
    mudança de semântica: só sobe quando peso, fórmula, corte ou trava mudam.
    Toda observação gravada carrega as duas, pra que seis meses depois dê pra
@@ -2012,7 +2012,16 @@ const NORMALIZACAO = {
   "ativosGlobais.cobre":    pct    => escalaSuave(pct, 10),          // cobre, % em ~3 meses
   "ativosGlobais.vix":      nivel  => escalaSuave(-(nivel - 18), 25),// VIX, nível (pivô 18)
   "ativosGlobais.juros10a": d      => escalaSuave(-d, 2.5),          // Δ Treasury 10a, pp em ~90d
-  "ativosGlobais.ouro":     pct    => escalaSuave(pct, 15)           // PAXG, % em ~90d (sensor, não pontua)
+  "ativosGlobais.ouro":     pct    => escalaSuave(pct, 15),          // PAXG, % em ~90d (sensor, não pontua)
+  /* v95 — o funding era a última fórmula viva FORA desta tabela: a mesma
+     expressão escrita duas vezes, no vivo e no backtest, com a mesma
+     constante. Coincidir hoje não é ser uma fórmula só — é ser duas que
+     ainda não divergiram. Os números não mudam nesta build; muda o número
+     de lugares onde alguém pode mudá-los.
+     Continua clamp LINEAR de propósito: trocar por escalaSuave mexeria no
+     score e isso precisa de justificativa e de bump de modelo, que é outra
+     build. Fica registrado como o item 8 do aberto. */
+  "derivativos.funding":    rate   => clamp(-rate * 100000, -100, 100) // taxa por 8h, fração
 };
 
 /* norm() é a única porta de entrada. Id desconhecido não vira silenciosamente
@@ -2749,7 +2758,7 @@ async function refreshMarketData(){
   { const line = logStep("consultando funding rate (Binance)");
     try{
       const rate = await fetchFunding();
-      setAuto("derivativos","funding", clamp(-rate * 100000, -100, 100), `funding rate: ${(rate*100).toFixed(4)}%`, { bruto: rate });
+      setAuto("derivativos","funding", norm("derivativos.funding", rate), `funding rate: ${(rate*100).toFixed(4)}%`, { bruto: rate });
       results.ok.push("funding");
       logDone(line, true, `${(rate*100).toFixed(4)}%`);
     }catch(e){ setFailed("derivativos","funding", e && e.message); results.fail.push("funding"); logDone(line, false, e.message); }
@@ -5625,7 +5634,7 @@ async function runScoreBacktest(){
       if(fg !== undefined) sourcesUsed.add("Sentimento (F&G)");
 
       const fr = fundingMap[date];
-      const derivativos = fr !== undefined ? clamp(-fr*100000,-100,100) : null;
+      const derivativos = fr !== undefined ? norm("derivativos.funding", fr) : null;
       if(fr !== undefined) sourcesUsed.add("Derivativos (funding)");
 
       // on-chain — mesma composição do motor ao vivo: hash rate + MVRV + NUPL + endereços ativos
@@ -5934,6 +5943,64 @@ async function runScoreBacktest(){
         "Direção coerente" significa que, historicamente, quando esse motor sozinho apontou pra cima o preço tendeu mais a subir do que quando apontou pra baixo — é o teste mínimo de um motor fazer sentido.
         Isso não decide peso sozinho — é o ponto de partida pra discutirmos juntos se algum motor merece pesar mais ou menos.
       </p>
+
+      ${(function(){
+        /* v95 — A DISTRIBUIÇÃO DO FUNDING, antes de escolher qualquer limiar.
+           O `FUNDING_ESTICADO` foi portado do código legado como 0,03% e a
+           produção mostrou 0,002% — quinze vezes menor. Virou 0,015% e ficou
+           declarado PROVISÓRIO, porque era escolha minha, não medida.
+           Aqui não escolho nada: mostro onde o funding realmente viveu nos
+           dias que este teste já baixou, e o que a fórmula atual faz com cada
+           faixa. Com a tabela na tela, o número da próxima build sai de uma
+           medição — e o bump de modelo terá justificativa ANTES. */
+        const taxas = Object.keys(fundingMap).map(function(d){ return fundingMap[d]; })
+                        .filter(function(v){ return Number.isFinite(v); });
+        if(taxas.length < 30) return "";
+        const abs = taxas.map(Math.abs).sort(function(a,b){ return a-b; });
+        const pct = function(p){ return abs[Math.min(abs.length-1, Math.floor(abs.length*p))]; };
+        const emPct = function(r){ return (r*100).toFixed(4) + "%"; };
+        const score = function(r){ return norm("derivativos.funding", r); };
+        const faixas = [
+          { r: pct(0.50), nome: "mediana (p50)" },
+          { r: pct(0.75), nome: "p75" },
+          { r: pct(0.90), nome: "p90" },
+          { r: pct(0.95), nome: "p95" },
+          { r: abs[abs.length-1], nome: "máximo do período" }
+        ];
+        const cruza15 = abs.filter(function(v){ return Math.abs(score(v)) >= 15; }).length;
+        const cruza40 = abs.filter(function(v){ return Math.abs(score(v)) >= 40; }).length;
+        const satura  = abs.filter(function(v){ return Math.abs(score(v)) >= 100; }).length;
+        const posLimiar = abs.filter(function(v){ return v < FUNDING_ESTICADO/100; }).length / abs.length;
+        return `
+          <div style="font-family:var(--font-mono);font-size:10px;color:var(--text-faint);text-transform:uppercase;letter-spacing:.06em;margin:22px 0 10px;border-top:1px solid var(--line-soft);padding-top:16px;">
+            Distribuição do funding — onde a taxa realmente vive, em ${abs.length} dias
+          </div>
+          <div style="font-family:var(--font-mono);font-size:10.5px;color:var(--text-faint);margin-bottom:10px;">
+            Módulo da taxa média diária por período de 8h, e o score que a fórmula atual
+            (<code>−taxa×100000</code>, clamp em ±100) produz em cada faixa. Nada aqui muda o
+            score: é a medição que falta pra decidir a escala com número, não com julgamento.
+          </div>
+          <table class="hist">
+            <thead><tr><th>Faixa</th><th>|Funding| por 8h</th><th>Score que a fórmula dá</th><th>Chega a cruzar ±15?</th></tr></thead>
+            <tbody>
+              ${faixas.map(function(f){
+                const s = Math.abs(score(f.r));
+                return `<tr><td>${f.nome}</td><td>${emPct(f.r)}</td><td>${s.toFixed(1)}</td>
+                  <td style="color:${s>=15?"var(--teal)":"var(--text-faint)"};">${s>=15?"sim":"não"}</td></tr>`;
+              }).join("")}
+            </tbody>
+          </table>
+          <p style="font-family:var(--font-mono);font-size:10.5px;color:var(--text-faint);margin-top:10px;">
+            <strong>${cruza15} de ${abs.length} dias (${((cruza15/abs.length)*100).toFixed(0)}%)</strong>
+            produziriam |score| ≥ 15 — o corte a partir do qual a calibração por indicador
+            classifica o dia como bullish ou bearish. É por isso que a linha do funding aparece
+            como “amostra insuficiente”: não é falta de histórico, é a escala não sair do centro.
+            ${cruza40} dia(s) chegariam a ±40 · ${satura} saturariam em ±100.
+            O limiar de gatilho declarado provisório (${FUNDING_ESTICADO}% por 8h) fica no
+            percentil ${(posLimiar*100).toFixed(0)} deste período.
+          </p>
+        `;
+      })()}
 
       ${(function(){
         // regime macro histórico — pra cada dimensão, divide os dias na

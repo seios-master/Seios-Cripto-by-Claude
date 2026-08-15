@@ -65,6 +65,7 @@ const pedacos = [
   "const CONCENTRACAO_MAXIMA =",
   "const COBERTURA_ALTA_CONVICCAO =",
   "const TETO_POSITIVO =",
+  "function aplicarTetoPuro(",
   "function aplicarTeto(",
   "function indicadoresVotantes(",
   "function computeCobertura(",
@@ -98,7 +99,7 @@ const carrega = new Function("ctx", pedacos + "\nreturn {" +
 const api = (function () {
   const wrapper = new Function(pedacos + "\nreturn {" +
     ["clamp","escalaSuave","NORMALIZACAO","norm","validadeDoIndicador","frescorDoIndicador",
-     "valorVigente","indicadoresExpirados","coberturaAuto","computeRSI","rsiAtIndex","serieCryptoQuantOrdenada","escadaDeAcao","bucketAction","indicadoresVotantes","computeCobertura","motorComposite","computeHorizonScores","aplicarTeto","manuaisSemCarimbo","validadeManual","eventosDecaidos","HISTERESE_PONTOS","INDICATOR_SPECS","SENSOR_SPECS","specDoIndicador","provedorDoIndicador","calcularAvailableAt","resumirSerie","diasSemColeta","pesoEfetivoIndicador","pesoSeMotorCompleto","contribuicoesCanonicas","FAMILIA_TETO","RENORM_MAX","computeMarketState","familiaDoIndicador","separarPorModelo","snapshotDoModeloAtual","MODEL_VERSION","precoMaisProximoDe","TOLERANCIA_RECONSTRUCAO_H","maturarRetornos","disponivelEm","comDefasagem","VINTAGE_USO","DEFASAGEM_PUBLICACAO_DIAS"].join(",") + "};");
+     "valorVigente","indicadoresExpirados","coberturaAuto","computeRSI","rsiAtIndex","serieCryptoQuantOrdenada","escadaDeAcao","bucketAction","indicadoresVotantes","computeCobertura","motorComposite","computeHorizonScores","aplicarTeto","aplicarTetoPuro","manuaisSemCarimbo","validadeManual","eventosDecaidos","HISTERESE_PONTOS","INDICATOR_SPECS","SENSOR_SPECS","specDoIndicador","provedorDoIndicador","calcularAvailableAt","resumirSerie","diasSemColeta","pesoEfetivoIndicador","pesoSeMotorCompleto","contribuicoesCanonicas","FAMILIA_TETO","RENORM_MAX","computeMarketState","familiaDoIndicador","separarPorModelo","snapshotDoModeloAtual","MODEL_VERSION","precoMaisProximoDe","TOLERANCIA_RECONSTRUCAO_H","maturarRetornos","disponivelEm","comDefasagem","VINTAGE_USO","DEFASAGEM_PUBLICACAO_DIAS"].join(",") + "};");
   return wrapper();
 })();
 
@@ -665,6 +666,16 @@ t("o chute do CPI continua sendo o fallback documentado",
   api.DEFASAGEM_PUBLICACAO_DIAS.CPIAUCSL, 45);
 t("o do M2 é maior, porque a divulgação é mais lenta",
   api.DEFASAGEM_PUBLICACAO_DIAS.M2SL > api.DEFASAGEM_PUBLICACAO_DIAS.CPIAUCSL, true);
+
+console.log("\n— v86: o teto é uma regra só, viva ou histórica —");
+t("versão pura corta o positivo", api.aplicarTetoPuro("geopolitico", 90), 30);
+t("e não mexe no negativo", api.aplicarTetoPuro("geopolitico", -90), -90);
+t("motor sem teto passa direto", api.aplicarTetoPuro("macro", 90), 90);
+t("null continua null", api.aplicarTetoPuro("geopolitico", null), null);
+t("indefinido não vira zero", api.aplicarTetoPuro("geopolitico", undefined), undefined);
+t("a versão viva delega para a pura — mesmo resultado",
+  [api.aplicarTeto("geopolitico", 90), api.aplicarTeto("geopolitico", -90)],
+  [api.aplicarTetoPuro("geopolitico", 90), api.aplicarTetoPuro("geopolitico", -90)]);
 
 console.log("\n" + (falhou ? "✗ " + falhou + " falha(s), " : "✓ ") + ok + " teste(s) ok\n");
 process.exit(falhou ? 1 : 0);

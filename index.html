@@ -979,7 +979,7 @@ const STORAGE_KEY = "seios_btc_v2";
 // fonte única da versão — usada no rodapé, no histórico e nos exports.
 // Muda toda vez que a fórmula de score/pesos muda, pra nunca misturar
 // decisões de regras diferentes como se fossem comparáveis.
-const BUILD_VERSION = "2026-08-15.85-reverte-consulta";
+const BUILD_VERSION = "2026-08-15.86-backtest-completo";
 /* v78: versão do MODELO separada da versão do BUILD. Mudança visual não é
    mudança de semântica: só sobe quando peso, fórmula, corte ou trava mudam.
    Toda observação gravada carrega as duas, pra que seis meses depois dê pra
@@ -1886,10 +1886,16 @@ function norm(id, bruto){
 // teto positivo por motor — só o Geopolítico por enquanto
 const TETO_POSITIVO = { geopolitico: 30 };
 
-function aplicarTeto(motorKey, valor){
-  if(valor === null) return null;
+/* v86: o backtest precisa do mesmo teto sem depender do estado vivo.
+   Uma regra, dois chamadores — o padrão que a v70 e a v73 estabeleceram. */
+function aplicarTetoPuro(motorKey, valor){
+  if(valor === null || valor === undefined) return valor;
   const teto = TETO_POSITIVO[motorKey];
   return (teto !== undefined && valor > teto) ? teto : valor;
+}
+
+function aplicarTeto(motorKey, valor){
+  return aplicarTetoPuro(motorKey, valor); // v86: uma regra, dois chamadores
 }
 
 // um indicador em ±99.5 ou além está no limite da escala: registra para a tela
@@ -4744,6 +4750,54 @@ async function fetchMacroHistoryMaps(apiKey){
     });
   }catch(e){ fredRegistra("SP500", e); }
 
+  /* v86 — MOTORES QUE NUNCA FORAM TESTADOS.
+     Até aqui o backtest media ~80% do peso e a tela mostrava 100%. Toda
+     conclusão sobre "o sistema não bate comprar e segurar" valia sobre um
+     subconjunto, e um subconjunto escolhido por disponibilidade de API, não
+     por relevância. Cobre, VIX e Treasury 10a completam Ativos Globais; o EPU
+     traz o Geopolítico para dentro, ainda que parcial.
+     Eventos continua fora: não há fonte histórica gratuita de GDELT com 12
+     meses utilizáveis. Fica declarado, não disfarçado. */
+  try{
+    const obs = await fetchFredSeriesRange("PCOPPUSDM", apiKey, startMonthly);
+    fredRegistra("PCOPPUSDM", null);
+    maps.cobreRaw = {};
+    for(let idx=3; idx<obs.length; idx++){
+      const pct = obs[idx-3].value ? ((obs[idx].value - obs[idx-3].value)/obs[idx-3].value)*100 : 0;
+      // série mensal: vale da divulgação até a próxima, como CPI e M2
+      const desde = disponivelEm(obs[idx], 60, "PCOPPUSDM");
+      const to = idx+1 < obs.length ? disponivelEm(obs[idx+1], 60, "PCOPPUSDM") : new Date();
+      fillDailyRange(maps.cobreRaw, desde, to, pct);
+    }
+  }catch(e){ fredRegistra("PCOPPUSDM", e); }
+
+  try{
+    const obs = await fetchFredSeriesRange("VIXCLS", apiKey, startDaily);
+    fredRegistra("VIXCLS", null);
+    maps.vixRaw = {};
+    obs.forEach(o=>{ maps.vixRaw[o.date] = o.value; }); // nível, não variação
+  }catch(e){ fredRegistra("VIXCLS", e); }
+
+  try{
+    const obs = await fetchFredSeriesRange("DGS10", apiKey, startDaily);
+    fredRegistra("DGS10", null);
+    maps.juros10aRaw = {};
+    obs.forEach((o,idx)=>{
+      const past = obs[indiceDiasAtras(obs, idx, 90)];
+      maps.juros10aRaw[o.date] = o.value - past.value; // delta em pp
+    });
+  }catch(e){ fredRegistra("DGS10", e); }
+
+  try{
+    const obs = await fetchFredSeriesRange("USEPUINDXD", apiKey, startDaily);
+    fredRegistra("USEPUINDXD", null);
+    maps.epuRaw = {};
+    obs.forEach((o,idx)=>{
+      const past = obs[indiceDiasAtras(obs, idx, 90)];
+      maps.epuRaw[o.date] = past.value ? ((o.value - past.value)/past.value)*100 : 0;
+    });
+  }catch(e){ fredRegistra("USEPUINDXD", e); }
+
   return maps;
 }
 
@@ -4982,7 +5036,7 @@ async function runScoreBacktest(){
 
     let macroMaps = {};
     if(S.apiKeys.fred){
-      line = logStep("consultando macro histórico — Fed/CPI/M2/DXY/curva (FRED)", "calibrationLog");
+      line = logStep("consultando macro histórico — Fed/CPI/M2/DXY/curva/cobre/VIX/10a/EPU (FRED)", "calibrationLog");
       macroMaps = await fetchMacroHistoryMaps(S.apiKeys.fred).catch(()=>({}));
       logDone(line, FRED_DIAG.ok.length>0,
         `${FRED_DIAG.ok.length}/8 séries: ${FRED_DIAG.ok.join(", ")}` +
@@ -5110,10 +5164,26 @@ async function runScoreBacktest(){
       if(agPet !== undefined) agVals.push(norm("ativosGlobais.petroleo", agPet));
       if(agEur !== undefined) agVals.push(norm("ativosGlobais.euro", agEur));
       if(agSp  !== undefined) agVals.push(norm("ativosGlobais.sp500", agSp));
+      // v86: os três que faltavam pra Ativos Globais ser o motor da tela
+      const agCobre = valorDeMapaAte(macroMaps.cobreRaw, date, 40);
+      const agVix   = valorDeMapaAte(macroMaps.vixRaw, date);
+      const agJ10   = valorDeMapaAte(macroMaps.juros10aRaw, date);
+      if(agCobre !== undefined) agVals.push(norm("ativosGlobais.cobre", agCobre));
+      if(agVix   !== undefined) agVals.push(norm("ativosGlobais.vix", agVix));
+      if(agJ10   !== undefined) agVals.push(norm("ativosGlobais.juros10a", agJ10));
       const ativosGlobais = agVals.length ? avg(agVals) : null;
       if(ativosGlobais !== null) sourcesUsed.add("Ativos Globais (FRED)");
 
-      const composites = { macro, institucional, onchain, derivativos, tecnico, sentimento, ativosGlobais, geopolitico:null, eventos:null };
+      /* v86: Geopolítico entra PARCIAL — só o EPU tem histórico gratuito.
+         GDELT e a tensão manual ficam de fora, então este motor no teste é
+         um terço do motor na tela. O teto de +30 é aplicado do mesmo jeito,
+         porque a regra do motor não depende de quantos indicadores existem. */
+      const geoEpu = valorDeMapaAte(macroMaps.epuRaw, date);
+      const geopolitico = geoEpu !== undefined
+        ? aplicarTetoPuro("geopolitico", norm("geopolitico.epu", geoEpu)) : null;
+      if(geopolitico !== null) sourcesUsed.add("Geopolítico parcial (EPU/FRED)");
+
+      const composites = { macro, institucional, onchain, derivativos, tecnico, sentimento, ativosGlobais, geopolitico, eventos:null };
       const { score, completeness } = aggregateScore(composites);
       const divergence = computeDivergence(composites);
       // no backtest a cobertura de indicador não é reconstituível dia a dia
@@ -5342,7 +5412,7 @@ async function runScoreBacktest(){
       <p style="font-family:var(--font-mono);font-size:10.5px;color:var(--text-faint);margin-top:10px;">
         Fontes usadas neste teste: ${Array.from(sourcesUsed).join(", ") || "nenhuma (verifique conexão)"}.
         Macro, Ativos Globais e On-chain só entram se você tiver conectado FRED/CryptoQuant — sem isso, o teste roda só com Técnico, Sentimento e Derivativos (funding), e o resultado é menos representativo do sistema completo.
-        Geopolítico e Eventos nunca entram aqui (sem fonte histórica gratuita), e Institucional entra só pelo prêmio Coinbase.
+        Geopolítico entra PARCIAL — só pelo EPU, que tem histórico no FRED; GDELT e a tensão manual ficam de fora, então este motor no teste vale um terço do que vale na tela. Eventos continua sem fonte histórica gratuita e não entra. Institucional entra só pelo prêmio Coinbase.
         Como nem todo motor tem fonte histórica, o peso total coberto por este teste é menor que o do sistema ao vivo — os cortes de recomendação são os mesmos, mas aplicados sobre uma base mais estreita.
         Retorno medido 30 dias após cada dia classificado. Passado recente, não garantia de futuro.
       </p>

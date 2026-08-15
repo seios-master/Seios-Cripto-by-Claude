@@ -974,7 +974,7 @@ const STORAGE_KEY = "seios_btc_v2";
 // fonte única da versão — usada no rodapé, no histórico e nos exports.
 // Muda toda vez que a fórmula de score/pesos muda, pra nunca misturar
 // decisões de regras diferentes como se fossem comparáveis.
-const BUILD_VERSION = "2026-08-15.89-proxy-proprio";
+const BUILD_VERSION = "2026-08-15.90-alfred";
 /* v78: versão do MODELO separada da versão do BUILD. Mudança visual não é
    mudança de semântica: só sobe quando peso, fórmula, corte ou trava mudam.
    Toda observação gravada carrega as duas, pra que seis meses depois dê pra
@@ -1798,6 +1798,31 @@ async function fetchCryptoQuantSeries(path, apiKey, limit){
    Antes eram três construções independentes da mesma coisa — exatamente o
    tipo de duplicação que faz live e histórico divergirem sem ninguém ver. */
 const FRED_ROTA = "/api/fred";
+
+/* v90 — ALFRED ≠ FRED.
+   O backtest pedia vintage (realtime_start/end + output_type=4) para TODAS as
+   séries. O SP500 respondeu 400, sempre, e sumia do teste:
+
+     "The series does not exist in ALFRED but may exist in FRED."
+
+   ALFRED é o arquivo de revisões. O SP500 é dado licenciado da S&P: existe no
+   FRED, mas sem histórico de divulgações arquivado. Não é rede, não é cota,
+   não é sábado — é estrutural e permanente.
+
+   A v84 suspeitou disto e removeu o vintage de todas as séries; três pararam
+   de carregar e a hipótese foi enterrada junto. Ela estava certa pela metade:
+   o problema é por série, não geral.
+
+   VINTAGE INDISPONÍVEL NÃO É SÉRIE INDISPONÍVEL. Uma série sem arquivo de
+   revisões ainda entrega os valores correntes — pior que vintage, melhor que
+   nada, desde que fique REGISTRADO que aquele indicador carrega look-ahead
+   residual. O diagnóstico já mostra isso; o que faltava era chegar até lá. */
+function erroSemVintage(e){
+  const txt = String((e && e.message) || e || "");
+  // o 400 do ALFRED é a assinatura; qualquer falha na consulta de vintage
+  // também cai para a corrente, mas só esta é estrutural e esperada
+  return /ALFRED/i.test(txt) || /\b400\b/.test(txt);
+}
 
 function fredUrl(params){
   const q = new URLSearchParams();
@@ -4623,23 +4648,38 @@ async function fetchFredSeriesRange(seriesId, startDate){
   const rt = fredRealtime(startDate);
 
   let comVintage = true;
-  let data = await (async ()=>{
-    // v85: consulta restaurada — o intervalo de realtime volta, porque sem ele
-    // três séries deixam de carregar e nenhuma traz data de publicação
-    const res = await smartFetch(fredUrl(Object.assign({}, comum, rt, { output_type: 4 })));
-    if(!res.ok) throw new Error("FRED falhou: " + seriesId);
-    return res.json();
-  })();
+  let data = null;
+  let motivoSemVintage = null;
 
-  const uteis = (data.observations || []).filter(o=>o.value !== "." && Number.isFinite(Number(o.value)));
-  if(uteis.length < 10){
-    // vintage não veio utilizável — cai para a série corrente e registra o fato
+  try{
+    // v85: o intervalo de realtime é o que faz a divulgação inicial vir junto
+    const res = await smartFetch(fredUrl(Object.assign({}, comum, rt, { output_type: 4 })));
+    if(!res.ok) throw new Error("FRED falhou: " + seriesId + " (status " + res.status + ")");
+    data = await res.json();
+    const uteis = (data.observations || []).filter(o=>o.value !== "." && Number.isFinite(Number(o.value)));
+    // veio, mas vazio demais pra servir: mesma decisão, motivo diferente
+    if(uteis.length < 10) motivoSemVintage = "vintage veio com " + uteis.length + " ponto(s)";
+  }catch(e){
+    /* v90 — ESTE catch É O CONSERTO. Antes o await estourava aqui e a série
+       inteira morria: o fallback existia mas estava pendurado ABAIXO do ponto
+       onde a execução caía. Rede de segurança embaixo do buraco não pega
+       ninguém. Foi assim que o SP500 sumiu de 6 backtests. */
+    motivoSemVintage = erroSemVintage(e)
+      ? "série não existe no ALFRED (sem arquivo de revisões)"
+      : String((e && e.message) || e);
+  }
+
+  if(motivoSemVintage){
+    // cai para a série corrente — valores revisados de hoje, look-ahead
+    // residual, e isso fica ESCRITO no diagnóstico em vez de silenciado
     const res2 = await smartFetch(fredUrl(comum));
-    if(!res2.ok) throw new Error("FRED falhou: " + seriesId);
+    if(!res2.ok) throw new Error("FRED falhou: " + seriesId + " (status " + res2.status + ")");
     data = await res2.json();
     comVintage = false;
     S.market.fredSemVintage = S.market.fredSemVintage || [];
-    if(!S.market.fredSemVintage.includes(seriesId)) S.market.fredSemVintage.push(seriesId);
+    if(!S.market.fredSemVintage.some(function(x){ return (x && x.id ? x.id : x) === seriesId; })){
+      S.market.fredSemVintage.push({ id: seriesId, motivo: motivoSemVintage });
+    }
   }
   // uma data de referência pode ter várias linhas (revisões); fica a primeira,
   // que é a divulgação inicial — o que existia naquele momento
@@ -5576,7 +5616,7 @@ async function runScoreBacktest(){
         if(frac < 0.2 && !semVintage.length && !FRED_DIAG.falhou.length) return "";
         return `<div style="margin:14px 0;padding:12px 16px;border:1px solid var(--brick);background:var(--brick-soft);font-family:var(--font-mono);font-size:11.5px;color:var(--brick);line-height:1.5;">
           ${frac >= 0.2 ? `⚠ <strong>${nGate} de ${total} dias (${(frac*100).toFixed(0)}%) caíram em "dados insuficientes".</strong> Quando essa fatia é grande, as outras linhas não estão medindo acerto do sistema — estão medindo o outro pedaço do calendário. Trate os números como não conclusivos até algum motor voltar.<br>` : ""}
-          ${semVintage.length ? `⚠ Sem vintage (divulgação inicial) em: ${esc(semVintage.join(", "))}. Estas séries entraram com o valor REVISADO de hoje — look-ahead residual.<br>` : ""}
+          ${semVintage.length ? `⚠ Sem vintage (divulgação inicial) em: ${esc(semVintage.map(function(x){ return x && x.id ? (x.id + " — " + x.motivo) : String(x); }).join(" · "))}. Estas séries entraram com o valor REVISADO de hoje — look-ahead residual.<br>` : ""}
           ${(VINTAGE_USO.medido + VINTAGE_USO.estimado) ? `📅 Data de divulgação: ${VINTAGE_USO.medido} observação(ões) com a data REAL informada pelo FRED · ${VINTAGE_USO.estimado} com defasagem estimada${VINTAGE_USO.medido === 0 ? " (nenhuma veio com data real — o FRED não devolveu realtime_start nesta consulta)" : ""}. ${Object.keys(VINTAGE_USO.series).length ? "Por série: " + esc(Object.keys(VINTAGE_USO.series).map(k=>k+" "+VINTAGE_USO.series[k]).join(" · ")) + "." : ""} O estimado erra quando o calendário de divulgação varia; o medido não erra.<br>` : ""}
           ${FRED_DIAG.falhou.length ? `⚠ <strong>Séries do FRED que FALHARAM e ficaram fora do teste:</strong> ${esc(FRED_DIAG.falhou.map(f=>f.id+" — "+f.motivo).join(" · "))}. O motor correspondente rodou incompleto ou não rodou.` : ""}
         </div>`;

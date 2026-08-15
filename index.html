@@ -979,7 +979,7 @@ const STORAGE_KEY = "seios_btc_v2";
 // fonte única da versão — usada no rodapé, no histórico e nos exports.
 // Muda toda vez que a fórmula de score/pesos muda, pra nunca misturar
 // decisões de regras diferentes como se fossem comparáveis.
-const BUILD_VERSION = "2026-08-15.81-desfecho-e-janela";
+const BUILD_VERSION = "2026-08-15.82-sensores-mudos";
 /* v78: versão do MODELO separada da versão do BUILD. Mudança visual não é
    mudança de semântica: só sobe quando peso, fórmula, corte ou trava mudam.
    Toda observação gravada carrega as duas, pra que seis meses depois dê pra
@@ -2031,7 +2031,27 @@ const INDICATOR_SPECS = {
   "ativosGlobais.juros10a": { provider:"FRED", serie:"DGS10",       rawUnit:"percentage_point", frequency:"daily",   lagH:24,  horizon:"longo", transform:"ativosGlobais.juros10a", family:"liquidez_condicoes" }
 };
 
+/* SENSORES EXPLORATÓRIOS (v82) — peso zero, só gravando.
+   Não votam, não têm motor, não podem mexer no score. Existem por um motivo
+   temporal e não por importância: dado point-in-time só existe se coletado no
+   instante certo, e cada dia sem gravar é irrecuperável. Quando houver série
+   suficiente pra testar se algum deles carrega informação, ela estará lá —
+   e se nunca houver, o custo terá sido zero.
+   `sensor: true` os mantém fora de qualquer verificação de completude dos
+   motores: são fichas técnicas sem indicador correspondente, de propósito. */
+const SENSOR_SPECS = {
+  "sensor.stablecoinSupply": { sensor:true, provider:"DeFiLlama", rawUnit:"usd",     frequency:"daily", lagH:0,  horizon:"medio", transform:"nao_pontua", family:"liquidez_condicoes" },
+  "sensor.stablecoinD7":     { sensor:true, provider:"DeFiLlama", rawUnit:"percent", frequency:"daily", lagH:0,  horizon:"medio", transform:"nao_pontua", family:"liquidez_condicoes" },
+  "sensor.stablecoinD30":    { sensor:true, provider:"DeFiLlama", rawUnit:"percent", frequency:"daily", lagH:0,  horizon:"medio", transform:"nao_pontua", family:"liquidez_condicoes" },
+  "sensor.juroReal10a":      { sensor:true, provider:"FRED", serie:"DFII10",     rawUnit:"percentage_point", frequency:"daily",  lagH:24, horizon:"longo", transform:"nao_pontua", family:"liquidez_condicoes" },
+  "sensor.juroReal10aD90":   { sensor:true, provider:"FRED", serie:"DFII10",     rawUnit:"percentage_point", frequency:"daily",  lagH:24, horizon:"longo", transform:"nao_pontua", family:"liquidez_condicoes" },
+  "sensor.liquidezLiquida":  { sensor:true, provider:"FRED", serie:"WALCL-WTREGEN-RRPONTSYD", rawUnit:"usd", frequency:"weekly", lagH:96, horizon:"medio", transform:"nao_pontua", family:"liquidez_condicoes" },
+  "sensor.liquidezLiquidaD30":{sensor:true, provider:"FRED", serie:"WALCL-WTREGEN-RRPONTSYD", rawUnit:"percent", frequency:"weekly", lagH:96, horizon:"medio", transform:"nao_pontua", family:"liquidez_condicoes" }
+};
+
 function specDoIndicador(motorKey, indKey){
+  const chave = motorKey + "." + indKey;
+  if(SENSOR_SPECS[chave]) return SENSOR_SPECS[chave];
   return INDICATOR_SPECS[motorKey + "." + indKey] || null;
 }
 
@@ -2777,6 +2797,9 @@ async function refreshMarketData(){
      Grava inclusive os VAZIOS: saber que a leitura de tensão geopolítica
      estava em branco nesta decisão é informação, não ausência dela. */
   registrarManuaisDaRodada();
+  // v82: sensores exploratórios entram depois de tudo — não votam e não podem
+  // atrasar nem quebrar o que decide
+  try{ await coletarSensoresExploratorios(); }catch(e){ logFinal("sensores exploratórios: " + e.message); }
 
   gravarObservacoesDaRodada()
     .then(function(n){ if(n) logFinal(`📈 ${n} observações point-in-time gravadas`); })
@@ -3448,6 +3471,105 @@ function registrarObservacao(motorKey, indKey, score, meta){
     modelo: MODEL_VERSION,
     schema: OBS_FORMATO
   });
+}
+
+/* ---- coleta dos sensores exploratórios (v82) --------------------------
+   Cada sensor é isolado: falha de um não derruba os outros nem a rodada.
+   Nenhum deles toca em S.motors, então é impossível mexerem no score.
+   O que eles fazem é uma coisa só: gravar, com carimbo temporal correto. */
+async function coletarSensoresExploratorios(){
+  const gravados = [];
+
+  // 1) Liquidez de stablecoins — o dinheiro que pode virar compra sem sair da cripto
+  { const line = logStep("sensor: liquidez de stablecoins (DeFiLlama)");
+    try{
+      const res = await smartFetch("https://stablecoins.llama.fi/stablecoincharts/all");
+      if(!res.ok) throw new Error("DeFiLlama " + res.status);
+      const rows = await res.json();
+      if(!Array.isArray(rows) || rows.length < 31) throw new Error("série curta");
+      const valorDe = function(r){
+        const c = r && r.totalCirculatingUSD;
+        if(!c) return null;
+        // o campo vem como objeto por tipo de lastro; soma tudo
+        return Object.keys(c).reduce(function(a,k){ return a + (Number(c[k]) || 0); }, 0);
+      };
+      const pontos = rows.map(function(r){
+        return { date: new Date(Number(r.date)*1000).toISOString().slice(0,10), valor: valorDe(r) };
+      }).filter(function(p){ return p.valor && /^\d{4}-\d{2}-\d{2}$/.test(p.date); });
+      if(pontos.length < 31) throw new Error("poucos pontos válidos");
+      pontos.sort(function(a,b){ return a.date < b.date ? -1 : 1; });
+      const hoje = pontos[pontos.length-1];
+      const d7   = pontos[pontos.length-8];
+      const d30  = pontos[pontos.length-31];
+      registrarObservacao("sensor","stablecoinSupply", null, { bruto: hoje.valor, referenceAt: hoje.date });
+      const v7 = ((hoje.valor - d7.valor)/d7.valor)*100;
+      const v30 = ((hoje.valor - d30.valor)/d30.valor)*100;
+      registrarObservacao("sensor","stablecoinD7",  null, { bruto: v7,  referenceAt: hoje.date });
+      registrarObservacao("sensor","stablecoinD30", null, { bruto: v30, referenceAt: hoje.date });
+      gravados.push("stablecoins");
+      logDone(line, true, `$${(hoje.valor/1e9).toFixed(1)}B · 7d ${v7>=0?"+":""}${v7.toFixed(2)}% · 30d ${v30>=0?"+":""}${v30.toFixed(2)}%`);
+    }catch(e){
+      registrarObservacao("sensor","stablecoinSupply", null, { qualidade:"falhou" });
+      logDone(line, false, e.message);
+    }
+  }
+
+  if(!S.apiKeys.fred){
+    logFinal("sensores de juro real e liquidez líquida precisam da chave do FRED");
+    return gravados;
+  }
+
+  // 2) Juro real de 10 anos — custo de oportunidade mais direto que o yield nominal
+  await sleep(300);
+  { const line = logStep("sensor: juro real 10 anos (FRED DFII10)");
+    try{
+      const obs = await fetchFredSeries("DFII10", S.apiKeys.fred, 95);
+      const atual = obs[0], antigo = obs[obs.length-1];
+      registrarObservacao("sensor","juroReal10a", null, { bruto: atual.value, referenceAt: atual.date });
+      registrarObservacao("sensor","juroReal10aD90", null,
+        { bruto: atual.value - antigo.value, referenceAt: atual.date });
+      gravados.push("juro real");
+      logDone(line, true, `${atual.value.toFixed(2)}% real`);
+    }catch(e){
+      registrarObservacao("sensor","juroReal10a", null, { qualidade:"falhou" });
+      logDone(line, false, e.message);
+    }
+  }
+
+  /* 3) Liquidez líquida = balanço do Fed − conta do Tesouro − recompra reversa.
+        Três séries de frequências e datas diferentes: cada uma entra com o
+        último valor conhecido, e o reference_at é o da MAIS ANTIGA delas —
+        o combinado não pode alegar ser mais recente que o seu componente
+        mais atrasado, senão inventa disponibilidade que não existia. */
+  await sleep(300);
+  { const line = logStep("sensor: liquidez líquida (WALCL − TGA − RRP)");
+    try{
+      const [walcl, tga, rrp] = await Promise.all([
+        fetchFredSeries("WALCL", S.apiKeys.fred, 40),
+        fetchFredSeries("WTREGEN", S.apiKeys.fred, 40),
+        fetchFredSeries("RRPONTSYD", S.apiKeys.fred, 60)
+      ]);
+      // WALCL e WTREGEN vêm em milhões; RRPONTSYD em bilhões
+      const liquida = function(i){
+        return (walcl[i].value/1000) - (tga[i].value/1000) - rrp[Math.min(i, rrp.length-1)].value;
+      };
+      const agora = liquida(0);
+      const refs = [walcl[0].date, tga[0].date, rrp[0].date].sort();
+      const idx30 = Math.min(4, walcl.length-1, tga.length-1); // séries semanais: ~4 semanas
+      const antes = liquida(idx30);
+      const var30 = antes ? ((agora - antes)/Math.abs(antes))*100 : null;
+      registrarObservacao("sensor","liquidezLiquida", null, { bruto: agora, referenceAt: refs[0] });
+      if(var30 !== null)
+        registrarObservacao("sensor","liquidezLiquidaD30", null, { bruto: var30, referenceAt: refs[0] });
+      gravados.push("liquidez líquida");
+      logDone(line, true, `$${agora.toFixed(0)}B` + (var30!==null ? ` · ${var30>=0?"+":""}${var30.toFixed(1)}% em ~30d` : ""));
+    }catch(e){
+      registrarObservacao("sensor","liquidezLiquida", null, { qualidade:"falhou" });
+      logDone(line, false, e.message);
+    }
+  }
+
+  return gravados;
 }
 
 function registrarManuaisDaRodada(){

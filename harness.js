@@ -25,6 +25,7 @@ const pedacos = [
   "const VALIDADE_HORAS =",
   "const INDICATOR_HORIZON = {",
   "const INDICATOR_SPECS = {",
+  "const SENSOR_SPECS = {",
   "const OBS_FORMATO =",
   "function specDoIndicador(",
   "function provedorDoIndicador(",
@@ -86,7 +87,7 @@ const carrega = new Function("ctx", pedacos + "\nreturn {" +
 const api = (function () {
   const wrapper = new Function(pedacos + "\nreturn {" +
     ["clamp","escalaSuave","NORMALIZACAO","norm","validadeDoIndicador","frescorDoIndicador",
-     "valorVigente","indicadoresExpirados","coberturaAuto","computeRSI","rsiAtIndex","serieCryptoQuantOrdenada","escadaDeAcao","bucketAction","indicadoresVotantes","computeCobertura","motorComposite","computeHorizonScores","aplicarTeto","manuaisSemCarimbo","validadeManual","eventosDecaidos","HISTERESE_PONTOS","INDICATOR_SPECS","specDoIndicador","provedorDoIndicador","calcularAvailableAt","resumirSerie","diasSemColeta","pesoEfetivoIndicador","pesoSeMotorCompleto","separarPorModelo","snapshotDoModeloAtual","MODEL_VERSION","precoMaisProximoDe","TOLERANCIA_RECONSTRUCAO_H","maturarRetornos"].join(",") + "};");
+     "valorVigente","indicadoresExpirados","coberturaAuto","computeRSI","rsiAtIndex","serieCryptoQuantOrdenada","escadaDeAcao","bucketAction","indicadoresVotantes","computeCobertura","motorComposite","computeHorizonScores","aplicarTeto","manuaisSemCarimbo","validadeManual","eventosDecaidos","HISTERESE_PONTOS","INDICATOR_SPECS","SENSOR_SPECS","specDoIndicador","provedorDoIndicador","calcularAvailableAt","resumirSerie","diasSemColeta","pesoEfetivoIndicador","pesoSeMotorCompleto","separarPorModelo","snapshotDoModeloAtual","MODEL_VERSION","precoMaisProximoDe","TOLERANCIA_RECONSTRUCAO_H","maturarRetornos"].join(",") + "};");
   return wrapper();
 })();
 
@@ -577,6 +578,26 @@ sn = serieDiaria(2, 100);
 api.maturarRetornos(sn, 110, base + 1 * umDia);
 t("30 dias não vence em 1 dia", sn[0].retornos.d30, undefined);
 t("e não é marcado como perdido", sn[0].retornosMeta.d30, undefined);
+
+console.log("\n— v82: sensores exploratórios não podem votar —");
+const sensores = Object.keys(api.SENSOR_SPECS);
+t("todo sensor é declarado como sensor",
+  sensores.every(k => api.SENSOR_SPECS[k].sensor === true), true);
+t("nenhum sensor tem transformação que pontue",
+  sensores.every(k => api.SENSOR_SPECS[k].transform === "nao_pontua"), true);
+t("nenhum sensor invadiu a tabela dos que votam",
+  sensores.filter(k => api.INDICATOR_SPECS[k]), []);
+t("sensor tem ficha técnica completa como qualquer indicador",
+  sensores.every(k => {
+    const e = api.SENSOR_SPECS[k];
+    return !!e.provider && !!e.rawUnit && Number.isFinite(e.lagH) && !!e.family;
+  }), true);
+t("specDoIndicador acha o sensor", api.specDoIndicador("sensor","juroReal10a").provider, "FRED");
+t("liquidez líquida declara lag de série semanal",
+  api.SENSOR_SPECS["sensor.liquidezLiquida"].lagH >= 96, true);
+t("stablecoin é diária e sem lag de publicação",
+  [api.SENSOR_SPECS["sensor.stablecoinSupply"].frequency,
+   api.SENSOR_SPECS["sensor.stablecoinSupply"].lagH], ["daily", 0]);
 
 console.log("\n" + (falhou ? "✗ " + falhou + " falha(s), " : "✓ ") + ok + " teste(s) ok\n");
 process.exit(falhou ? 1 : 0);

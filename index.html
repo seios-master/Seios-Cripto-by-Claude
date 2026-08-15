@@ -979,7 +979,7 @@ const STORAGE_KEY = "seios_btc_v2";
 // fonte única da versão — usada no rodapé, no histórico e nos exports.
 // Muda toda vez que a fórmula de score/pesos muda, pra nunca misturar
 // decisões de regras diferentes como se fossem comparáveis.
-const BUILD_VERSION = "2026-08-15.80-peso-visivel";
+const BUILD_VERSION = "2026-08-15.81-desfecho-e-janela";
 /* v78: versão do MODELO separada da versão do BUILD. Mudança visual não é
    mudança de semântica: só sobe quando peso, fórmula, corte ou trava mudam.
    Toda observação gravada carrega as duas, pra que seis meses depois dê pra
@@ -3779,29 +3779,114 @@ function relatorioTexto(snap, snaps){
    totalmente sobrepostas (N efetivo ridículo). Em 1 dia cada leitura é
    praticamente independente — é o horizonte que dá evidência em semanas em vez
    de anos, se é que há evidência. */
+/* =====================================================================
+   § DESFECHO QUE NÃO SE PERDE (v81)
+   =====================================================================
+   A versão anterior só gravava o retorno se o app estivesse ABERTO dentro de
+   ±12h da maturidade. Fechou o iPad no fim de semana? O desfecho de 3 dias
+   evaporou — sem erro, sem aviso, sem buraco visível. E o viés não é neutro:
+   some justamente o desfecho dos dias em que a pessoa não abriu o app, que
+   não são dias aleatórios. É viés de desfecho ausente, crescendo em silêncio.
+
+   Agora o retorno é reconstruído a posteriori a partir da PRÓPRIA série: a
+   leitura mais próxima de t+h fornece o preço, e fica registrado qual leitura
+   foi usada e a que distância. Retorno medido a 30,4 dias não é retorno de 30
+   dias, e a diferença tem que estar no dado, não na suposição.
+
+   Quando nem isso existe, o desfecho é marcado como PERDIDO em vez de ficar
+   nulo. Nulo se confunde com "ainda não venceu"; perdido é informação. */
+
+// tolerância proporcional: meio dia num horizonte de 1 dia é muito, num de 30 é pouco
+const TOLERANCIA_RECONSTRUCAO_H = { 1: 12, 3: 24, 30: 72 };
+
+function precoMaisProximoDe(snaps, alvoMs, toleranciaH){
+  let melhor = null, menorDist = Infinity;
+  snaps.forEach(function(s){
+    if(!s.preco) return;
+    const t = new Date(s.ts).getTime();
+    if(!Number.isFinite(t)) return;
+    const d = Math.abs(t - alvoMs);
+    if(d < menorDist){ menorDist = d; melhor = s; }
+  });
+  if(!melhor || menorDist > toleranciaH*3600e3) return null;
+  return { preco: melhor.preco, ts: melhor.ts, distanciaH: menorDist/3600e3 };
+}
+
+/* miolo puro: recebe a série ordenada e devolve quem mudou. Sem IndexedDB,
+   sem estado global — é o que permite provar a maturação no banco de provas
+   em vez de confiar que ela funciona. */
+function maturarRetornos(ordenados, precoAtual, agoraMs){
+  const pendentes = [];
+  ordenados.forEach(function(s, idx){
+    if(!s.preco) return;
+    const nasceu = new Date(s.ts).getTime();
+    if(!Number.isFinite(nasceu)) return;
+    const idade = (agoraMs - nasceu) / (24*3600*1000);
+    s.retornos = s.retornos || {};
+    s.retornosMeta = s.retornosMeta || {};
+
+    /* --- RETORNO ATÉ A PRÓXIMA LEITURA ---
+       Três leituras por dia com janela de 24h compartilham 2/3 do futuro:
+       não são três observações, são uma e meia. De uma leitura à seguinte,
+       as janelas não se sobrepõem — é o que torna a contagem rumo às ~777
+       uma contagem de observações independentes de verdade. */
+    if(s.retornos.prox === undefined || s.retornos.prox === null){
+      const prox = ordenados[idx+1];
+      if(prox && prox.preco){
+        const horas = (new Date(prox.ts).getTime() - nasceu) / 3600e3;
+        if(horas > 0){
+          s.retornos.prox = ((prox.preco - s.preco)/s.preco)*100;
+          s.retornosMeta.prox = { horas: Math.round(horas*100)/100, tsUsado: prox.ts };
+          if(pendentes.indexOf(s) === -1) pendentes.push(s);
+        }
+      }
+    }
+
+    [1,3,30].forEach(function(h){
+      const chave = "d" + h;
+      if(s.retornos[chave] !== undefined && s.retornos[chave] !== null) return;
+      if(s.retornosMeta[chave] && s.retornosMeta[chave].origem === "perdido") return;
+      const tol = TOLERANCIA_RECONSTRUCAO_H[h] || 12;
+
+      // caminho normal: o app está aberto na hora certa, usa o preço de agora
+      if(idade >= h - 0.5 && idade <= h + 0.5){
+        s.retornos[chave] = ((precoAtual - s.preco)/s.preco)*100;
+        s.retornosMeta[chave] = { origem: "janela", distanciaH: Math.round(Math.abs(idade-h)*24*100)/100 };
+        if(pendentes.indexOf(s) === -1) pendentes.push(s);
+        return;
+      }
+
+      // já passou da hora e ficou sem desfecho: tenta reconstruir da série
+      if(idade > h + 0.5){
+        const alvo = nasceu + h*24*3600e3;
+        const achado = precoMaisProximoDe(ordenados, alvo, tol);
+        if(achado){
+          s.retornos[chave] = ((achado.preco - s.preco)/s.preco)*100;
+          s.retornosMeta[chave] = { origem: "reconstruido",
+                                    distanciaH: Math.round(achado.distanciaH*100)/100,
+                                    tsUsado: achado.ts };
+        }else{
+          // nem série nem janela: o desfecho não existe e não vai existir
+          s.retornosMeta[chave] = { origem: "perdido" };
+        }
+        if(pendentes.indexOf(s) === -1) pendentes.push(s);
+      }
+    });
+  });
+  return pendentes;
+}
+
 async function preencherRetornos(precoAtual, agoraISO){
   if(!precoAtual) return 0;
   try{
     const snaps = await lerSnapshots();
     if(snaps.length < 2) return 0;
     const agora = new Date(agoraISO || new Date().toISOString()).getTime();
-    const pendentes = [];
-
-    snaps.forEach(function(s){
-      if(!s.preco) return;
-      const idade = (agora - new Date(s.ts).getTime()) / (24*3600*1000);
-      s.retornos = s.retornos || {};
-      [1,3,30].forEach(function(h){
-        const chave = "d" + h;
-        if(s.retornos[chave] !== undefined && s.retornos[chave] !== null) return;
-        // tolerância de meio dia para os lados: a leitura diária não cai no
-        // mesmo segundo todo dia, e exigir precisão exata deixaria buracos
-        if(idade >= h - 0.5 && idade <= h + 0.5){
-          s.retornos[chave] = ((precoAtual - s.preco)/s.preco)*100;
-          if(pendentes.indexOf(s) === -1) pendentes.push(s);
-        }
-      });
+    // ordem explícita: o "próximo" só faz sentido numa série ordenada
+    const ordenados = snaps.slice().sort(function(a,b){
+      return new Date(a.ts).getTime() - new Date(b.ts).getTime();
     });
+    const pendentes = maturarRetornos(ordenados, precoAtual, agora);
 
     if(!pendentes.length) return 0;
     const db = await openSnapDB();
@@ -7940,12 +8025,20 @@ document.addEventListener("click", (e)=>{
     // número sobe sozinho a cada dia coletado.
     const eye = document.getElementById("brandEyebrow");
     if(eye){
-      const o1 = snaps.filter(function(x){ return x.retornos && typeof x.retornos.d1 === "number"; }).length;
+      /* v81: o cabeçalho contava TODAS as leituras, inclusive as de modelo
+         anterior que o painel já excluía das médias. Duas contagens da mesma
+         coisa discordando na mesma tela. O número vai cair muito — porque
+         estava contando leituras de um modelo que não existe mais. */
+      const doModelo = separarPorModelo(snaps);
+      const o1 = doModelo.atual.filter(function(x){
+        return x.retornos && typeof x.retornos.prox === "number";
+      }).length;
       /* v80: "vencida" significa o OPOSTO no resto do sistema — dado velho que
          não pontua mais. Aqui queria dizer "amadureceu, já dá pra comparar com
          o que o mercado fez depois". Duas palavras contrárias na mesma tela. */
-      eye.textContent = "SEIOS Cripto · Coletando — " + snaps.length + " leituras · " +
-                        o1 + " com desfecho apurado";
+      eye.textContent = "SEIOS Cripto · Coletando — " + doModelo.atual.length +
+                        " leituras sob o modelo atual · " + o1 + " janelas independentes" +
+                        (doModelo.legado.length ? " · " + doModelo.legado.length + " de modelo anterior" : "");
     }
     // com o painel fechado por padrão, um alerta que só vive lá dentro deixa de
     // ser alerta. O detector existe justamente para aparecer sem ser procurado.
@@ -8613,9 +8706,27 @@ document.addEventListener("click", (e)=>{
     const vencidas = snaps.filter(function(s){ return s.retornos && typeof s.retornos.d1 === "number"; });
     const nef1 = vencidas.length;
     const diasVencidos = new Set(vencidas.map(function(s){ return s.ts.slice(0,10); })).size;
-    t += "\n────────\n" + snaps.length + " leitura(s) sob o modelo atual · " + dias + " dia(s) · " +
+    /* v81: a contagem que importa é a de janelas NÃO sobrepostas. Três leituras
+       por dia com retorno de 24h compartilham 2/3 do futuro — contá-las como
+       três observações infla a amostra em três vezes e antecipa em anos a
+       sensação de ter dado suficiente. */
+    const comProx = snaps.filter(function(s){ return s.retornos && typeof s.retornos.prox === "number"; });
+    const origens = { janela:0, reconstruido:0, perdido:0 };
+    snaps.forEach(function(s){
+      ["d1","d3","d30"].forEach(function(k){
+        const m = s.retornosMeta && s.retornosMeta[k];
+        if(m && origens[m.origem] !== undefined) origens[m.origem]++;
+      });
+    });
+
+    t += "\n────────\n" + snaps.length + " leitura(s) sob o modelo atual · " + dias + " dia(s)\n" +
+         comProx.length + " janela(s) independente(s) — de uma leitura à seguinte, sem futuro compartilhado\n" +
          nef1 + " com desfecho de 1 dia apurado (em " + diasVencidos + " dia(s))\n" +
-         (legado.length ? legado.length + " leitura(s) de modelo anterior, fora das médias\n" : "");
+         (legado.length ? legado.length + " leitura(s) de modelo anterior, fora das médias\n" : "") +
+         "desfechos: " + origens.janela + " na janela · " + origens.reconstruido +
+         " reconstruídos da série · " + origens.perdido + " perdidos\n" +
+         (origens.perdido ? "⚠ desfecho perdido = o app não estava aberto e não havia leitura próxima.\n" +
+                            "   Não é aleatório: some justamente o que aconteceu enquanto você não olhava.\n" : "");
     // v68 — quando as observações vêm todas do mesmo punhado de dias, TODA
     // média acima é o mesmo número repetido, e as linhas passam a parecer
     // descoberta quando são a mesma observação vista de ângulos diferentes.

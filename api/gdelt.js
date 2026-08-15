@@ -56,17 +56,52 @@ export default async function handler(req, res) {
     + "&format=json"
     + "&timespan="  + timespan;
 
-  try {
-    /* O GDELT leva de 10 a 20 segundos por natureza — o prazo aqui é
-       generoso de propósito. Prazo curto foi o que matou o motor na v55. */
-    const controle = new AbortController();
-    const corta = setTimeout(() => controle.abort(), 45000);
-    const r = await fetch(url, { signal: controle.signal });
-    clearTimeout(corta);
+  /* O 429 EXPLICA TUDO (v98.1).
+     A primeira chamada por esta rota devolveu `GDELT respondeu 429`: limite de
+     taxa por IP. É a resposta que o "Load failed" escondia — o navegador via
+     uma falha de rede genérica porque a chamada morria no CORS ou no
+     intermediário público antes de o status chegar. Nunca foi instabilidade
+     misteriosa do GDELT: era ele dizendo "devagar", e ninguém escutando.
 
-    if (!r.ok) {
+     Duas defesas, aqui no servidor, onde o cliente não precisa saber:
+     · espera e tenta de novo, com intervalo crescente — o limite do GDELT é
+       por janela curta, então esperar resolve o que insistir não resolve;
+     · cache de borda longo: com 15 minutos de `s-maxage` e um dia de
+       `stale-while-revalidate`, três leituras diárias batem no GDELT poucas
+       vezes por dia em vez de a cada clique. Menos pedido é o único jeito
+       honesto de não levar 429. */
+  const espera = (ms) => new Promise(r => setTimeout(r, ms));
+  const BACKOFF = [0, 6000, 12000];   // três tentativas dentro do orçamento
+
+  try {
+    let r = null, ultimoStatus = 0;
+
+    for (let i = 0; i < BACKOFF.length; i++) {
+      if (BACKOFF[i]) await espera(BACKOFF[i]);
+      /* O GDELT leva de 10 a 20 segundos por natureza — o prazo aqui é
+         generoso de propósito. Prazo curto foi o que matou o motor na v55. */
+      const controle = new AbortController();
+      const corta = setTimeout(() => controle.abort(), 25000);
+      try {
+        r = await fetch(url, { signal: controle.signal });
+      } finally { clearTimeout(corta); }
+      ultimoStatus = r.status;
+      if (r.ok) break;
+      if (r.status !== 429 && r.status !== 503) break;  // só espera pelo que passa com tempo
+      r = null;
+    }
+
+    if (!r || !r.ok) {
       res.setHeader("X-SEIOS-Fonte", "gdelt-erro");
-      return res.status(502).json({ error: "GDELT respondeu " + r.status });
+      res.setHeader("X-SEIOS-Tentativas", String(BACKOFF.length));
+      if (ultimoStatus === 429) {
+        res.setHeader("Retry-After", "60");
+        return res.status(429).json({
+          error: "GDELT limitou a taxa (429) nas " + BACKOFF.length + " tentativas",
+          dica: "limite por IP, janela curta — a próxima leitura provavelmente passa"
+        });
+      }
+      return res.status(502).json({ error: "GDELT respondeu " + ultimoStatus });
     }
 
     /* O GDELT às vezes devolve HTML de erro com status 200. Ler como texto
@@ -86,7 +121,7 @@ export default async function handler(req, res) {
        porque a idade vai junto: `X-SEIOS-Idade-S` diz há quantos segundos
        o dado foi buscado, e o cliente conta a validade a partir daí.
        Dado velho pode ser útil; dado velho disfarçado de novo, não. */
-    res.setHeader("Cache-Control", "s-maxage=600, stale-while-revalidate=3600");
+    res.setHeader("Cache-Control", "s-maxage=900, stale-while-revalidate=86400");
     res.setHeader("X-SEIOS-Fonte", "gdelt");
     res.setHeader("X-SEIOS-Ms", String(Date.now() - t0));
     res.setHeader("X-SEIOS-Buscado-Em", new Date().toISOString());

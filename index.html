@@ -979,7 +979,7 @@ const STORAGE_KEY = "seios_btc_v2";
 // fonte única da versão — usada no rodapé, no histórico e nos exports.
 // Muda toda vez que a fórmula de score/pesos muda, pra nunca misturar
 // decisões de regras diferentes como se fossem comparáveis.
-const BUILD_VERSION = "2026-08-15.83-peso-fixo-e-familia";
+const BUILD_VERSION = "2026-08-15.84-vintage-medido";
 /* v78: versão do MODELO separada da versão do BUILD. Mudança visual não é
    mudança de semântica: só sobe quando peso, fórmula, corte ou trava mudam.
    Toda observação gravada carrega as duas, pra que seis meses depois dê pra
@@ -4516,11 +4516,29 @@ function fredRealtime(startDate){
   return `&realtime_start=${startDate}&realtime_end=9999-12-31`;
 }
 
+/* =====================================================================
+   § VINTAGES (v84) — usar a data de divulgação que o FRED informa
+   =====================================================================
+   A v69 já pedia `output_type=4` (divulgação inicial), o que era metade do
+   caminho: pegava o valor original em vez do revisado. Faltava a outra metade,
+   que estava chegando na resposta e sendo jogada fora — o campo
+   `realtime_start`, que é a data em que aquele valor foi PUBLICADO.
+
+   Isso é o `available_at` de graça, medido, sem aproximação. Até aqui o
+   backtest usava DEFASAGEM_PUBLICACAO_DIAS — 45 dias para o CPI, 60 para o M2
+   — chutes razoáveis que erram quando o calendário do BLS varia. Agora a data
+   real de divulgação de cada observação vem junto com ela.
+
+   Também corrigido: a consulta combinava `output_type=4` com um intervalo de
+   realtime, e essa combinação é o motivo provável de o SP500 cair no fallback
+   e aparecer como "sem vintage". Divulgação inicial não precisa de janela de
+   realtime — pedir as duas coisas juntas confunde a API. */
 async function fetchFredSeriesRange(seriesId, apiKey, startDate){
   const base = `https://api.stlouisfed.org/fred/series/observations?series_id=${seriesId}&api_key=${encodeURIComponent(apiKey)}&file_type=json&sort_order=asc&observation_start=${startDate}`;
 
+  let comVintage = true;
   let data = await (async ()=>{
-    const res = await smartFetch(base + fredRealtime(startDate) + "&output_type=4");
+    const res = await smartFetch(base + "&output_type=4");
     if(!res.ok) throw new Error("FRED falhou: " + seriesId);
     return res.json();
   })();
@@ -4531,15 +4549,24 @@ async function fetchFredSeriesRange(seriesId, apiKey, startDate){
     const res2 = await smartFetch(base);
     if(!res2.ok) throw new Error("FRED falhou: " + seriesId);
     data = await res2.json();
+    comVintage = false;
     S.market.fredSemVintage = S.market.fredSemVintage || [];
     if(!S.market.fredSemVintage.includes(seriesId)) S.market.fredSemVintage.push(seriesId);
   }
-  // com output_type=4 a API pode devolver mais de uma linha por data; fica a
-  // primeira (a divulgação inicial), que é o que existia naquele momento
+  // uma data de referência pode ter várias linhas (revisões); fica a primeira,
+  // que é a divulgação inicial — o que existia naquele momento
   const vistos = new Set();
   return (data.observations || [])
     .filter(o=>o.value !== "." && Number.isFinite(Number(o.value)))
-    .map(o=>({date:o.date, value:Number(o.value)}))
+    .map(function(o){
+      return {
+        date: o.date,                    // período de referência
+        value: Number(o.value),
+        // data real de publicação quando o FRED informa; null quando não
+        availableAt: (comVintage && o.realtime_start && /^\d{4}-\d{2}-\d{2}$/.test(o.realtime_start))
+                     ? o.realtime_start : null
+      };
+    })
     .filter(o=>{ if(vistos.has(o.date)) return false; vistos.add(o.date); return true; })
     .sort((a,b)=> a.date < b.date ? -1 : 1);
 }
@@ -4571,6 +4598,22 @@ function comDefasagem(dataReferencia, dias){
   return d;
 }
 
+/* v84: quando o FRED informa a data real de publicação, ela vence o chute.
+   O fallback continua existindo porque nem toda série traz vintage — mas
+   agora é fallback declarado, e o painel diz quando foi usado. */
+const VINTAGE_USO = { medido: 0, estimado: 0, series: {} };
+
+function disponivelEm(o, diasFallback, seriesId){
+  if(o && o.availableAt){
+    VINTAGE_USO.medido++;
+    if(seriesId) VINTAGE_USO.series[seriesId] = "medido";
+    return new Date(o.availableAt + "T00:00:00Z");
+  }
+  VINTAGE_USO.estimado++;
+  if(seriesId && VINTAGE_USO.series[seriesId] !== "medido") VINTAGE_USO.series[seriesId] = "estimado";
+  return comDefasagem(o.date, diasFallback);
+}
+
 /* Os catch(e){} desta função eram todos vazios. Quando uma série do FRED
    falhava, ela sumia sem deixar rastro — e o log só dizia "8 séries" sem
    informar QUAIS. Foi assim que passamos duas versões sem perceber que o Fed
@@ -4584,6 +4627,7 @@ function fredRegistra(seriesId, erro){
 
 async function fetchMacroHistoryMaps(apiKey){
   FRED_DIAG.ok = []; FRED_DIAG.falhou = [];
+  VINTAGE_USO.medido = 0; VINTAGE_USO.estimado = 0; VINTAGE_USO.series = {};
   const startDaily = new Date(Date.now() - 400*24*3600*1000).toISOString().slice(0,10);
   // 900 dias garante observações suficientes pra que o preenchimento por
   // meses cubra o ano inteiro do backtest (bug anterior: só cobria ~2 meses)
@@ -4632,8 +4676,8 @@ async function fetchMacroHistoryMaps(apiKey){
       const yoyPast = (obs[idx-3].value/obs[idx-15].value - 1)*100;
       const score = norm("macro.inflacao", yoyNow - yoyPast);
       // só passa a valer na data provável de DIVULGAÇÃO, não na de referência
-      const desde = comDefasagem(obs[idx].date, DEFASAGEM_PUBLICACAO_DIAS.CPIAUCSL);
-      const to = idx+1 < obs.length ? comDefasagem(obs[idx+1].date, DEFASAGEM_PUBLICACAO_DIAS.CPIAUCSL) : new Date();
+      const desde = disponivelEm(obs[idx], DEFASAGEM_PUBLICACAO_DIAS.CPIAUCSL, "CPIAUCSL");
+      const to = idx+1 < obs.length ? disponivelEm(obs[idx+1], DEFASAGEM_PUBLICACAO_DIAS.CPIAUCSL, "CPIAUCSL") : new Date();
       fillDailyRange(maps.inflacao, desde, to, score);
       fillDailyRange(maps.inflacaoRaw, desde, to, yoyNow);
     }
@@ -4646,8 +4690,8 @@ async function fetchMacroHistoryMaps(apiKey){
     for(let idx=12; idx<obs.length; idx++){
       const yoy = (obs[idx].value/obs[idx-12].value - 1)*100;
       const score = norm("macro.liquidez", yoy);
-      const desde = comDefasagem(obs[idx].date, DEFASAGEM_PUBLICACAO_DIAS.M2SL);
-      const to = idx+1 < obs.length ? comDefasagem(obs[idx+1].date, DEFASAGEM_PUBLICACAO_DIAS.M2SL) : new Date();
+      const desde = disponivelEm(obs[idx], DEFASAGEM_PUBLICACAO_DIAS.M2SL, "M2SL");
+      const to = idx+1 < obs.length ? disponivelEm(obs[idx+1], DEFASAGEM_PUBLICACAO_DIAS.M2SL, "M2SL") : new Date();
       fillDailyRange(maps.liquidez, desde, to, score);
     }
   }catch(e){ fredRegistra("M2SL", e); }
@@ -5278,6 +5322,7 @@ async function runScoreBacktest(){
         return `<div style="margin:14px 0;padding:12px 16px;border:1px solid var(--brick);background:var(--brick-soft);font-family:var(--font-mono);font-size:11.5px;color:var(--brick);line-height:1.5;">
           ${frac >= 0.2 ? `⚠ <strong>${nGate} de ${total} dias (${(frac*100).toFixed(0)}%) caíram em "dados insuficientes".</strong> Quando essa fatia é grande, as outras linhas não estão medindo acerto do sistema — estão medindo o outro pedaço do calendário. Trate os números como não conclusivos até algum motor voltar.<br>` : ""}
           ${semVintage.length ? `⚠ Sem vintage (divulgação inicial) em: ${esc(semVintage.join(", "))}. Estas séries entraram com o valor REVISADO de hoje — look-ahead residual.<br>` : ""}
+          ${(VINTAGE_USO.medido + VINTAGE_USO.estimado) ? `📅 Data de divulgação: ${VINTAGE_USO.medido} observação(ões) com a data REAL informada pelo FRED · ${VINTAGE_USO.estimado} com defasagem estimada. ${Object.keys(VINTAGE_USO.series).length ? "Por série: " + esc(Object.keys(VINTAGE_USO.series).map(k=>k+" "+VINTAGE_USO.series[k]).join(" · ")) + "." : ""} O estimado erra quando o calendário de divulgação varia; o medido não erra.<br>` : ""}
           ${FRED_DIAG.falhou.length ? `⚠ <strong>Séries do FRED que FALHARAM e ficaram fora do teste:</strong> ${esc(FRED_DIAG.falhou.map(f=>f.id+" — "+f.motivo).join(" · "))}. O motor correspondente rodou incompleto ou não rodou.` : ""}
         </div>`;
       })()}

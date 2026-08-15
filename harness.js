@@ -41,6 +41,10 @@ const pedacos = [
   "function snapshotDoModeloAtual(",
   "function separarPorModelo(",
   "const TOLERANCIA_RECONSTRUCAO_H =",
+  "const DEFASAGEM_PUBLICACAO_DIAS = {",
+  "const VINTAGE_USO =",
+  "function comDefasagem(",
+  "function disponivelEm(",
   "function precoMaisProximoDe(",
   "function maturarRetornos(",
   "function resumirSerie(",
@@ -94,7 +98,7 @@ const carrega = new Function("ctx", pedacos + "\nreturn {" +
 const api = (function () {
   const wrapper = new Function(pedacos + "\nreturn {" +
     ["clamp","escalaSuave","NORMALIZACAO","norm","validadeDoIndicador","frescorDoIndicador",
-     "valorVigente","indicadoresExpirados","coberturaAuto","computeRSI","rsiAtIndex","serieCryptoQuantOrdenada","escadaDeAcao","bucketAction","indicadoresVotantes","computeCobertura","motorComposite","computeHorizonScores","aplicarTeto","manuaisSemCarimbo","validadeManual","eventosDecaidos","HISTERESE_PONTOS","INDICATOR_SPECS","SENSOR_SPECS","specDoIndicador","provedorDoIndicador","calcularAvailableAt","resumirSerie","diasSemColeta","pesoEfetivoIndicador","pesoSeMotorCompleto","contribuicoesCanonicas","FAMILIA_TETO","RENORM_MAX","computeMarketState","familiaDoIndicador","separarPorModelo","snapshotDoModeloAtual","MODEL_VERSION","precoMaisProximoDe","TOLERANCIA_RECONSTRUCAO_H","maturarRetornos"].join(",") + "};");
+     "valorVigente","indicadoresExpirados","coberturaAuto","computeRSI","rsiAtIndex","serieCryptoQuantOrdenada","escadaDeAcao","bucketAction","indicadoresVotantes","computeCobertura","motorComposite","computeHorizonScores","aplicarTeto","manuaisSemCarimbo","validadeManual","eventosDecaidos","HISTERESE_PONTOS","INDICATOR_SPECS","SENSOR_SPECS","specDoIndicador","provedorDoIndicador","calcularAvailableAt","resumirSerie","diasSemColeta","pesoEfetivoIndicador","pesoSeMotorCompleto","contribuicoesCanonicas","FAMILIA_TETO","RENORM_MAX","computeMarketState","familiaDoIndicador","separarPorModelo","snapshotDoModeloAtual","MODEL_VERSION","precoMaisProximoDe","TOLERANCIA_RECONSTRUCAO_H","maturarRetornos","disponivelEm","comDefasagem","VINTAGE_USO","DEFASAGEM_PUBLICACAO_DIAS"].join(",") + "};");
   return wrapper();
 })();
 
@@ -639,6 +643,28 @@ t("liquidez líquida declara lag de série semanal",
 t("stablecoin é diária e sem lag de publicação",
   [api.SENSOR_SPECS["sensor.stablecoinSupply"].frequency,
    api.SENSOR_SPECS["sensor.stablecoinSupply"].lagH], ["daily", 0]);
+
+console.log("\n— v84: data de divulgação medida vence o chute —");
+api.VINTAGE_USO.medido = 0; api.VINTAGE_USO.estimado = 0; api.VINTAGE_USO.series = {};
+const cpiComVintage = { date: "2026-07-01", value: 300, availableAt: "2026-08-12" };
+const dispMedido = api.disponivelEm(cpiComVintage, 45, "CPIAUCSL");
+t("usa a data real que o FRED informou", dispMedido.toISOString().slice(0,10), "2026-08-12");
+t("e contabiliza como medido", api.VINTAGE_USO.medido, 1);
+t("marcando a série", api.VINTAGE_USO.series.CPIAUCSL, "medido");
+
+const cpiSemVintage = { date: "2026-07-01", value: 300, availableAt: null };
+const dispChute = api.disponivelEm(cpiSemVintage, 45, "SP500");
+t("sem vintage, cai na defasagem estimada", dispChute.toISOString().slice(0,10), "2026-08-15");
+t("e contabiliza como estimado", api.VINTAGE_USO.estimado, 1);
+
+t("a data medida difere do chute — é por isso que ela importa",
+  dispMedido.toISOString().slice(0,10) !== api.comDefasagem("2026-07-01", 45).toISOString().slice(0,10), true);
+t("série que já mediu uma vez não é rebaixada pra estimada",
+  (() => { api.disponivelEm(cpiSemVintage, 45, "CPIAUCSL"); return api.VINTAGE_USO.series.CPIAUCSL; })(), "medido");
+t("o chute do CPI continua sendo o fallback documentado",
+  api.DEFASAGEM_PUBLICACAO_DIAS.CPIAUCSL, 45);
+t("o do M2 é maior, porque a divulgação é mais lenta",
+  api.DEFASAGEM_PUBLICACAO_DIAS.M2SL > api.DEFASAGEM_PUBLICACAO_DIAS.CPIAUCSL, true);
 
 console.log("\n" + (falhou ? "✗ " + falhou + " falha(s), " : "✓ ") + ok + " teste(s) ok\n");
 process.exit(falhou ? 1 : 0);

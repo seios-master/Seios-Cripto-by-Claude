@@ -979,12 +979,12 @@ const STORAGE_KEY = "seios_btc_v2";
 // fonte única da versão — usada no rodapé, no histórico e nos exports.
 // Muda toda vez que a fórmula de score/pesos muda, pra nunca misturar
 // decisões de regras diferentes como se fossem comparáveis.
-const BUILD_VERSION = "2026-08-15.91.1-portas";
+const BUILD_VERSION = "2026-08-15.92-um-agregador";
 /* v78: versão do MODELO separada da versão do BUILD. Mudança visual não é
    mudança de semântica: só sobe quando peso, fórmula, corte ou trava mudam.
    Toda observação gravada carrega as duas, pra que seis meses depois dê pra
    saber sob qual regra aquela leitura foi produzida. */
-const MODEL_VERSION = "m3-2026-08-15";
+const MODEL_VERSION = "m4-2026-08-15";
 
 // indicador padrão — auto = tenta buscar sozinho; manual = você preenche
 function ind(label, source, note, excludeFromScore){
@@ -3240,51 +3240,53 @@ function scoreLabel(score){
 //
 // Com o divisor certo, vale a identidade: a média dos três relógios, ponderada
 // pelos pesos que cada um acumulou, reproduz o score geral.
-function computeHorizonScores(){
-  const groups = { curto: {sum:0, w:0}, medio: {sum:0, w:0}, longo: {sum:0, w:0} };
+function computeHorizonScores(vetor){
+  /* v92 — OS RELÓGIOS TAMBÉM ESTAVAM NO MODELO ANTIGO.
+     Dividiam o peso do motor entre os indicadores PREENCHIDOS (`motor.weight
+     / usaveis.length`), então o coeficiente de cada indicador mudava conforme
+     as APIs respondiam — o oposto do que o m2 faz. E aplicavam o teto do
+     Geopolítico por conta própria, com uma segunda cópia da translação.
 
-  Object.entries(S.motors).forEach(([motorKey, motor])=>{
-    if(motorKey === "eventos"){
-      const c = motorComposite("eventos");
-      if(c !== null){
-        const h = INDICATOR_HORIZON["eventos"];
-        groups[h].sum += c * motor.weight;
-        groups[h].w += motor.weight;
-      }
-      return;
-    }
-    // só os indicadores com valor E com horizonte classificado dividem o peso
-    // mesma regra de vigência do score geral — relógio não pontua com dado vencido
-    const usaveis = indicadoresVotantes(motorKey).filter(ik=>{
-      return valorVigente(motorKey, ik) !== null && INDICATOR_HORIZON[`${motorKey}.${ik}`];
-    });
-    if(!usaveis.length) return; // motor sem dado vigente não entra em relógio nenhum
+     Agora recortam o vetor canônico por horizonte. O teto e o peso fixo já
+     vêm aplicados na origem; aqui só se separa por prazo.
 
-    /* TETO IGNORADO PELOS RELÓGIOS (v75). O score geral limita o Geopolítico a
-       +30 no COMPOSTO do motor; os relógios distribuíam indicador a indicador e
-       nunca passavam por aplicarTeto(). Com Geo positivo alto, os painéis de
-       prazo mostravam um otimismo que o score geral não autorizava — dois
-       números na mesma tela, medindo universos diferentes.
-       O ajuste é uma translação: desconta de cada indicador do motor a mesma
-       diferença entre o composto bruto e o composto com teto. A média do motor
-       passa a bater com a do score geral, e as diferenças relativas entre os
-       indicadores (que é o que separa curto de longo) ficam preservadas. */
-    const bruto = usaveis.reduce((a,ik)=>a+valorVigente(motorKey, ik), 0) / usaveis.length;
-    const ajuste = aplicarTeto(motorKey, bruto) - bruto; // 0 quando não há teto
+     RECONCILIAÇÃO, que a auditoria pediu por escrito: cada relógio é a média
+     do seu grupo, na mesma escala −100..+100 do score. A média dos três,
+     ponderada pela massa de cada um, reproduz `mediaObservada`. O score é
+     essa média multiplicada pelo amortecimento (a penalidade por massa
+     ausente). Ou seja:
 
-    const perIndWeight = motor.weight / usaveis.length;
-    usaveis.forEach(ik=>{
-      const h = INDICATOR_HORIZON[`${motorKey}.${ik}`];
-      groups[h].sum += (valorVigente(motorKey, ik) + ajuste) * perIndWeight;
-      groups[h].w += perIndWeight;
-    });
+         Σ(score_h × massa_h) ÷ Σ(massa_h) × amortecimento = score
+
+     O harness verifica essa identidade a cada build. Enquanto o piso de
+     renormalização estiver ativo, os relógios são MAIORES que o score em
+     bloco — e isso passa a ser explicável em vez de misterioso. */
+  vetor = vetor || contribuicoesCanonicas();
+  const ag = agregarCanonico(vetor);
+  const grupos = { curto: null, medio: null, longo: null };
+
+  Object.keys(grupos).forEach(function(h){
+    const dentro = function(x){
+      const chave = x.motor === "eventos" ? "eventos" : (x.motor + "." + x.indicador);
+      return (INDICATOR_HORIZON[chave] || INDICATOR_HORIZON[x.motor]) === h;
+    };
+    const sub = agregarCanonico(vetor, { filtroItem: dentro, filtroNominal: dentro });
+    grupos[h] = sub;
   });
 
   const out = {};
-  Object.entries(groups).forEach(([h,g])=>{
-    const score = g.w > 0 ? g.sum / g.w : null;
-    out[h] = { score, completeness: g.w, label: score === null ? "Sem dados" : scoreLabel(score) };
+  Object.keys(grupos).forEach(function(h){
+    const g = grupos[h];
+    const score = g.massaObservada > 0 ? g.mediaObservada : null;
+    out[h] = {
+      score: score,
+      completeness: g.massaObservada,      // massa que este relógio acumulou
+      massaTotal: g.massaTotal,
+      label: score === null ? "Sem dados" : scoreLabel(score)
+    };
   });
+  out._amortecimento = ag.amortecimento;   // o que separa os relógios do score
+  out._mediaObservada = ag.mediaObservada;
   return out;
 }
 
@@ -3357,25 +3359,41 @@ function motorComposite(motorKey){
 
    pesosEfetivos() devolve o peso REAL de cada motor nesta leitura, e a tela
    passa a mostrar os dois quando eles divergem. */
-function pesosEfetivos(){
+/* v92 — ESTA FUNÇÃO ERA O MODELO ANTIGO INTEIRO.
+   Ela redistribuía o peso entre os motores PRESENTES: com os nove vivos,
+   `usado` = 1,0 e o efetivo saía exatamente igual ao nominal. Por isso a tela
+   anunciava 28,0% · 15,0% · 15,0% e parecia certa. Não era: no m2 o peso de
+   um motor é a soma dos pesos dos indicadores dele QUE TÊM VALOR, sobre o
+   denominador com piso. Na leitura de 15/08 o Macro valia 35,90% e o
+   Institucional 4,81% — a tela errava por 8 e por 10 pontos.
+
+   Agora deriva do mesmo vetor que produz o score. Aceita o vetor pronto para
+   não recalculá-lo a cada chamada. */
+function pesosEfetivos(vetor){
+  vetor = vetor || contribuicoesCanonicas();
+  const ag = agregarCanonico(vetor);
   const out = {};
-  let usado = 0;
-  Object.entries(S.motors).forEach(function(par){
-    const mk = par[0];
-    if(motorComposite(mk) !== null) usado += par[1].weight;
-  });
-  Object.entries(S.motors).forEach(function(par){
-    const mk = par[0], motor = par[1];
-    const vivo = motorComposite(mk) !== null;
+
+  // massa nominal de cada motor, já com o teto de família aplicado
+  const nomPorMotor = {};
+  vetor.nominais.forEach(function(n){ nomPorMotor[n.motor] = (nomPorMotor[n.motor] || 0) + n.peso; });
+
+  Object.keys(S.motors).forEach(function(mk){
+    const p = ag.porMotor[mk];
     out[mk] = {
-      nominal: motor.weight,
-      efetivo: vivo && usado > 0 ? motor.weight / usado : 0,
-      vivo,
-      fator: usado > 0 ? 1 / usado : 1
+      // nominal na MESMA base do efetivo (fração da massa total), senão a
+      // comparação mistura teto de família com ausência de dado
+      nominal: ag.massaTotal > 0 ? (nomPorMotor[mk] || 0) / ag.massaTotal : 0,
+      nominalDeclarado: S.motors[mk].weight,   // o que o cadastro diz
+      efetivo: p ? p.peso : 0,
+      contribuicao: p ? p.contribuicao : 0,    // quantos PONTOS do score vêm daqui
+      vivo: !!p,
+      indicadores: p ? p.itens : 0
     };
   });
-  out._pesoVivo = usado;
-  out._fator = usado > 0 ? 1 / usado : 1;
+  out._pesoVivo = ag.massaObservada;
+  out._fator = ag.denom > 0 ? ag.massaObservada / ag.denom : 1;
+  out._amortecimento = ag.amortecimento;
   return out;
 }
 
@@ -3407,13 +3425,13 @@ function pesoIndicadorTxt(motorKey, indKey){
    da decisão. É a diferença entre entender o número e ser enganado por ele. */
 /* m2: o peso na tela sai do MESMO vetor que produz o score. Antes era uma
    segunda conta, que concordava por coincidência. */
-function pesoEfetivoIndicador(motorKey, indKey){
-  const vetor = contribuicoesCanonicas();
+function pesoEfetivoIndicador(motorKey, indKey, vetor){
+  vetor = vetor || contribuicoesCanonicas();
+  const ag = agregarCanonico(vetor);          // v92: mesmo denominador do score
   const alvo = motorKey + "." + indKey;
   const item = vetor.itens.find(function(i){ return i.id === alvo; });
   if(!item) return 0;
-  const denom = Math.max(vetor.massaObservada, vetor.massaTotal / RENORM_MAX);
-  return denom > 0 ? item.peso / denom : 0;
+  return ag.denom > 0 ? item.peso / ag.denom : 0;
 }
 
 /* Quanto ELE valeria se os companheiros de motor estivessem preenchidos.
@@ -3482,13 +3500,17 @@ function coberturaAuto(){
   return total > 0 ? vivos / total : 0;
 }
 
-function concentracaoMaxima(){
-  // pesosEfetivos() devolve {nominal, efetivo, vivo, fator} por motor, mais as
-  // chaves soltas _pesoVivo e _fator. A primeira versão desta função filtrou
-  // por typeof number e acabou comparando _pesoVivo com _fator — dois números
-  // que não são peso de motor nenhum. Dava 53% e o nome "_fator" na tela.
-  // Agora lê o campo .efetivo dos motores reais e ignora o resto.
-  const pesos = pesosEfetivos();
+function concentracaoMaxima(vetor){
+  /* pesosEfetivos() devolve um objeto por motor mais as chaves soltas
+     _pesoVivo e _fator. A primeira versão desta função filtrou por typeof
+     number e acabou comparando _pesoVivo com _fator — dois números que não
+     são peso de motor nenhum. Dava 53% e o nome "_fator" na tela.
+
+     v92: o .efetivo agora vem do vetor canônico. A trava passou a medir a
+     grandeza que ela sempre disse medir. Na leitura de 15/08 ela reportava
+     28,0% de concentração no Macro quando o valor real era 35,90% — folga de
+     4,1 pontos até o gatilho de 40%, e não os 12 que a tela sugeria. */
+  const pesos = pesosEfetivos(vetor);
   let maior = 0;
   Object.keys(pesos).forEach(function(k){
     if(k.charAt(0) === "_") return;
@@ -4476,16 +4498,98 @@ function contribuicoesCanonicas(){
   return { itens, nominais, massaTotal, massaObservada, massaFamilia, fatorFamilia: fator };
 }
 
+/* =====================================================================
+   § agregarCanonico — A ÚNICA FUNÇÃO QUE TRANSFORMA O VETOR EM NÚMERO (v92)
+   =====================================================================
+   A v70 unificou a NORMALIZAÇÃO — de valor bruto para score de indicador.
+   Ficou faltando o andar de cima: a AGREGAÇÃO, de scores de indicador para
+   score do sistema. Ali continuavam existindo duas matemáticas.
+
+   O que a leitura de 15/08 às 17:54 mostrou, com números do próprio aparelho:
+
+     score na tela                     16,25   (m2, vetor canônico)
+     soma da tabela de motores         15,95   (modelo antigo, por motor)
+     peso do Macro exibido             28,0%   real: 35,90%
+     peso do Institucional exibido     15,0%   real:  4,81%
+     concentração exibida              28,0%   real: 35,90%
+     "sem Macro o score iria pra"         13   real:  7,9
+
+   Nenhum desses números era mentira deliberada: cada um era a resposta certa
+   de um modelo que deixou de ser o modelo. `pesosEfetivos` renormalizava
+   entre motores presentes; `concentracaoMaxima` lia dali; `scoreWithoutMotor`
+   redistribuía o peso do motor removido entre os vizinhos; os relógios de
+   prazo dividiam o peso do motor entre os indicadores PREENCHIDOS. Todos
+   corretos no m1. Todos errados desde que o m2 fixou o peso por indicador e
+   passou a manter a ausência no denominador.
+
+   A diferença de 0,30 ponto no score é o sintoma pequeno. O grave é o
+   contrafactual: ele existe para responder "algum motor está mandando
+   sozinho?", que é a mesma pergunta da trava de concentração, e respondia
+   que o Macro valia 3 pontos quando valia 8 — metade da leitura.
+
+   Daqui pra frente TUDO sai desta função: score, cobertura de massa, peso por
+   motor, peso por indicador, concentração, contrafactual e relógios de prazo.
+   E o teste invariante `soma das contribuições === score` roda no harness, de
+   modo que a segunda matemática não consegue nascer sem quebrar a build.
+
+   `filtro` permite recortar o vetor sem duplicar a conta:
+     · contrafactual "sem o motor X" → remove os ITENS de X e mantém os
+       NOMINAIS, porque a pergunta é "e se esse motor não tivesse dado", não
+       "e se ele não existisse". A massa dele continua no denominador, como
+       massa não observada — que é o que o m2 faz com qualquer ausência.
+     · relógio de prazo → recorta itens e nominais do horizonte. */
+function agregarCanonico(vetor, opts){
+  opts = opts || {};
+  const fItem = opts.filtroItem || function(){ return true; };
+  const fNom  = opts.filtroNominal || function(){ return true; };
+
+  const itens    = vetor.itens.filter(fItem);
+  const nominais = vetor.nominais.filter(fNom);
+
+  const massaTotal      = nominais.reduce(function(a,n){ return a + n.peso; }, 0);
+  const massaObservada  = itens.reduce(function(a,i){ return a + i.peso; }, 0);
+  const soma            = itens.reduce(function(a,i){ return a + i.valor * i.peso; }, 0);
+
+  /* piso de renormalização: a massa ausente só é redistribuída até 1,25× do
+     nominal. Acima disso o score é amortecido — menos evidência tem que
+     significar menos convicção, não a mesma convicção dividida entre menos
+     gente. */
+  const denom = Math.max(massaObservada, massaTotal / RENORM_MAX);
+  const score = denom > 0 ? soma / denom : 0;
+
+  /* a média SEM o piso: é o que os relógios de prazo produzem, porque cada
+     relógio é a média do seu grupo, na mesma escala −100..+100 do score.
+     Guardar as duas torna a reconciliação verificável em vez de misteriosa:
+        score = mediaObservada × amortecimento
+     e é isso que o teste invariante exige. */
+  const mediaObservada = massaObservada > 0 ? soma / massaObservada : 0;
+  const amortecimento  = denom > 0 ? massaObservada / denom : 1;
+
+  const contribuicoes = {};   // por indicador — somam exatamente `score`
+  const porMotor      = {};   // { contribuicao, peso, itens }
+  itens.forEach(function(i){
+    const c = denom > 0 ? (i.valor * i.peso) / denom : 0;
+    const w = denom > 0 ? i.peso / denom : 0;
+    contribuicoes[i.id] = c;
+    if(!porMotor[i.motor]) porMotor[i.motor] = { contribuicao: 0, peso: 0, itens: 0 };
+    porMotor[i.motor].contribuicao += c;
+    porMotor[i.motor].peso += w;
+    porMotor[i.motor].itens++;
+  });
+
+  return { score: score, mediaObservada: mediaObservada, amortecimento: amortecimento,
+           soma: soma, denom: denom, massaTotal: massaTotal, massaObservada: massaObservada,
+           contribuicoes: contribuicoes, porMotor: porMotor, nItens: itens.length,
+           amortecido: massaObservada < massaTotal / RENORM_MAX };
+}
+
 function computeMarketState(){
   const composites = {};
   Object.entries(S.motors).forEach(([key])=>{ composites[key] = motorComposite(key); });
 
   const vetor = contribuicoesCanonicas();
-  const soma = vetor.itens.reduce(function(a,i){ return a + i.valor * i.peso; }, 0);
-  /* denominador: a massa observada, mas nunca menos que a massa total dividida
-     pelo limite de renormalização. É o que impede a ausência de virar convicção. */
-  const denom = Math.max(vetor.massaObservada, vetor.massaTotal / RENORM_MAX);
-  const score = denom > 0 ? (soma / denom) : 0;
+  const ag = agregarCanonico(vetor);           // v92: uma conta, um lugar
+  const score = ag.score;
   const completeness = vetor.massaTotal > 0 ? vetor.massaObservada / vetor.massaTotal : 0;
 
   // divergência: quanto os motores preenchidos discordam entre si (desvio-padrão)
@@ -4512,9 +4616,12 @@ function computeMarketState(){
   else if(score <= -15) label = "Bear";
 
   return { score, completeness, label, composites, divergence,
-           cobertura: computeCobertura(), pesos: pesosEfetivos(),
+           cobertura: computeCobertura(), pesos: pesosEfetivos(vetor),
            massaObservada: vetor.massaObservada, massaTotal: vetor.massaTotal,
-           amortecido: vetor.massaObservada < vetor.massaTotal / RENORM_MAX };
+           amortecido: ag.amortecido,
+           // v92: o agregado inteiro viaja junto, pra que tela, relógios e
+           // contrafactual leiam o MESMO objeto em vez de recalcular
+           ag: ag, vetor: vetor };
 }
 
 function volatilityLabel(){
@@ -5124,6 +5231,26 @@ function aggregateScore(composites){
 }
 // mesmo cálculo do score, mas excluindo um motor — usado no contrafactual
 // "sem esse motor, o score iria pra onde" no Decision Engine
+/* v92 — O CONTRAFACTUAL ERA O PIOR DOS TRÊS ERROS.
+   Ele redistribuía o peso do motor removido entre os restantes, como o m1
+   fazia. Resultado na leitura de 15/08: "sem Macro o score iria de 16 para
+   13". A resposta certa é 7,9 — o Macro contribuía 8,1 dos 15,95 pontos.
+   Errava por mais de duas vezes, justamente na pergunta que existe para
+   detectar motor dominante, que é a mesma pergunta da trava de concentração.
+
+   Agora a conta é o recorte do vetor: os ITENS do motor saem, os NOMINAIS
+   ficam. A pergunta é "e se esse motor não tivesse dado hoje", e no m2 dado
+   ausente permanece no denominador como massa não observada — exatamente o
+   que aconteceria de verdade se as fontes dele caíssem. */
+function scoreSemMotor(excludeKey, vetor){
+  vetor = vetor || contribuicoesCanonicas();
+  return agregarCanonico(vetor, {
+    filtroItem: function(i){ return i.motor !== excludeKey; }
+  }).score;
+}
+
+// assinatura antiga mantida para o backtest, que ainda passa compostos por
+// motor. O caminho vivo usa scoreSemMotor().
 function scoreWithoutMotor(composites, excludeKey){
   let weightedSum = 0, weightUsed = 0;
   Object.entries(S.motors).forEach(([key,motor])=>{
@@ -5861,6 +5988,24 @@ function cenarioVencido(sc){
    valorVigente() de propósito: fonte caída ou dado vencido não responde
    gatilho, pela mesma regra que impede de pontuar. Um gatilho respondido por
    dado morto é exatamente o problema que a v91 está corrigindo no score. */
+/* LIMIAR DE FUNDING (v92) — eu tinha errado.
+   Na v91 portei 0,03% do código legado. A leitura de produção mostrou funding
+   em 0,002%: quinze vezes menor. Com esse limiar, "funding saudável" seria ✓
+   sempre e "funding dispara" seria ✗ sempre — dois dos seis gatilhos do
+   cenário nasceram constantes. Preservei fielmente um número que os dados
+   mostram estar fora da faixa de operação.
+
+   0,01% por período de 8h é a taxa de referência documentada da Binance, e o
+   perpétuo passa a maior parte do tempo perto dela. 0,015% é o ponto em que o
+   indicador cruza ±15 na fórmula atual, que é o limiar que a calibração usa
+   para chamar um dia de "bullish"/"bearish". Coerência entre gatilho e
+   calibração é o mínimo.
+
+   PROVISÓRIO E DECLARADO: o número certo sai do percentil dos 167 dias de
+   funding que o backtest já carrega, não da minha intuição. Enquanto essa
+   derivação não existir, isto é uma escolha de engenharia, não uma medição. */
+const FUNDING_ESTICADO = 0.015;   // % por período de 8h
+
 const GATILHO_FONTE = {
   "tecnico.rsi": {
     rotulo: "RSI-SMA(14) diário", unidade: "",
@@ -5935,9 +6080,9 @@ function interpretarLegado(texto){
     return null;
   }
   if(t.includes("funding")){
-    if(t.includes("dispara") || t.includes("sobre-alavancagem")) return { id:"derivativos.funding", op:">",  limiar:0.03, texto:texto };
-    if(t.includes("negativo") || t.includes("comprimido"))       return { id:"derivativos.funding", op:"<",  limiar:-0.03, texto:texto };
-    if(t.includes("saudável") || t.includes("normaliza"))        return { id:"derivativos.funding", op:"<=", limiar:0.03, texto:texto };
+    if(t.includes("dispara") || t.includes("sobre-alavancagem")) return { id:"derivativos.funding", op:">",  limiar:FUNDING_ESTICADO, texto:texto };
+    if(t.includes("negativo") || t.includes("comprimido"))       return { id:"derivativos.funding", op:"<",  limiar:-FUNDING_ESTICADO, texto:texto };
+    if(t.includes("saudável") || t.includes("normaliza"))        return { id:"derivativos.funding", op:"<=", limiar:FUNDING_ESTICADO, texto:texto };
     return null;
   }
   return null;
@@ -6068,11 +6213,11 @@ function generateAutoScenario(){
     if(ehBear){
       // num cenário de queda, funding esticado PRA BAIXO (shorts pagando) é o
       // que sustenta a tese; funding voltando ao normal é sinal de que passou
-      confirmTriggers.push(gat("derivativos.funding", "<", -0.03, "Funding rate segue negativo ou comprimido, abaixo de −0,03% (shorts no comando)"));
+      confirmTriggers.push(gat("derivativos.funding", "<", -FUNDING_ESTICADO, "Funding rate segue negativo ou comprimido, abaixo de −" + FUNDING_ESTICADO + "% (shorts no comando)"));
       invalidateTriggers.push(gat("derivativos.funding", ">=", 0, "Funding rate normaliza para terreno positivo"));
     } else {
-      confirmTriggers.push(gat("derivativos.funding", "<=", 0.03, "Funding rate permanece saudável, até 0,03% (sem alavancagem excessiva)"));
-      invalidateTriggers.push(gat("derivativos.funding", ">", 0.03, "Funding rate dispara acima de 0,03%, indicando sobre-alavancagem"));
+      confirmTriggers.push(gat("derivativos.funding", "<=", FUNDING_ESTICADO, "Funding rate permanece saudável, até " + FUNDING_ESTICADO + "% (sem alavancagem excessiva)"));
+      invalidateTriggers.push(gat("derivativos.funding", ">", FUNDING_ESTICADO, "Funding rate dispara acima de " + FUNDING_ESTICADO + "%, indicando sobre-alavancagem"));
     }
   }
   if(!confirmTriggers.length){
@@ -6359,7 +6504,7 @@ function computeDecision(){
   const filledEntries = Object.entries(ms.composites).filter(([,v])=>v!==null);
   if(filledEntries.length >= 2){
     const counterfactuals = filledEntries.map(([key])=>{
-      const without = scoreWithoutMotor(ms.composites, key);
+      const without = scoreSemMotor(key, ms.vetor);   // v92: mesmo modelo do score
       return { key, label:S.motors[key].label, without, delta: without - ms.score };
     }).sort((a,b)=>Math.abs(b.delta)-Math.abs(a.delta)).slice(0,2);
     counterfactuals.forEach(cf=>{

@@ -31,6 +31,10 @@ const pedacos = [
   "function provedorDoIndicador(",
   "function calcularAvailableAt(",
   "const MODEL_VERSION =",
+  "const RENORM_MAX =",
+  "const FAMILIA_TETO = {",
+  "function familiaDoIndicador(",
+  "function contribuicoesCanonicas(",
   "function pesosEfetivos(",
   "function pesoEfetivoIndicador(",
   "function pesoSeMotorCompleto(",
@@ -62,6 +66,9 @@ const pedacos = [
   "function computeCobertura(",
   "function motorComposite(",
   "function computeHorizonScores(",
+  "function computeMarketState(",
+  "function computeCobertura(",
+  "function volatilityLabel(",
   "function scoreLabel(",
   "const HISTERESE_PONTOS =",
   "const EVENTO_JANELA_DIAS =",
@@ -87,7 +94,7 @@ const carrega = new Function("ctx", pedacos + "\nreturn {" +
 const api = (function () {
   const wrapper = new Function(pedacos + "\nreturn {" +
     ["clamp","escalaSuave","NORMALIZACAO","norm","validadeDoIndicador","frescorDoIndicador",
-     "valorVigente","indicadoresExpirados","coberturaAuto","computeRSI","rsiAtIndex","serieCryptoQuantOrdenada","escadaDeAcao","bucketAction","indicadoresVotantes","computeCobertura","motorComposite","computeHorizonScores","aplicarTeto","manuaisSemCarimbo","validadeManual","eventosDecaidos","HISTERESE_PONTOS","INDICATOR_SPECS","SENSOR_SPECS","specDoIndicador","provedorDoIndicador","calcularAvailableAt","resumirSerie","diasSemColeta","pesoEfetivoIndicador","pesoSeMotorCompleto","separarPorModelo","snapshotDoModeloAtual","MODEL_VERSION","precoMaisProximoDe","TOLERANCIA_RECONSTRUCAO_H","maturarRetornos"].join(",") + "};");
+     "valorVigente","indicadoresExpirados","coberturaAuto","computeRSI","rsiAtIndex","serieCryptoQuantOrdenada","escadaDeAcao","bucketAction","indicadoresVotantes","computeCobertura","motorComposite","computeHorizonScores","aplicarTeto","manuaisSemCarimbo","validadeManual","eventosDecaidos","HISTERESE_PONTOS","INDICATOR_SPECS","SENSOR_SPECS","specDoIndicador","provedorDoIndicador","calcularAvailableAt","resumirSerie","diasSemColeta","pesoEfetivoIndicador","pesoSeMotorCompleto","contribuicoesCanonicas","FAMILIA_TETO","RENORM_MAX","computeMarketState","familiaDoIndicador","separarPorModelo","snapshotDoModeloAtual","MODEL_VERSION","precoMaisProximoDe","TOLERANCIA_RECONSTRUCAO_H","maturarRetornos"].join(",") + "};");
   return wrapper();
 })();
 
@@ -456,8 +463,8 @@ t("acha o dia de buraco na coleta", api.diasSemColeta(res.dias), ["2026-08-16"])
 t("série sem buraco não inventa alarme", api.diasSemColeta(["2026-08-15","2026-08-16"]), []);
 t("um dia só não gera buraco", api.diasSemColeta(["2026-08-15"]), []);
 
-console.log("\n— v80: peso efetivo por indicador —");
-// reproduz o caso real do Jorge: Institucional com só o prêmio Coinbase
+console.log("\n— m2: a inflação por ausência é limitada, não eliminada —");
+// mesmo caso real: Institucional com só o prêmio Coinbase preenchido
 global.S = { events: [], market: {}, motors: {
   institucional: { label:"Inst", weight:0.15, indicators: {
     coinbasePremium: { label:"premio", source:"auto", value:-2, updatedAt:new Date().toISOString() },
@@ -467,25 +474,59 @@ global.S = { events: [], market: {}, motors: {
   macro: { label:"Macro", weight:0.28, indicators: {
     juros: { label:"j", source:"auto", value:10, updatedAt:new Date().toISOString() } } }
 }};
-const efetInst = api.pesoEfetivoIndicador("institucional","coinbasePremium");
-const nomInst  = api.pesoSeMotorCompleto("institucional","coinbasePremium");
-t("sozinho no motor, o prêmio carrega o peso inteiro do motor",
-  Math.round(efetInst*1e4), Math.round((0.15/0.43)*1e4));
-t("com o motor completo ele valeria um quarto disso", Math.round(nomInst*1e4), Math.round((0.15/0.43/4)*1e4));
-t("logo, está inchado", efetInst > nomInst*1.15, true);
-// preenche os três manuais e o peso dele desaba
-global.S.motors.institucional.indicators.etfFlow.value = 10;
-global.S.motors.institucional.indicators.custodia.value = 10;
-global.S.motors.institucional.indicators.soberanos.value = 10;
-const efetDepois = api.pesoEfetivoIndicador("institucional","coinbasePremium");
-t("com os companheiros preenchidos, o peso dele cai pra um quarto",
-  Math.round(efetDepois*1e4), Math.round((efetInst/4)*1e4));
-t("e deixa de estar inchado", efetDepois > api.pesoSeMotorCompleto("institucional","coinbasePremium")*1.15, false);
-t("o inchaço não se confunde com a renormalização entre motores",
-  Math.round(efetDepois*1e6), Math.round(api.pesoSeMotorCompleto("institucional","coinbasePremium")*1e6));
-t("indicador que não pontua tem peso zero, não peso pequeno",
-  (() => { global.S.motors.macro.indicators.juros.value = null;
-           return api.pesoEfetivoIndicador("macro","juros"); })(), 0);
+const soPremio = api.pesoEfetivoIndicador("institucional","coinbasePremium");
+// preenche os três companheiros
+["etfFlow","custodia","soberanos"].forEach(k => { global.S.motors.institucional.indicators[k].value = 10; });
+const comTodos = api.pesoEfetivoIndicador("institucional","coinbasePremium");
+/* O TESTE QUE DEFINE O m2. A inflação por ausência não é eliminada — é
+   LIMITADA. Sozinho, o prêmio ainda ganha influência, mas no máximo 1,25x o
+   coeficiente nominal, contra as 4x do modelo anterior. */
+t("sozinho, o prêmio infla — mas no limite exato de 1,25x",
+  Math.round((soPremio/comTodos)*1e6), Math.round(api.RENORM_MAX*1e6));
+t("no modelo anterior a mesma ausência inflava 4x",
+  Math.round((0.15/0.0375)*1e4), 40000);
+t("e o peso dele deixou de ser o peso inteiro do motor",
+  soPremio < 0.15/0.40, true);
+t("o nominal também não depende de disponibilidade",
+  Math.round(api.pesoSeMotorCompleto("institucional","coinbasePremium")*1e6),
+  Math.round((0.0375/0.40)*1e6));
+
+console.log("\n— m2: ausência vira massa não observada —");
+global.S.motors.institucional.indicators.etfFlow.value = null;
+global.S.motors.institucional.indicators.custodia.value = null;
+global.S.motors.institucional.indicators.soberanos.value = null;
+const msFalta = api.computeMarketState();
+["etfFlow","custodia","soberanos"].forEach(k => { global.S.motors.institucional.indicators[k].value = 10; });
+const msCheio = api.computeMarketState();
+t("com metade do sistema mudo, a massa observada é menor que a total",
+  msFalta.massaObservada < msFalta.massaTotal, true);
+t("e o score é declarado como amortecido", msFalta.amortecido, true);
+t("com tudo preenchido, deixa de amortecer", msCheio.amortecido, false);
+t("completude agora é fração de massa, não soma de pesos de motor",
+  Math.round(msCheio.completeness*1e6), 1e6);
+// o indicador ausente não empurra o score: puxa pra zero
+global.S.motors.institucional.indicators.coinbasePremium.value = 100;
+["etfFlow","custodia","soberanos"].forEach(k => { global.S.motors.institucional.indicators[k].value = null; });
+const soUm = api.computeMarketState().score;
+["etfFlow","custodia","soberanos"].forEach(k => { global.S.motors.institucional.indicators[k].value = 100; });
+const todosBull = api.computeMarketState().score;
+t("um indicador gritando +100 sozinho vale menos que quatro concordando",
+  soUm < todosBull, true);
+
+console.log("\n— m2: teto por família latente —");
+t("liquidez/condições tem o teto mais alto", api.FAMILIA_TETO.liquidez_condicoes, 0.25);
+t("cambial é limitado — DXY e euro medem a mesma coisa", api.FAMILIA_TETO.cambial, 0.08);
+t("microestrutura quase não pesa", api.FAMILIA_TETO.microestrutura, 0.05);
+t("renormalização limitada a 1,25x, versionada", api.RENORM_MAX, 1.25);
+const vet = api.contribuicoesCanonicas();
+t("nenhuma família ultrapassa o próprio teto",
+  Object.keys(vet.massaFamilia).filter(f => {
+    const teto = api.FAMILIA_TETO[f];
+    const massa = vet.nominais.filter(n => n.familia === f).reduce((a,n) => a+n.peso, 0);
+    return teto && massa > teto + 1e-9;
+  }), []);
+t("macro sozinho seria 28% mas o teto de família corta pra 25%",
+  Math.round(vet.nominais.find(n => n.id === "macro.juros").peso*1e4), 2500);
 
 console.log("\n— v80: leitura de modelo antigo não entra em estatística —");
 const snapNovo = { ts:"2026-08-15T00:00:00.000Z", modelo: api.MODEL_VERSION, score: 10 };

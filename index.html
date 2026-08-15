@@ -979,12 +979,12 @@ const STORAGE_KEY = "seios_btc_v2";
 // fonte única da versão — usada no rodapé, no histórico e nos exports.
 // Muda toda vez que a fórmula de score/pesos muda, pra nunca misturar
 // decisões de regras diferentes como se fossem comparáveis.
-const BUILD_VERSION = "2026-08-15.82-sensores-mudos";
+const BUILD_VERSION = "2026-08-15.83-peso-fixo-e-familia";
 /* v78: versão do MODELO separada da versão do BUILD. Mudança visual não é
    mudança de semântica: só sobe quando peso, fórmula, corte ou trava mudam.
    Toda observação gravada carrega as duas, pra que seis meses depois dê pra
    saber sob qual regra aquela leitura foi produzida. */
-const MODEL_VERSION = "m1-2026-08-14";
+const MODEL_VERSION = "m2-2026-08-15";
 
 // indicador padrão — auto = tenta buscar sozinho; manual = você preenche
 function ind(label, source, note, excludeFromScore){
@@ -3207,7 +3207,7 @@ function pesoIndicadorTxt(motorKey, indKey){
   const inchado = nom > 0 && efet > nom * 1.15;
   return `<div class="ind-note" style="font-size:9.5px;color:${inchado ? "var(--gold)" : "var(--text-faint)"};">`
     + `peso agora: ${pctEf}% da decisão`
-    + (inchado ? ` · valeria ${pctNom}% com o motor completo — está inchado porque os outros indicadores dele estão vazios` : "")
+    + (inchado ? ` · nominal ${pctNom}% — está maior porque parte do sistema não respondeu` : "")
     + `</div>`;
 }
 
@@ -3221,17 +3221,15 @@ function pesoIndicadorTxt(motorKey, indKey){
    Esse número nunca esteve em lugar nenhum da tela. Sem ele, é impossível
    saber que uma medida de spread entre exchanges está respondendo por 15%
    da decisão. É a diferença entre entender o número e ser enganado por ele. */
+/* m2: o peso na tela sai do MESMO vetor que produz o score. Antes era uma
+   segunda conta, que concordava por coincidência. */
 function pesoEfetivoIndicador(motorKey, indKey){
-  const motor = S.motors[motorKey];
-  if(!motor) return 0;
-  if(valorVigente(motorKey, indKey) === null) return 0; // não pontua = peso zero
-  const vivos = indicadoresVotantes(motorKey).filter(function(ik){
-    return valorVigente(motorKey, ik) !== null;
-  });
-  if(!vivos.length) return 0;
-  const pesos = pesosEfetivos();
-  const doMotor = pesos[motorKey] ? pesos[motorKey].efetivo : 0;
-  return doMotor / vivos.length;
+  const vetor = contribuicoesCanonicas();
+  const alvo = motorKey + "." + indKey;
+  const item = vetor.itens.find(function(i){ return i.id === alvo; });
+  if(!item) return 0;
+  const denom = Math.max(vetor.massaObservada, vetor.massaTotal / RENORM_MAX);
+  return denom > 0 ? item.peso / denom : 0;
 }
 
 /* Quanto ELE valeria se os companheiros de motor estivessem preenchidos.
@@ -3239,14 +3237,15 @@ function pesoEfetivoIndicador(motorKey, indKey){
    motores aplicada. Comparar o efetivo (renormalizado) com o nominal puro
    misturaria dois efeitos diferentes: motor faltando no sistema e indicador
    faltando no motor. O que esta linha quer denunciar é só o segundo. */
+/* quanto ele valeria com TODO o sistema preenchido: o coeficiente nominal, já
+   limitado por família, sobre a massa total. Com peso fixo, este número deixa
+   de variar conforme os vizinhos — que é exatamente a diferença do m2. */
 function pesoSeMotorCompleto(motorKey, indKey){
-  const motor = S.motors[motorKey];
-  if(!motor) return 0;
-  const todos = indicadoresVotantes(motorKey).length;
-  if(!todos) return 0;
-  const pesos = pesosEfetivos();
-  const doMotor = pesos[motorKey] ? pesos[motorKey].efetivo : 0;
-  return doMotor / todos;
+  const vetor = contribuicoesCanonicas();
+  const alvo = motorKey + "." + indKey;
+  const nom = vetor.nominais.find(function(n){ return n.id === alvo; });
+  if(!nom || vetor.massaTotal <= 0) return 0;
+  return nom.peso / vetor.massaTotal;
 }
 
 /* =====================================================================
@@ -4122,19 +4121,135 @@ function computeCobertura(){
   return total > 0 ? coberto / total : 0;
 }
 
-function computeMarketState(){
-  let weightedSum = 0, weightUsed = 0;
-  const composites = {};
-  Object.entries(S.motors).forEach(([key,motor])=>{
-    const c = motorComposite(key);
-    composites[key] = c;
-    if(c !== null){
-      weightedSum += c * motor.weight;
-      weightUsed += motor.weight;
+/* =====================================================================
+   § VETOR CANÔNICO DE CONTRIBUIÇÕES (m2)
+   =====================================================================
+   TRÊS MUDANÇAS DE MODELO, DE UMA VEZ. Cada uma sozinha zeraria a série;
+   juntas, custam uma virada só.
+
+   1. PESO NOMINAL FIXO. Cada indicador tem um coeficiente que NÃO depende de
+      quem mais está preenchido: w_motor ÷ número total de votantes do motor.
+      Antes, o prêmio Coinbase sozinho no Institucional herdava os 15% inteiros
+      — quatro vezes o que lhe cabe. Ele não ficou mais confiável; ficou
+      sozinho. A topologia de disponibilidade pesava mais que a evidência.
+
+   2. AUSÊNCIA VIRA MASSA NÃO OBSERVADA, não redistribuição. Indicador que
+      falta não doa o peso dele aos vizinhos: some do numerador e PERMANECE no
+      denominador. Consequência intencional: cobertura baixa puxa o score para
+      zero, porque menos evidência deve significar menos convicção — e não a
+      mesma convicção repartida entre menos gente.
+
+      Concessão prática: renormalização limitada a 1,25× do nominal. Acima de
+      ~80% de massa observada o comportamento é o de antes; abaixo disso o
+      score é amortecido proporcionalmente. É o meio-termo que a auditoria
+      propôs, e está aqui como número versionado, não como verdade.
+
+   3. TETO POR FAMÍLIA LATENTE. DXY, EUR/USD, Fed Funds, Treasury 10a, curva e
+      M2 são um fator econômico só votando seis vezes. O teto limita quanto um
+      mesmo fator pode pesar, independentemente de quantas APIs o expõem.
+
+      Os tetos abaixo são JULGAMENTO DECLARADO, não estimativa. Estimá-los
+      contra o histórico de hoje seria o data snooping que a linha de base
+      proíbe. Entram como restrição de pesquisa, versionados, para serem
+      substituídos por estimativa quando houver série suficiente.
+   ===================================================================== */
+const RENORM_MAX = 1.25;
+
+const FAMILIA_TETO = {
+  liquidez_condicoes: 0.25,   // hoje 23,7% — no limite
+  institucional:      0.20,   // hoje 15,0%
+  posicionamento:     0.15,   // hoje 12,5%
+  tendencia_residual: 0.12,   // hoje  5,7%
+  eventos_exogenos:   0.10,   // hoje 12,5% — ÚNICO teto que corta hoje
+  risk_appetite:      0.10,
+  risco_implicito:    0.10,
+  valuation_onchain:  0.12,
+  realizacao_fluxos:  0.12,
+  cambial:            0.08,   // DXY e euro medem a mesma coisa
+  uso_rede:           0.08,
+  mineracao:          0.05,
+  microestrutura:     0.05    // book imbalance oscilou 43 pontos numa hora
+};
+
+function familiaDoIndicador(motorKey, indKey){
+  const spec = specDoIndicador(motorKey, indKey);
+  return (spec && spec.family) ? spec.family : "sem_familia";
+}
+
+/* Devolve o vetor de contribuições já com as regras de motor aplicadas (teto
+   geopolítico, agregação de eventos) e os pesos já limitados por família.
+   TUDO que precisa de peso — score, horizontes, painel — sai daqui. Duas
+   implementações paralelas da mesma contribuição foi o erro que a v70, a v72
+   e a v73 corrigiram em outras camadas; não vamos recriá-lo aqui. */
+function contribuicoesCanonicas(){
+  const itens = [];
+  const nominais = []; // todos os votantes, presentes ou não
+
+  Object.entries(S.motors).forEach(function(par){
+    const mk = par[0], motor = par[1];
+
+    if(mk === "eventos"){
+      // eventos agrega por severidade com decaimento: entra como bloco único
+      const c = motorComposite(mk);
+      nominais.push({ id: mk + ".composto", motor: mk, indicador: "composto",
+                      familia: "eventos_exogenos", peso: motor.weight });
+      if(c !== null) itens.push({ id: mk + ".composto", motor: mk, indicador: "composto",
+                                  familia: "eventos_exogenos", valor: c, peso: motor.weight });
+      return;
     }
+
+    const votantes = indicadoresVotantes(mk);
+    if(!votantes.length) return;
+    const pesoInd = motor.weight / votantes.length; // FIXO: não depende de quem faltou
+
+    const presentes = votantes.filter(function(ik){ return valorVigente(mk, ik) !== null; });
+    // teto do motor (Geopolítico) vira translação, preservando as diferenças
+    // relativas entre os indicadores — mesma técnica dos relógios na v75
+    let ajuste = 0;
+    if(presentes.length){
+      const bruto = presentes.reduce(function(a,ik){ return a + valorVigente(mk, ik); }, 0) / presentes.length;
+      ajuste = aplicarTeto(mk, bruto) - bruto;
+    }
+
+    votantes.forEach(function(ik){
+      const fam = familiaDoIndicador(mk, ik);
+      nominais.push({ id: mk + "." + ik, motor: mk, indicador: ik, familia: fam, peso: pesoInd });
+      const v = valorVigente(mk, ik);
+      if(v !== null) itens.push({ id: mk + "." + ik, motor: mk, indicador: ik,
+                                  familia: fam, valor: v + ajuste, peso: pesoInd });
+    });
   });
-  const score = weightUsed > 0 ? (weightedSum / weightUsed) : 0;
-  const completeness = weightUsed; // 0..1, soma dos pesos preenchidos
+
+  /* teto por família: se a massa NOMINAL de uma família passa do limite, todos
+     os indicadores dela encolhem proporcionalmente. O corte é sobre o nominal,
+     não sobre o observado — senão o teto apertaria e afrouxaria conforme as
+     APIs respondem, que é o defeito que estamos eliminando. */
+  const massaFamilia = {};
+  nominais.forEach(function(n){ massaFamilia[n.familia] = (massaFamilia[n.familia] || 0) + n.peso; });
+  const fator = {};
+  Object.keys(massaFamilia).forEach(function(f){
+    const teto = FAMILIA_TETO[f];
+    fator[f] = (teto && massaFamilia[f] > teto) ? teto / massaFamilia[f] : 1;
+  });
+  nominais.forEach(function(n){ n.peso *= fator[n.familia]; });
+  itens.forEach(function(i){ i.peso *= fator[i.familia]; });
+
+  const massaTotal = nominais.reduce(function(a,n){ return a + n.peso; }, 0);
+  const massaObservada = itens.reduce(function(a,i){ return a + i.peso; }, 0);
+  return { itens, nominais, massaTotal, massaObservada, massaFamilia, fatorFamilia: fator };
+}
+
+function computeMarketState(){
+  const composites = {};
+  Object.entries(S.motors).forEach(([key])=>{ composites[key] = motorComposite(key); });
+
+  const vetor = contribuicoesCanonicas();
+  const soma = vetor.itens.reduce(function(a,i){ return a + i.valor * i.peso; }, 0);
+  /* denominador: a massa observada, mas nunca menos que a massa total dividida
+     pelo limite de renormalização. É o que impede a ausência de virar convicção. */
+  const denom = Math.max(vetor.massaObservada, vetor.massaTotal / RENORM_MAX);
+  const score = denom > 0 ? (soma / denom) : 0;
+  const completeness = vetor.massaTotal > 0 ? vetor.massaObservada / vetor.massaTotal : 0;
 
   // divergência: quanto os motores preenchidos discordam entre si (desvio-padrão)
   // divergência PONDERADA: Técnico (4%) discordar não é o mesmo que Macro (28%)
@@ -4159,7 +4274,10 @@ function computeMarketState(){
   else if(score <= -40) label = "Bear forte";
   else if(score <= -15) label = "Bear";
 
-  return { score, completeness, label, composites, divergence, cobertura: computeCobertura(), pesos: pesosEfetivos() };
+  return { score, completeness, label, composites, divergence,
+           cobertura: computeCobertura(), pesos: pesosEfetivos(),
+           massaObservada: vetor.massaObservada, massaTotal: vetor.massaTotal,
+           amortecido: vetor.massaObservada < vetor.massaTotal / RENORM_MAX };
 }
 
 function volatilityLabel(){

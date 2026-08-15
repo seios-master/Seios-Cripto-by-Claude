@@ -979,7 +979,7 @@ const STORAGE_KEY = "seios_btc_v2";
 // fonte única da versão — usada no rodapé, no histórico e nos exports.
 // Muda toda vez que a fórmula de score/pesos muda, pra nunca misturar
 // decisões de regras diferentes como se fossem comparáveis.
-const BUILD_VERSION = "2026-08-15.87-geo-na-tabela";
+const BUILD_VERSION = "2026-08-15.88-por-indicador";
 /* v78: versão do MODELO separada da versão do BUILD. Mudança visual não é
    mudança de semântica: só sobe quando peso, fórmula, corte ou trava mudam.
    Toda observação gravada carrega as duas, pra que seis meses depois dê pra
@@ -5093,6 +5093,27 @@ async function runScoreBacktest(){
     const motorBuckets = {};
     motorKeys.forEach(k=> motorBuckets[k] = { bull: [], bear: [] });
 
+    /* =====================================================================
+       § CALIBRAÇÃO POR INDICADOR (v88)
+       =====================================================================
+       Até aqui o teste dizia se um MOTOR carregava sinal. Não servia pra saber
+       se o problema é o motor ou um indicador dentro dele — e a diferença
+       importa: o Técnico junta RSI (leitura contrária), tendência 30d e MM50
+       (leitura a favor). Metade do motor aposta contra a outra metade. Um
+       composto perto de zero pode ser "sem sinal" ou pode ser dois sinais
+       fortes se cancelando, e as duas coisas pedem tratamento oposto.
+
+       Isto NÃO autoriza mudar peso. Autoriza formular hipótese pra testar
+       fora da amostra, quando houver amostra. */
+    const indBuckets = {};
+    function registraIndicador(id, valor, fwd){
+      if(valor === null || valor === undefined || !Number.isFinite(valor)) return;
+      if(!indBuckets[id]) indBuckets[id] = { bull: [], bear: [], n: 0 };
+      indBuckets[id].n++;
+      if(valor >= 15) indBuckets[id].bull.push(fwd);
+      else if(valor <= -15) indBuckets[id].bear.push(fwd);
+    }
+
     let acaoAnterior = null; // v77: histerese precisa de memória entre os dias
     for(let i=50; i<closes.length-forwardDays; i++){
       const date = dates[i];
@@ -5188,6 +5209,35 @@ async function runScoreBacktest(){
       const geopolitico = geoEpu !== undefined
         ? aplicarTetoPuro("geopolitico", norm("geopolitico.epu", geoEpu)) : null;
       if(geopolitico !== null) sourcesUsed.add("Geopolítico parcial (EPU/FRED)");
+
+      /* v88: cada indicador é registrado isolado, com o MESMO retorno futuro.
+         Nenhum cálculo novo — são os valores que o motor já usava, agora
+         guardados um a um em vez de só a média deles. */
+      { const fwdInd = ((closes[i+forwardDays]-closes[i])/closes[i])*100;
+        registraIndicador("tecnico.tendencia", clamp(trendPct*4,-100,100), fwdInd);
+        registraIndicador("tecnico.momentum",  clamp(momPct*12,-100,100), fwdInd);
+        if(rsi !== null) registraIndicador("tecnico.rsi", clamp(-(rsi-50)*2,-100,100), fwdInd);
+        if(sma !== null) registraIndicador("tecnico.mediaMovel", clamp(((closes[i]-sma)/sma*100)*8,-100,100), fwdInd);
+        registraIndicador("sentimento.fearGreed", sentimento, fwdInd);
+        registraIndicador("derivativos.funding", derivativos, fwdInd);
+        registraIndicador("institucional.coinbasePremium", institucional, fwdInd);
+        if(hrScore !== null) registraIndicador("onchain.hashrate", hrScore, fwdInd);
+        if(addrScore !== null) registraIndicador("onchain.activeAddresses", addrScore, fwdInd);
+        { const mv = (onchainMaps.mvrv && onchainMaps.mvrv[date] !== undefined)
+                     ? onchainMaps.mvrv[date] : cmMvrvByDate[date];
+          if(mv !== undefined) registraIndicador("onchain.mvrv", mv, fwdInd); }
+        ["juros","inflacao","liquidez","dxy","curva"].forEach(k=>{
+          const v = valorDeMapaAte(macroMaps[k], date);
+          if(v !== undefined) registraIndicador("macro."+k, v, fwdInd);
+        });
+        if(agPet   !== undefined) registraIndicador("ativosGlobais.petroleo", norm("ativosGlobais.petroleo", agPet), fwdInd);
+        if(agEur   !== undefined) registraIndicador("ativosGlobais.euro", norm("ativosGlobais.euro", agEur), fwdInd);
+        if(agSp    !== undefined) registraIndicador("ativosGlobais.sp500", norm("ativosGlobais.sp500", agSp), fwdInd);
+        if(agCobre !== undefined) registraIndicador("ativosGlobais.cobre", norm("ativosGlobais.cobre", agCobre), fwdInd);
+        if(agVix   !== undefined) registraIndicador("ativosGlobais.vix", norm("ativosGlobais.vix", agVix), fwdInd);
+        if(agJ10   !== undefined) registraIndicador("ativosGlobais.juros10a", norm("ativosGlobais.juros10a", agJ10), fwdInd);
+        if(geoEpu  !== undefined) registraIndicador("geopolitico.epu", norm("geopolitico.epu", geoEpu), fwdInd);
+      }
 
       const composites = { macro, institucional, onchain, derivativos, tecnico, sentimento, ativosGlobais, geopolitico, eventos:null };
       const { score, completeness } = aggregateScore(composites);
@@ -5304,6 +5354,41 @@ async function runScoreBacktest(){
               <td>${r.winRate.toFixed(0)}%</td>
             </tr>
           `).join("")}
+        </tbody>
+      </table>
+
+      <div style="font-family:var(--font-mono);font-size:10px;color:var(--text-faint);text-transform:uppercase;letter-spacing:.06em;margin:20px 0 10px;border-top:1px solid var(--line-soft);padding-top:16px;">
+        Calibração por INDICADOR — o motor é o problema ou é alguém dentro dele?
+      </div>
+      <div style="font-family:var(--font-mono);font-size:10.5px;color:var(--text-faint);margin-bottom:10px;">
+        Cada indicador isolado, contra o mesmo retorno futuro. Um motor pode parecer "sem sinal"
+        quando na verdade tem dois indicadores fortes se cancelando — e as duas situações pedem
+        tratamento oposto. <strong>Isto não autoriza mudar peso:</strong> é o passado recente, num
+        regime só, com janelas sobrepostas. Serve pra formular hipótese, não pra confirmar.
+      </div>
+      <table class="hist">
+        <thead><tr><th>Indicador</th><th>Motor</th><th>Bullish (≥15) — 30d</th><th>Bearish (≤−15) — 30d</th><th>Separação</th></tr></thead>
+        <tbody>
+          ${Object.keys(indBuckets).sort().map(function(id){
+            const b = indBuckets[id];
+            const bullAvg = b.bull.length ? avg(b.bull) : null;
+            const bearAvg = b.bear.length ? avg(b.bear) : null;
+            let leitura = "amostra insuficiente", cor = "var(--text-faint)";
+            if(b.bull.length >= 8 && b.bear.length >= 8){
+              const sep = bullAvg - bearAvg;
+              if(sep > 1){ leitura = "✓ separa " + sep.toFixed(1) + "pp"; cor = "var(--teal)"; }
+              else if(sep < -1){ leitura = "⚠ invertido " + Math.abs(sep).toFixed(1) + "pp"; cor = "var(--brick)"; }
+              else { leitura = "≈ não separa"; cor = "var(--gold)"; }
+            }
+            const partes = id.split(".");
+            return `<tr>
+              <td style="font-family:var(--font-mono);font-size:11px;">${esc(partes[1])}</td>
+              <td style="font-size:10.5px;color:var(--text-faint);">${esc(partes[0])}</td>
+              <td>${bullAvg === null ? "—" : bullAvg.toFixed(1)+"% <span style=\"font-size:10px;color:var(--text-faint);\">("+b.bull.length+"d)</span>"}</td>
+              <td>${bearAvg === null ? "—" : bearAvg.toFixed(1)+"% <span style=\"font-size:10px;color:var(--text-faint);\">("+b.bear.length+"d)</span>"}</td>
+              <td style="color:${cor};">${leitura}</td>
+            </tr>`;
+          }).join("")}
         </tbody>
       </table>
 

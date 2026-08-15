@@ -979,7 +979,7 @@ const STORAGE_KEY = "seios_btc_v2";
 // fonte única da versão — usada no rodapé, no histórico e nos exports.
 // Muda toda vez que a fórmula de score/pesos muda, pra nunca misturar
 // decisões de regras diferentes como se fossem comparáveis.
-const BUILD_VERSION = "2026-08-15.79-lag-e-painel";
+const BUILD_VERSION = "2026-08-15.80-peso-visivel";
 /* v78: versão do MODELO separada da versão do BUILD. Mudança visual não é
    mudança de semântica: só sobe quando peso, fórmula, corte ou trava mudam.
    Toda observação gravada carrega as duas, pra que seis meses depois dê pra
@@ -2769,6 +2769,15 @@ async function refreshMarketData(){
   try{ S.market.acaoVigente = computeDecision().action; }catch(e){ /* estado parcial: mantém a anterior */ }
   // v78: grava a série point-in-time da rodada. Falha aqui não derruba a
   // coleta nem a tela — mas aparece no log, porque série perdida não volta.
+  /* v80: os manuais nunca entravam na série. Oito indicadores que VOTAM no
+     score — três deles no Institucional, 15% do peso — não deixavam rastro
+     nenhum, porque a gravação estava pendurada no setAuto e manual não passa
+     por lá. Sem isso, daqui a seis meses metade do vetor de decisão de hoje
+     seria invisível, e nenhuma calibragem posterior fecharia a conta.
+     Grava inclusive os VAZIOS: saber que a leitura de tensão geopolítica
+     estava em branco nesta decisão é informação, não ausência dela. */
+  registrarManuaisDaRodada();
+
   gravarObservacoesDaRodada()
     .then(function(n){ if(n) logFinal(`📈 ${n} observações point-in-time gravadas`); })
     .catch(function(e){ logFinal("⚠ falha ao gravar observações: " + e.message); });
@@ -3163,6 +3172,60 @@ function pesosEfetivos(){
   return out;
 }
 
+/* linha de peso na tela: só aparece quando o indicador está pontuando, e só
+   destaca quando o efetivo passou do nominal — que é o caso interessante,
+   o indicador que engordou porque os vizinhos estão vazios */
+function pesoIndicadorTxt(motorKey, indKey){
+  const efet = pesoEfetivoIndicador(motorKey, indKey);
+  if(efet <= 0) return "";
+  const nom = pesoSeMotorCompleto(motorKey, indKey);
+  const pctEf = (efet*100).toFixed(2).replace(".", ",");
+  const pctNom = (nom*100).toFixed(2).replace(".", ",");
+  const inchado = nom > 0 && efet > nom * 1.15;
+  return `<div class="ind-note" style="font-size:9.5px;color:${inchado ? "var(--gold)" : "var(--text-faint)"};">`
+    + `peso agora: ${pctEf}% da decisão`
+    + (inchado ? ` · valeria ${pctNom}% com o motor completo — está inchado porque os outros indicadores dele estão vazios` : "")
+    + `</div>`;
+}
+
+/* PESO EFETIVO POR INDICADOR (v80).
+   O peso nominal do motor é dividido entre os indicadores que TÊM valor
+   naquele instante. Consequência: hoje, com os três manuais do Institucional
+   vazios, o prêmio Coinbase carrega os 15% inteiros do motor — quatro vezes
+   os 3,75% que ele teria se os campos estivessem preenchidos. Ele não ficou
+   mais confiável; só ficou sozinho.
+
+   Esse número nunca esteve em lugar nenhum da tela. Sem ele, é impossível
+   saber que uma medida de spread entre exchanges está respondendo por 15%
+   da decisão. É a diferença entre entender o número e ser enganado por ele. */
+function pesoEfetivoIndicador(motorKey, indKey){
+  const motor = S.motors[motorKey];
+  if(!motor) return 0;
+  if(valorVigente(motorKey, indKey) === null) return 0; // não pontua = peso zero
+  const vivos = indicadoresVotantes(motorKey).filter(function(ik){
+    return valorVigente(motorKey, ik) !== null;
+  });
+  if(!vivos.length) return 0;
+  const pesos = pesosEfetivos();
+  const doMotor = pesos[motorKey] ? pesos[motorKey].efetivo : 0;
+  return doMotor / vivos.length;
+}
+
+/* Quanto ELE valeria se os companheiros de motor estivessem preenchidos.
+   Calculado na MESMA base do efetivo — isto é, já com a renormalização entre
+   motores aplicada. Comparar o efetivo (renormalizado) com o nominal puro
+   misturaria dois efeitos diferentes: motor faltando no sistema e indicador
+   faltando no motor. O que esta linha quer denunciar é só o segundo. */
+function pesoSeMotorCompleto(motorKey, indKey){
+  const motor = S.motors[motorKey];
+  if(!motor) return 0;
+  const todos = indicadoresVotantes(motorKey).length;
+  if(!todos) return 0;
+  const pesos = pesosEfetivos();
+  const doMotor = pesos[motorKey] ? pesos[motorKey].efetivo : 0;
+  return doMotor / todos;
+}
+
 /* =====================================================================
    § SAÚDE DA LEITURA (v60) — duas medidas que faltavam
    =====================================================================
@@ -3387,6 +3450,27 @@ function registrarObservacao(motorKey, indKey, score, meta){
   });
 }
 
+function registrarManuaisDaRodada(){
+  Object.entries(S.motors).forEach(function(par){
+    const mk = par[0], motor = par[1];
+    Object.keys(motor.indicators).forEach(function(ik){
+      const ind = motor.indicators[ik];
+      if(!(ind.source === "manual" || ind.locked)) return;
+      const f = frescorDoIndicador(mk, ik);
+      const preenchido = ind.value !== null && ind.value !== undefined;
+      registrarObservacao(mk, ik, preenchido ? ind.value : null, {
+        bruto: preenchido ? ind.value : null,
+        referenceAt: ind.enteredAt || null, // quando ESTA opinião foi digitada
+        nota: ind.note || null,
+        qualidade: !preenchido ? "vazio"
+                 : f.expirado ? "vencido"
+                 : f.semCarimbo ? "sem_carimbo"
+                 : "ok"
+      });
+    });
+  });
+}
+
 function gravarObservacoesDaRodada(){
   if(!OBS_BUFFER.length) return Promise.resolve(0);
   const lote = OBS_BUFFER.slice();
@@ -3441,6 +3525,18 @@ function openSnapDB(){
 }
 
 // monta o vetor completo da leitura atual
+/* leitura gravada sob o modelo atual? Só estas podem sustentar estatística. */
+function snapshotDoModeloAtual(snap){
+  return !!snap && snap.modelo === MODEL_VERSION;
+}
+function separarPorModelo(snaps){
+  const atual = [], legado = [];
+  (snaps || []).forEach(function(s){
+    (snapshotDoModeloAtual(s) ? atual : legado).push(s);
+  });
+  return { atual, legado };
+}
+
 function montarSnapshot(results){
   const ms = computeMarketState();
   const hs = computeHorizonScores();
@@ -3479,6 +3575,13 @@ function montarSnapshot(results){
   return {
     ts: new Date().toISOString(),
     build: BUILD_VERSION,
+    /* v80: versão do MODELO, separada da build. Snapshot sem este campo foi
+       gravado antes da v78, sob fórmulas que as auditorias mostraram estarem
+       erradas: clamp em vez de escalaSuave, cobertura contando quem não vota,
+       cortes sem histerese. Ele continua existindo e continua legível — mas
+       não entra em nenhuma estatística de acerto, porque misturar modelos
+       produz um número que não descreve nenhum dos dois. */
+    modelo: MODEL_VERSION,
     preco: S.market.price === undefined ? null : S.market.price,
     variacao24h: S.market.change24h === undefined ? null : S.market.change24h,
     score: ms.score,
@@ -5450,6 +5553,7 @@ function renderIndicatorRow(motorKey, indKey, d){
           <div class="ind-bar-fill" style="width:${pct}%; background:${barColor(d.value)};"></div>
         </div>
         <div class="ind-note">${valorTxt}${d.note ? " · " + esc(d.note) : ""}${idadeTxt}</div>
+        ${pesoIndicadorTxt(motorKey, indKey)}
       </div>
       <div class="ind-edit-col">
         ${showSlider ? `<input type="range" min="-100" max="100" value="${d.value===null?0:d.value}" data-motor="${motorKey}" data-ind="${indKey}">` : ""}
@@ -7809,7 +7913,7 @@ document.addEventListener("click", (e)=>{
       { n: 777, o: "detectar um edge fino (55% vs 50%)" }
     ];
     const proximo = MARCOS.find(function(m){ return obs1d < m.n; }) || MARCOS[MARCOS.length-1];
-    txt += "\nobservações de 1 dia já vencidas: " + obs1d + "\n";
+    txt += "\nleituras com desfecho de 1 dia já apurado: " + obs1d + "\n";
     MARCOS.forEach(function(m){
       const marca = obs1d >= m.n ? "✓" : (m === proximo ? "→" : " ");
       txt += "  " + marca + " " + String(m.n).padStart(3) + " · " + m.o +
@@ -7837,8 +7941,11 @@ document.addEventListener("click", (e)=>{
     const eye = document.getElementById("brandEyebrow");
     if(eye){
       const o1 = snaps.filter(function(x){ return x.retornos && typeof x.retornos.d1 === "number"; }).length;
+      /* v80: "vencida" significa o OPOSTO no resto do sistema — dado velho que
+         não pontua mais. Aqui queria dizer "amadureceu, já dá pra comparar com
+         o que o mercado fez depois". Duas palavras contrárias na mesma tela. */
       eye.textContent = "SEIOS Cripto · Coletando — " + snaps.length + " leituras · " +
-                        o1 + " observações vencidas";
+                        o1 + " com desfecho apurado";
     }
     // com o painel fechado por padrão, um alerta que só vive lá dentro deixa de
     // ser alerta. O detector existe justamente para aparecer sem ser procurado.
@@ -8402,22 +8509,42 @@ document.addEventListener("click", (e)=>{
   }
 
   async function atualizar(){
-    const snaps = await lerSnapshots();
+    const todas = await lerSnapshots();
     if(!corpo) return;
-    if(!snaps.length){ corpo.textContent = "Nenhuma leitura gravada ainda."; return; }
+    if(!todas.length){ corpo.textContent = "Nenhuma leitura gravada ainda."; return; }
+
+    /* v80: leitura gravada sob modelo antigo aparece no REGISTRO (é histórico
+       legítimo e a única testemunha do que o sistema fazia antes), mas fica
+       FORA de toda estatística. Média que mistura dois modelos não descreve
+       nenhum dos dois — e a diferença medida entre eles chegou a 23,8 pontos
+       por indicador. Marcar em vez de apagar: proteção igual, sem destruir. */
+    const grupos = separarPorModelo(todas);
+    const snaps = grupos.atual;
+    const legado = grupos.legado;
 
     const dias = new Set(snaps.map(function(s){ return s.ts.slice(0,10); })).size;
     let t = "";
 
-    /* --- 1. registro --- */
+    if(legado.length){
+      t += "⚠ " + legado.length + " leitura(s) de modelo anterior (pré-" + MODEL_VERSION + ")" +
+           " aparecem no registro abaixo mas NÃO entram em nenhuma média.\n" +
+           "   Foram calculadas com fórmulas que as auditorias corrigiram.\n\n";
+    }
+    if(!snaps.length){
+      t += "Nenhuma leitura sob o modelo atual ainda — as estatísticas começam\n" +
+           "a existir a partir da próxima coleta.\n\n";
+    }
+
+    /* --- 1. registro (inclui legado, marcado) --- */
     t += "REGISTRO — últimas leituras\n";
-    snaps.slice(-12).reverse().forEach(function(s){
+    todas.slice(-12).reverse().forEach(function(s){
       const r = s.retornos || {};
       t += "  " + new Date(s.ts).toLocaleString("pt-BR").replace(",","") +
            "  " + String(fmt(s.score,1)).padStart(6) +
            "  " + String(s.rotulo||"—").padEnd(8) +
            "  $" + (s.preco ? Math.round(s.preco).toLocaleString("en-US") : "—") +
-           "   1d " + fmt(r.d1,2) + "  3d " + fmt(r.d3,2) + "  30d " + fmt(r.d30,2) + "\n";
+           "   1d " + fmt(r.d1,2) + "  3d " + fmt(r.d3,2) + "  30d " + fmt(r.d30,2) +
+           (snapshotDoModeloAtual(s) ? "" : "  ⟵ modelo antigo") + "\n";
     });
     t += "  (retorno vazio = o prazo ainda não venceu)\n";
 
@@ -8486,14 +8613,15 @@ document.addEventListener("click", (e)=>{
     const vencidas = snaps.filter(function(s){ return s.retornos && typeof s.retornos.d1 === "number"; });
     const nef1 = vencidas.length;
     const diasVencidos = new Set(vencidas.map(function(s){ return s.ts.slice(0,10); })).size;
-    t += "\n────────\n" + snaps.length + " leitura(s) · " + dias + " dia(s) · " +
-         nef1 + " com retorno de 1 dia já vencido (em " + diasVencidos + " dia(s))\n";
+    t += "\n────────\n" + snaps.length + " leitura(s) sob o modelo atual · " + dias + " dia(s) · " +
+         nef1 + " com desfecho de 1 dia apurado (em " + diasVencidos + " dia(s))\n" +
+         (legado.length ? legado.length + " leitura(s) de modelo anterior, fora das médias\n" : "");
     // v68 — quando as observações vêm todas do mesmo punhado de dias, TODA
     // média acima é o mesmo número repetido, e as linhas passam a parecer
     // descoberta quando são a mesma observação vista de ângulos diferentes.
     // Melhor dizer isso do que deixar a tabela sugerir o contrário.
     if(nef1 > 0 && diasVencidos < 3){
-      t += "⚠ As " + nef1 + " observações vencidas vêm de apenas " + diasVencidos +
+      t += "⚠ As " + nef1 + " leituras com desfecho vêm de apenas " + diasVencidos +
            " dia(s) — elas compartilham quase o mesmo futuro.\n" +
            "   Por isso praticamente todas as médias acima dão o MESMO valor.\n" +
            "   Isso não é padrão descoberto: é a mesma observação repetida.\n";

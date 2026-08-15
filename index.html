@@ -979,7 +979,7 @@ const STORAGE_KEY = "seios_btc_v2";
 // fonte única da versão — usada no rodapé, no histórico e nos exports.
 // Muda toda vez que a fórmula de score/pesos muda, pra nunca misturar
 // decisões de regras diferentes como se fossem comparáveis.
-const BUILD_VERSION = "2026-08-15.92-um-agregador";
+const BUILD_VERSION = "2026-08-15.92.1-render-isolado";
 /* v78: versão do MODELO separada da versão do BUILD. Mudança visual não é
    mudança de semântica: só sobe quando peso, fórmula, corte ou trava mudam.
    Toda observação gravada carrega as duas, pra que seis meses depois dê pra
@@ -6437,14 +6437,26 @@ function computeDecision(){
     .map(([key,motor])=>({ key, label:motor.label, composite: ms.composites[key], weight: motor.weight }))
     .filter(m=>m.composite !== null);
 
-  if(ms.pesos && ms.pesos._fator > 1.02){
-    const inflados = Object.entries(ms.pesos)
-      .filter(([k,v])=>k[0] !== "_" && v.vivo)
-      .map(([k,v])=>`${S.motors[k].label} ${(v.nominal*100).toFixed(0)}%→${(v.efetivo*100).toFixed(1)}%`);
-    const ausentes = Object.entries(ms.pesos)
-      .filter(([k,v])=>k[0] !== "_" && !v.vivo)
-      .map(([k])=>S.motors[k].label);
-    reasoning.push(`⚠ Pesos reescalonados: ${ausentes.length ? `sem dado em ${ausentes.join(", ")}` : "motores ausentes"}, os presentes passaram a valer ${ms.pesos._fator.toFixed(2)}x o declarado (${inflados.slice(0,3).join(" · ")}${inflados.length>3?" …":""}). O modelo executado não é o da etiqueta.`);
+  /* v92 — este aviso descrevia o m1 e ficou sem sentido.
+     Ele dizia "os presentes passaram a valer Nx o declarado", que era o que a
+     renormalização por motor fazia. No m2 não há inflação: o peso de cada
+     indicador é fixo e a ausência FICA no denominador. O que existe é o
+     contrário — amortecimento. E existe uma segunda coisa que a tela nunca
+     disse: o peso efetivo de um motor difere do nominal declarado mesmo com
+     tudo preenchido, porque o teto de família redistribui. */
+  if(ms.pesos){
+    const amort = ms.pesos._amortecimento;
+    if(amort !== undefined && amort < 0.98){
+      reasoning.push(`⚠ Score amortecido em ${((1-amort)*100).toFixed(1)}%: parte do sistema não tem dado e essa massa permanece no denominador. Menos evidência significa menos convicção — o score é puxado para zero, não redistribuído entre quem sobrou. Sem o amortecimento a leitura seria ${(ms.score/amort).toFixed(1)}.`);
+    }
+    const desviados = Object.entries(ms.pesos)
+      .filter(([k,v])=>k[0] !== "_" && v.vivo && S.motors[k] &&
+                       Math.abs(v.efetivo - S.motors[k].weight) > 0.02)
+      .sort((a,b)=>Math.abs(b[1].efetivo - S.motors[b[0]].weight) - Math.abs(a[1].efetivo - S.motors[a[0]].weight))
+      .map(([k,v])=>`${S.motors[k].label} ${(S.motors[k].weight*100).toFixed(0)}%→${(v.efetivo*100).toFixed(1)}%`);
+    if(desviados.length){
+      reasoning.push(`Peso real vs. etiqueta: ${desviados.slice(0,4).join(" · ")}${desviados.length>4?" …":""}. A diferença vem do teto por família e de quantos indicadores de cada motor têm dado — não é o nominal do cadastro que decide o score.`);
+    }
   }
 
   reasoning.push(`Cobertura: ${(ms.cobertura*100).toFixed(0)}% dos indicadores preenchidos e vigentes · ${(ms.completeness*100).toFixed(0)}% do peso tem pelo menos um dado · divergência ponderada entre motores: ${ms.divergence.toFixed(0)} · desvio-padrão diário dos retornos, janela de 30 fechamentos (sem anualizar): ${volatilityLabel()}`);
@@ -6871,15 +6883,33 @@ function renderState(){
       .map(i=>`${i.label}: ${i.value>=0?"+":""}${Math.round(i.value)}`);
     // peso EFETIVO, não o nominal: quando faltam motores, os presentes são
     // reescalonados e passam a valer mais do que a etiqueta dizia
+    /* v92 — ESTA LINHA DERRUBOU A TELA INTEIRA.
+       O texto lia `pe.fator`, um campo que a pesosEfetivos() do m1 devolvia e
+       a do m2 não devolve mais. No m1 `divergePeso` era raro (só quando um
+       motor morria); no m2 o peso efetivo difere do nominal declarado em quase
+       todo motor, então a condição passou a ser verdadeira SEMPRE e o acesso a
+       undefined.toFixed() estourava em cada motor. Uma exceção dentro do
+       renderMotors aborta o render inteiro: relógios somem, a barra de
+       relatórios nunca é ligada, e nenhum botão abre.
+
+       Eu troquei a forma de um objeto e conferi os consumidores que a busca
+       por "pesosEfetivos" encontrou — mas este lia o campo pelo nome, longe da
+       chamada. `node --check` não pega, e o harness não renderiza. A lição já
+       estava escrita desde a v69 e eu repeti: função existe, campo não.
+
+       Agora o texto explica o que o m2 realmente faz, sem campo fantasma. */
     const pe = ms.pesos ? ms.pesos[key] : null;
     const efet = pe && pe.vivo ? pe.efetivo : 0;
-    const divergePeso = pe && pe.vivo && Math.abs(efet - motor.weight) > 0.005;
+    const declarado = motor.weight;
+    const divergePeso = pe && pe.vivo && Math.abs(efet - declarado) > 0.005;
     const sub = !pe || !pe.vivo
-      ? `peso ${(motor.weight*100).toFixed(0)}% · sem dado`
+      ? `peso ${(declarado*100).toFixed(0)}% · sem dado`
       : (divergePeso
-          ? `peso ${(efet*100).toFixed(1)}% <span style="opacity:.55;">(nominal ${(motor.weight*100).toFixed(0)}%)</span>`
-          : `peso ${(motor.weight*100).toFixed(0)}%`);
-    const tooltip = `${motor.label}\nPeso nominal: ${(motor.weight*100).toFixed(0)}%${pe && pe.vivo ? `\nPeso EFETIVO nesta leitura: ${(efet*100).toFixed(2)}%` : "\nSem dado — não pontua"}${divergePeso ? `\n(motores ausentes fizeram os presentes valerem ${(pe.fator).toFixed(2)}x o declarado)` : ""}${c!==null?`\nLeitura: ${c.toFixed(0)}`:""}${indLines.length?"\n\n"+indLines.join("\n"):""}`;
+          ? `peso ${(efet*100).toFixed(1)}% <span style="opacity:.55;">(nominal ${(declarado*100).toFixed(0)}%)</span>`
+          : `peso ${(declarado*100).toFixed(0)}%`);
+    const motivoPeso = !divergePeso ? "" :
+      `\n(${efet > declarado ? "maior" : "menor"} que o nominal: o peso real é a soma dos indicadores DESTE motor que têm valor, sobre a massa observada${pe.indicadores ? ` — ${pe.indicadores} preenchido(s)` : ""})`;
+    const tooltip = `${motor.label}\nPeso nominal: ${(declarado*100).toFixed(0)}%${pe && pe.vivo ? `\nPeso EFETIVO nesta leitura: ${(efet*100).toFixed(2)}%` : "\nSem dado — não pontua"}${motivoPeso}${pe && pe.vivo ? `\nContribui ${pe.contribuicao >= 0 ? "+" : ""}${pe.contribuicao.toFixed(2)} pontos do score` : ""}${c!==null?`\nLeitura: ${c.toFixed(0)}`:""}${indLines.length?"\n\n"+indLines.join("\n"):""}`;
     return dialWidget(motor.label, pct, color, sub, 90, 8, 15, c===null?null:Math.round(c), tooltip);
   }).join("");
 
@@ -7704,20 +7734,58 @@ function renderHero(){
   }
 }
 
+/* =====================================================================
+   § RENDER ISOLADO (v92.1) — um painel que estoura não leva a tela junto
+   =====================================================================
+   Treze renders em sequência, sem rede de proteção. Uma exceção no terceiro
+   abortava os dez seguintes: os relógios sumiam, a barra de relatórios nunca
+   era ligada e nenhum botão abria. Da cadeira do usuário, "o sistema morreu".
+
+   Foi o que aconteceu na v92: uma única leitura de campo inexistente
+   (`pe.fator`) dentro do renderMotors apagou o aplicativo inteiro. O defeito
+   era de uma linha; o estrago foi total, e desproporcional por construção.
+
+   Agora cada bloco roda isolado. Se um falhar, os outros doze aparecem e a
+   tela mostra QUAL falhou e por quê, em vez de ficar preta. É o mesmo
+   princípio que já vale para as fontes de dados desde a v46 — cada uma falha
+   sozinha sem derrubar as outras. A tela não tinha ganhado isso ainda. */
 function renderAll(){
-  renderHero();
-  renderTicker();
-  renderMotors();
-  renderState();
-  renderScenarios();
-  renderPremises();
-  renderDecision();
-  renderHistory();
-  renderMemoryPanel();
-  renderCaseEnginePanel();
-  renderBackupWarning();
-  renderArchiveStatus();
-  renderCalibrationTimestamp();
+  const blocos = [
+    ["hero", renderHero], ["ticker", renderTicker], ["motores", renderMotors],
+    ["estado", renderState], ["cenários", renderScenarios], ["premissas", renderPremises],
+    ["decisão", renderDecision], ["histórico", renderHistory],
+    ["memória", renderMemoryPanel], ["case engine", renderCaseEnginePanel],
+    ["aviso de backup", renderBackupWarning], ["arquivo", renderArchiveStatus],
+    ["calibração", renderCalibrationTimestamp]
+  ];
+  const quebrados = [];
+  blocos.forEach(function(par){
+    try{ par[1](); }
+    catch(e){
+      quebrados.push({ nome: par[0], erro: (e && e.message) || String(e) });
+      console.error("[SEIOS] render de \"" + par[0] + "\" falhou:", e);
+    }
+  });
+  mostrarFalhasDeRender(quebrados);
+}
+
+/* a falha aparece NA TELA, não só no console — o usuário não abre o console,
+   e um painel silenciosamente vazio é indistinguível de "não há dados" */
+function mostrarFalhasDeRender(quebrados){
+  let el = document.getElementById("renderWarning");
+  if(!quebrados.length){ if(el) el.remove(); return; }
+  if(!el){
+    el = document.createElement("div");
+    el.id = "renderWarning";
+    el.style.cssText = "margin:12px 0;padding:11px 14px;border:1px solid #a33;" +
+      "background:rgba(120,20,20,.25);font-family:var(--font-mono);font-size:11.5px;" +
+      "color:#f99;line-height:1.6;";
+    const host = document.getElementById("deepDive") || document.body;
+    host.insertBefore(el, host.firstChild);
+  }
+  el.textContent = "⚠ " + quebrados.length + " painel(is) falharam ao desenhar e foram pulados: " +
+    quebrados.map(function(q){ return q.nome + " (" + q.erro + ")"; }).join(" · ") +
+    ". O resto da tela está correto. Reporte esta mensagem.";
 }
 
 // assíncrono de propósito — a contagem no IndexedDB não pode travar o

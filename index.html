@@ -974,17 +974,19 @@ const STORAGE_KEY = "seios_btc_v2";
 // fonte única da versão — usada no rodapé, no histórico e nos exports.
 // Muda toda vez que a fórmula de score/pesos muda, pra nunca misturar
 // decisões de regras diferentes como se fossem comparáveis.
-const BUILD_VERSION = "2026-08-15.90-alfred";
+const BUILD_VERSION = "2026-08-15.91-voto-morre-com-a-fonte";
 /* v78: versão do MODELO separada da versão do BUILD. Mudança visual não é
    mudança de semântica: só sobe quando peso, fórmula, corte ou trava mudam.
    Toda observação gravada carrega as duas, pra que seis meses depois dê pra
    saber sob qual regra aquela leitura foi produzida. */
-const MODEL_VERSION = "m2-2026-08-15";
+const MODEL_VERSION = "m3-2026-08-15";
 
 // indicador padrão — auto = tenta buscar sozinho; manual = você preenche
 function ind(label, source, note, excludeFromScore){
   return { label, source, value:null, note: note||"", locked:false, fetchFailed:false,
            excludeFromScore: !!excludeFromScore,
+           falhouEm: null, motivoFalha: "",   // v91: quando e por que a fonte caiu
+           bruto: null, brutoAt: null,        // v91: o número como a fonte entregou
            enteredAt: null }; // v76: quando ESTE número foi digitado por você
 }
 
@@ -2001,22 +2003,56 @@ function marcarSaturacao(ind, valor){
 function setAuto(motorKey, indKey, value, note, meta){
   const ind = S.motors[motorKey].indicators[indKey];
   ind.fetchFailed = false;
+  ind.falhouEm = null;
+  ind.motivoFalha = "";
   if(!ind.locked){
     ind.value = value;
     ind.note = note;
     marcarSaturacao(ind, value);
     ind.updatedAt = new Date().toISOString(); // carimbo por indicador — base de todo o controle de frescor
+    /* O BRUTO FICA (v91). O valor transformado não deve substituir o número
+       como a fonte entregou. Até aqui o bruto só ia para a observação, que
+       vive em IndexedDB e é assíncrona — então nada síncrono conseguia
+       consultá-lo, e os gatilhos de cenário acabaram lendo o bruto de dentro
+       da FRASE em português da nota. Guardar aqui elimina a necessidade. */
+    if(meta && meta.bruto !== null && meta.bruto !== undefined && Number.isFinite(Number(meta.bruto))){
+      ind.bruto = Number(meta.bruto);
+      ind.brutoAt = ind.updatedAt;
+    }
   }
   // registra SEMPRE, mesmo com o indicador travado em valor manual: a fonte
   // respondeu, e o que a fonte disse é o que a série precisa guardar
   try{ registrarObservacao(motorKey, indKey, value, Object.assign({ nota: note }, meta || {})); }
   catch(e){ /* observação nunca pode derrubar a coleta */ }
 }
-function setFailed(motorKey, indKey){
-  S.motors[motorKey].indicators[indKey].fetchFailed = true;
+/* A FALHA TEM QUE MATAR O VOTO (v91).
+   Até a v90 esta função acendia uma luz e mais nada: `value` continuava lá,
+   `updatedAt` continuava marcando o ÚLTIMO SUCESSO, e valorVigente() só
+   perguntava "existe valor?" e "venceu?". Como a idade era contada a partir do
+   último sucesso, um indicador cuja fonte morreu hoje seguia votando com o
+   número de ontem por 12h, 72h ou 336h — catorze dias, no caso do Macro.
+
+   E o efeito pior não era no score: era na COBERTURA. O valor obsoleto contava
+   como indicador vivo, então a trava de 70% de coleta automática — que existe
+   exatamente para dizer "não opine, as fontes caíram" — não disparava, porque
+   os cadáveres seguravam o número no alto. A defesa era desativada pela
+   própria coisa contra a qual ela defende.
+
+   Fail-open é perigoso. Ausência não pode virar valor benigno, e "a fonte
+   falhou agora" não é a mesma pergunta que "o dado está velho".
+
+   O valor NÃO é apagado: ele continua no estado como última leitura conhecida,
+   e a tela mostra isso, com a data e o motivo. O que muda é que ele deixa de
+   pontuar e deixa de contar como cobertura. Última leitura é informação
+   histórica; não é evidência de agora. */
+function setFailed(motorKey, indKey, motivo){
+  const ind = S.motors[motorKey].indicators[indKey];
+  ind.fetchFailed = true;
+  ind.falhouEm = new Date().toISOString();
+  ind.motivoFalha = motivo ? String(motivo).slice(0, 200) : "";
   // falha também é observação: sem isso a série fica com buracos mudos e não
   // dá pra distinguir "não coletei" de "a fonte estava fora do ar"
-  try{ registrarObservacao(motorKey, indKey, null, { qualidade: "falhou" }); }
+  try{ registrarObservacao(motorKey, indKey, null, { qualidade: "falhou", motivo: ind.motivoFalha }); }
   catch(e){}
 }
 
@@ -2201,6 +2237,17 @@ function frescorDoIndicador(motorKey, indKey){
     return { temValor:true, expirado: idade > limite, idadeHoras: idade, manual:true, limite };
   }
 
+  /* FONTE CAÍDA ≠ DADO VELHO (v91). Duas perguntas diferentes que o código
+     tratava como uma só. A idade abaixo é contada a partir do último SUCESSO,
+     então uma fonte que falhou hoje aparecia com idade zero e voto cheio.
+     `falhou` é reportado separado de `expirado` porque o motivo importa na
+     tela: "venceu" pede paciência, "a fonte caiu" pede olhar o log. */
+  if(ind.fetchFailed)
+    return { temValor:true, expirado:false, falhou:true, idadeHoras:null,
+             falhouEm: ind.falhouEm || null, motivoFalha: ind.motivoFalha || "",
+             ultimoSucessoEm: ind.updatedAt || null,
+             limite: validadeDoIndicador(motorKey, indKey) };
+
   const carimbo = ind.updatedAt || S.market.lastFetch; // estados antigos caem no último fetch geral
   if(!carimbo) return { temValor:true, expirado:false, idadeHoras:null };
 
@@ -2217,12 +2264,26 @@ function frescorDoIndicador(motorKey, indKey){
   return { temValor:true, expirado: idadeHoras > limite, idadeHoras, limite };
 }
 
-// o valor que efetivamente pontua: null quando venceu
+/* O valor que efetivamente pontua: null quando venceu OU quando a fonte
+   falhou nesta rodada. Uma porta só, e todo o resto do sistema passa por ela
+   — score, cobertura, cobertura automática, relógios de horizonte e vetor
+   canônico. Consertar aqui conserta os cinco; era esse o desenho. */
 function valorVigente(motorKey, indKey){
   const motor = S.motors[motorKey];
   const ind = motor && motor.indicators[indKey];
   if(!ind || ind.value === null || ind.value === undefined) return null;
-  return frescorDoIndicador(motorKey, indKey).expirado ? null : ind.value;
+  const f = frescorDoIndicador(motorKey, indKey);
+  return (f.expirado || f.falhou) ? null : ind.value;
+}
+
+/* A última leitura conhecida, para a TELA — nunca para a conta. Existe para
+   que "a fonte caiu" possa mostrar o número antigo com a data dele, em vez de
+   sumir sem explicação ou, pior, continuar parecendo leitura de agora. */
+function ultimaLeituraConhecida(motorKey, indKey){
+  const motor = S.motors[motorKey];
+  const ind = motor && motor.indicators[indKey];
+  if(!ind || ind.value === null || ind.value === undefined) return null;
+  return { valor: ind.value, em: ind.updatedAt || null, nota: ind.note || "" };
 }
 
 // manuais herdados de versões anteriores: vigentes, mas com idade desconhecida
@@ -2233,6 +2294,25 @@ function manuaisSemCarimbo(){
     Object.keys(motor.indicators).forEach(function(ik){
       const f = frescorDoIndicador(mk, ik);
       if(f.temValor && f.semCarimbo) out.push({ motor: motor.label, label: motor.indicators[ik].label });
+    });
+  });
+  return out;
+}
+
+/* os que têm valor mas cuja fonte caiu nesta rodada (v91) — separados dos
+   expirados de propósito: são problemas diferentes com respostas diferentes.
+   Expirado se resolve esperando a próxima coleta; fonte caída pode ser rede,
+   cota, bloqueio geográfico ou mudança de API, e pede olhar o log. */
+function indicadoresComFalha(){
+  const out = [];
+  Object.entries(S.motors).forEach(function(par){
+    const mk = par[0], motor = par[1];
+    Object.keys(motor.indicators).forEach(function(ik){
+      const f = frescorDoIndicador(mk, ik);
+      if(f.temValor && f.falhou){
+        out.push({ motor: motor.label, label: motor.indicators[ik].label,
+                   ultimoSucessoEm: f.ultimoSucessoEm, motivo: f.motivoFalha || "" });
+      }
     });
   });
   return out;
@@ -2337,7 +2417,7 @@ async function refreshMarketData(){
         setAuto("macro","juros", norm("macro.juros", delta), `Fed Funds ${latest.toFixed(2)}% (${delta>=0?"+":""}${delta.toFixed(2)}pp em ~90d)`, { bruto: delta, referenceAt: obs[0].date });
         results.ok.push("juros (FRED)");
         logDone(line, true, `${latest.toFixed(2)}%`);
-      }catch(e){ setFailed("macro","juros"); results.fail.push("juros (FRED)"); logDone(line, false, e.message); }
+      }catch(e){ setFailed("macro","juros", e && e.message); results.fail.push("juros (FRED)"); logDone(line, false, e.message); }
     }
     await sleep(400);
 
@@ -2353,7 +2433,7 @@ async function refreshMarketData(){
         setAuto("macro","inflacao", norm("macro.inflacao", delta), `CPI YoY ${yoyNow.toFixed(1)}% (${delta>=0?"acelerando":"desacelerando"})`, { bruto: delta, referenceAt: obs[0].date });
         results.ok.push("inflação (FRED)");
         logDone(line, true, `YoY ${yoyNow.toFixed(1)}%`);
-      }catch(e){ setFailed("macro","inflacao"); results.fail.push("inflação (FRED)"); logDone(line, false, e.message); }
+      }catch(e){ setFailed("macro","inflacao", e && e.message); results.fail.push("inflação (FRED)"); logDone(line, false, e.message); }
     }
     await sleep(400);
 
@@ -2365,7 +2445,7 @@ async function refreshMarketData(){
         setAuto("macro","liquidez", norm("macro.liquidez", yoy), `M2 YoY ${yoy>=0?"+":""}${yoy.toFixed(1)}%`, { bruto: yoy, referenceAt: obs[0].date });
         results.ok.push("liquidez/M2 (FRED)");
         logDone(line, true, `YoY ${yoy>=0?"+":""}${yoy.toFixed(1)}%`);
-      }catch(e){ setFailed("macro","liquidez"); results.fail.push("liquidez/M2 (FRED)"); logDone(line, false, e.message); }
+      }catch(e){ setFailed("macro","liquidez", e && e.message); results.fail.push("liquidez/M2 (FRED)"); logDone(line, false, e.message); }
     }
     await sleep(400);
 
@@ -2377,7 +2457,7 @@ async function refreshMarketData(){
         setAuto("macro","dxy", norm("macro.dxy", pct), `dólar ${pct>=0?"+":""}${pct.toFixed(1)}% em ~90d`, { bruto: pct, referenceAt: obs[0].date });
         results.ok.push("dxy (FRED)");
         logDone(line, true, `${pct>=0?"+":""}${pct.toFixed(1)}%`);
-      }catch(e){ setFailed("macro","dxy"); results.fail.push("dxy (FRED)"); logDone(line, false, e.message); }
+      }catch(e){ setFailed("macro","dxy", e && e.message); results.fail.push("dxy (FRED)"); logDone(line, false, e.message); }
     }
     await sleep(400);
 
@@ -2388,7 +2468,7 @@ async function refreshMarketData(){
         setAuto("macro","curva", norm("macro.curva", spread), `spread 10y-2y ${spread>=0?"+":""}${spread.toFixed(2)}pp`, { bruto: spread, referenceAt: obs[0].date });
         results.ok.push("curva de juros (FRED)");
         logDone(line, true, `${spread>=0?"+":""}${spread.toFixed(2)}pp`);
-      }catch(e){ setFailed("macro","curva"); results.fail.push("curva de juros (FRED)"); logDone(line, false, e.message); }
+      }catch(e){ setFailed("macro","curva", e && e.message); results.fail.push("curva de juros (FRED)"); logDone(line, false, e.message); }
     }
     await sleep(400);
 
@@ -2405,7 +2485,7 @@ async function refreshMarketData(){
         setAuto("geopolitico","epu", norm("geopolitico.epu", pct), `EPU ${latest.toFixed(0)} (${pct>=0?"+":""}${pct.toFixed(1)}% em ~90d)`, { bruto: pct, referenceAt: obs[0].date });
         results.ok.push("epu (FRED)");
         logDone(line, true, latest.toFixed(0));
-      }catch(e){ setFailed("geopolitico","epu"); results.fail.push("epu (FRED)"); logDone(line, false, e.message); }
+      }catch(e){ setFailed("geopolitico","epu", e && e.message); results.fail.push("epu (FRED)"); logDone(line, false, e.message); }
     }
 
     await sleep(400);
@@ -2420,7 +2500,7 @@ async function refreshMarketData(){
         setAuto("ativosGlobais","petroleo", norm("ativosGlobais.petroleo", pct), `$${latest.toFixed(0)}/barril (${pct>=0?"+":""}${pct.toFixed(1)}% em ~90d)`, { bruto: pct, referenceAt: obs[0].date });
         results.ok.push("petroleo (FRED)");
         logDone(line, true, `$${latest.toFixed(0)}`);
-      }catch(e){ setFailed("ativosGlobais","petroleo"); results.fail.push("petroleo (FRED)"); logDone(line, false, e.message); }
+      }catch(e){ setFailed("ativosGlobais","petroleo", e && e.message); results.fail.push("petroleo (FRED)"); logDone(line, false, e.message); }
     }
 
     await sleep(400);
@@ -2433,7 +2513,7 @@ async function refreshMarketData(){
         setAuto("ativosGlobais","euro", norm("ativosGlobais.euro", pct), `€/US$ ${latest.toFixed(3)} (${pct>=0?"+":""}${pct.toFixed(1)}% em ~90d)`, { bruto: pct, referenceAt: obs[0].date });
         results.ok.push("euro (FRED)");
         logDone(line, true, latest.toFixed(3));
-      }catch(e){ setFailed("ativosGlobais","euro"); results.fail.push("euro (FRED)"); logDone(line, false, e.message); }
+      }catch(e){ setFailed("ativosGlobais","euro", e && e.message); results.fail.push("euro (FRED)"); logDone(line, false, e.message); }
     }
 
     await sleep(400);
@@ -2446,7 +2526,7 @@ async function refreshMarketData(){
         setAuto("ativosGlobais","sp500", norm("ativosGlobais.sp500", pct), `${latest.toFixed(0)} pts (${pct>=0?"+":""}${pct.toFixed(1)}% em ~90d)`, { bruto: pct, referenceAt: obs[0].date });
         results.ok.push("sp500 (FRED)");
         logDone(line, true, latest.toFixed(0));
-      }catch(e){ setFailed("ativosGlobais","sp500"); results.fail.push("sp500 (FRED)"); logDone(line, false, e.message); }
+      }catch(e){ setFailed("ativosGlobais","sp500", e && e.message); results.fail.push("sp500 (FRED)"); logDone(line, false, e.message); }
     }
 
     await sleep(400);
@@ -2468,7 +2548,7 @@ async function refreshMarketData(){
           { bruto: pct, referenceAt: new Date(rows[rows.length-1][0]).toISOString() });
         results.ok.push("ouro (PAXG)");
         logDone(line, true, `$${latest.toFixed(0)} · ${pct>=0?"+":""}${pct.toFixed(1)}%`);
-      }catch(e){ setFailed("ativosGlobais","ouro"); results.fail.push("ouro (PAXG)"); logDone(line, false, e.message); }
+      }catch(e){ setFailed("ativosGlobais","ouro", e && e.message); results.fail.push("ouro (PAXG)"); logDone(line, false, e.message); }
     }
 
     await sleep(400);
@@ -2481,7 +2561,7 @@ async function refreshMarketData(){
         setAuto("ativosGlobais","cobre", norm("ativosGlobais.cobre", pct), `$${latest.toFixed(0)}/ton (${pct>=0?"+":""}${pct.toFixed(1)}% em ~3 meses) — demanda industrial em alta = bullish`, { bruto: pct, referenceAt: obs[0].date });
         results.ok.push("cobre (FRED)");
         logDone(line, true, `$${latest.toFixed(0)}`);
-      }catch(e){ setFailed("ativosGlobais","cobre"); results.fail.push("cobre (FRED)"); logDone(line, false, e.message); }
+      }catch(e){ setFailed("ativosGlobais","cobre", e && e.message); results.fail.push("cobre (FRED)"); logDone(line, false, e.message); }
     }
 
     await sleep(400);
@@ -2493,7 +2573,7 @@ async function refreshMarketData(){
         setAuto("ativosGlobais","vix", norm("ativosGlobais.vix", latest), `VIX ${latest.toFixed(1)}`, { bruto: latest, referenceAt: obs[0].date });
         results.ok.push("vix (FRED)");
         logDone(line, true, latest.toFixed(1));
-      }catch(e){ setFailed("ativosGlobais","vix"); results.fail.push("vix (FRED)"); logDone(line, false, e.message); }
+      }catch(e){ setFailed("ativosGlobais","vix", e && e.message); results.fail.push("vix (FRED)"); logDone(line, false, e.message); }
     }
 
     await sleep(400);
@@ -2505,7 +2585,7 @@ async function refreshMarketData(){
         setAuto("ativosGlobais","juros10a", norm("ativosGlobais.juros10a", latest-past), `${latest.toFixed(2)}% (${(latest-past)>=0?"+":""}${(latest-past).toFixed(2)}pp em ~90d)`, { bruto: latest-past, referenceAt: obs[0].date });
         results.ok.push("treasury10a (FRED)");
         logDone(line, true, latest.toFixed(2)+"%");
-      }catch(e){ setFailed("ativosGlobais","juros10a"); results.fail.push("treasury10a (FRED)"); logDone(line, false, e.message); }
+      }catch(e){ setFailed("ativosGlobais","juros10a", e && e.message); results.fail.push("treasury10a (FRED)"); logDone(line, false, e.message); }
     }
   }
 
@@ -2521,7 +2601,7 @@ async function refreshMarketData(){
       setAuto("tecnico","momentum", clamp(p.change24h * 12, -100, 100), `variação 24h: ${p.change24h.toFixed(2)}%`, { bruto: p.change24h });
       results.ok.push("preço/momentum");
       logDone(line, true, `$${p.price.toLocaleString("en-US",{maximumFractionDigits:0})}`);
-    }catch(e){ setFailed("tecnico","momentum"); results.fail.push("preço/momentum"); logDone(line, false, e.message); }
+    }catch(e){ setFailed("tecnico","momentum", e && e.message); results.fail.push("preço/momentum"); logDone(line, false, e.message); }
   }
 
   await sleep(200);
@@ -2581,7 +2661,7 @@ async function refreshMarketData(){
         logDone(line, false, `histórico diário insuficiente (${prices ? prices.length : 0} dias, precisa de 60+)`);
       }
     }catch(e){
-      ["tendencia","rsi","mediaMovel"].forEach(k=>setFailed("tecnico",k));
+      ["tendencia","rsi","mediaMovel"].forEach(k=>setFailed("tecnico",k, e && e.message));
       results.fail.push("tendência/volatilidade/rsi/mm50");
       logDone(line, false, e.message);
     }
@@ -2597,7 +2677,7 @@ async function refreshMarketData(){
       setAuto("sentimento","fearGreed", clamp(-(fg.value - 50) * 2, -100, 100), `F&G ${fg.value} · ${fg.label} (leitura contrária)`, { bruto: fg.value });
       results.ok.push("sentimento");
       logDone(line, true, `${fg.value} (${fg.label})`);
-    }catch(e){ setFailed("sentimento","fearGreed"); results.fail.push("sentimento"); logDone(line, false, e.message); }
+    }catch(e){ setFailed("sentimento","fearGreed", e && e.message); results.fail.push("sentimento"); logDone(line, false, e.message); }
   }
 
   await sleep(200);
@@ -2609,7 +2689,7 @@ async function refreshMarketData(){
       setAuto("derivativos","funding", clamp(-rate * 100000, -100, 100), `funding rate: ${(rate*100).toFixed(4)}%`, { bruto: rate });
       results.ok.push("funding");
       logDone(line, true, `${(rate*100).toFixed(4)}%`);
-    }catch(e){ setFailed("derivativos","funding"); results.fail.push("funding"); logDone(line, false, e.message); }
+    }catch(e){ setFailed("derivativos","funding", e && e.message); results.fail.push("funding"); logDone(line, false, e.message); }
   }
 
   await sleep(200);
@@ -2683,7 +2763,7 @@ async function refreshMarketData(){
       // guardadas só pra referência na tela; não são mais base de cálculo
       S.market.prevOpenInterest = serie[serie.length-1].oi;
       S.market.prevOICheckedAt = new Date().toISOString();
-    }catch(e){ setFailed("derivativos","openInterest"); results.fail.push("open interest"); logDone(line, false, e.message); }
+    }catch(e){ setFailed("derivativos","openInterest", e && e.message); results.fail.push("open interest"); logDone(line, false, e.message); }
   }
 
   await sleep(200);
@@ -2694,7 +2774,7 @@ async function refreshMarketData(){
       setAuto("onchain","hashrate", clamp(pct * 6, -100, 100), `hash rate ${pct>=0?"+":""}${pct.toFixed(1)}% em 90d`, { bruto: pct });
       results.ok.push("hash rate");
       logDone(line, true, `${pct>=0?"+":""}${pct.toFixed(1)}% em 90d`);
-    }catch(e){ setFailed("onchain","hashrate"); results.fail.push("hash rate"); logDone(line, false, e.message); }
+    }catch(e){ setFailed("onchain","hashrate", e && e.message); results.fail.push("hash rate"); logDone(line, false, e.message); }
   }
 
   await sleep(200);
@@ -2728,7 +2808,7 @@ async function refreshMarketData(){
       }
       logDone(line, true, extra);
     }catch(e){
-      setFailed("onchain","mvrv"); setFailed("onchain","nupl"); setFailed("onchain","activeAddresses");
+      setFailed("onchain","mvrv", e && e.message); setFailed("onchain","nupl", e && e.message); setFailed("onchain","activeAddresses", e && e.message);
       results.fail.push("coinmetrics on-chain");
       logDone(line, false, e.message);
     }
@@ -2742,7 +2822,7 @@ async function refreshMarketData(){
       setAuto("derivativos","putCall", clamp(-(ratio-1)*60, -100, 100), `put/call OI ${ratio.toFixed(2)}`, { bruto: ratio });
       results.ok.push("put/call (deribit)");
       logDone(line, true, ratio.toFixed(2));
-    }catch(e){ setFailed("derivativos","putCall"); results.fail.push("put/call (deribit)"); logDone(line, false, e.message); }
+    }catch(e){ setFailed("derivativos","putCall", e && e.message); results.fail.push("put/call (deribit)"); logDone(line, false, e.message); }
   }
 
   await sleep(200);
@@ -2753,7 +2833,7 @@ async function refreshMarketData(){
       setAuto("derivativos","longShort", clamp(-(ratio-1)*40, -100, 100), `long/short ${ratio.toFixed(2)} (contrário: manada muito comprada = risco)`, { bruto: ratio });
       results.ok.push("long/short");
       logDone(line, true, ratio.toFixed(2));
-    }catch(e){ setFailed("derivativos","longShort"); results.fail.push("long/short"); logDone(line, false, e.message); }
+    }catch(e){ setFailed("derivativos","longShort", e && e.message); results.fail.push("long/short"); logDone(line, false, e.message); }
   }
 
   await sleep(200);
@@ -2763,7 +2843,7 @@ async function refreshMarketData(){
       setAuto("derivativos","takerRatio", clamp((ratio-1)*80, -100, 100), `taker buy/sell ${ratio.toFixed(2)}`, { bruto: ratio });
       results.ok.push("taker ratio");
       logDone(line, true, ratio.toFixed(2));
-    }catch(e){ setFailed("derivativos","takerRatio"); results.fail.push("taker ratio"); logDone(line, false, e.message); }
+    }catch(e){ setFailed("derivativos","takerRatio", e && e.message); results.fail.push("taker ratio"); logDone(line, false, e.message); }
   }
 
   await sleep(200);
@@ -2774,7 +2854,7 @@ async function refreshMarketData(){
       setAuto("institucional","coinbasePremium", clamp(premium*50, -100, 100), `prêmio Coinbase ${premium>=0?"+":""}${premium.toFixed(3)}%`, { bruto: premium });
       results.ok.push("prêmio coinbase");
       logDone(line, true, `${premium>=0?"+":""}${premium.toFixed(3)}%`);
-    }catch(e){ setFailed("institucional","coinbasePremium"); results.fail.push("prêmio coinbase"); logDone(line, false, e.message); }
+    }catch(e){ setFailed("institucional","coinbasePremium", e && e.message); results.fail.push("prêmio coinbase"); logDone(line, false, e.message); }
   }
 
   await sleep(200);
@@ -2785,7 +2865,7 @@ async function refreshMarketData(){
       setAuto("tecnico","bookImbalance", clamp(imb, -100, 100), `desequilíbrio do book ${imb>=0?"+":""}${imb.toFixed(1)}%`, { bruto: imb });
       results.ok.push("book imbalance");
       logDone(line, true, `${imb>=0?"+":""}${imb.toFixed(1)}%`);
-    }catch(e){ setFailed("tecnico","bookImbalance"); results.fail.push("book imbalance"); logDone(line, false, e.message); }
+    }catch(e){ setFailed("tecnico","bookImbalance", e && e.message); results.fail.push("book imbalance"); logDone(line, false, e.message); }
   }
 
   await sleep(800); // mais respiro aqui — GDELT vem depois de uma sequência
@@ -2798,7 +2878,7 @@ async function refreshMarketData(){
       setAuto("geopolitico","gdelt", norm("geopolitico.gdelt", tone), `tom médio: ${tone.toFixed(2)}`, { bruto: tone });
       results.ok.push("gdelt");
       logDone(line, true, tone.toFixed(2));
-    }catch(e){ setFailed("geopolitico","gdelt"); results.fail.push("gdelt"); logDone(line, false, e.message); }
+    }catch(e){ setFailed("geopolitico","gdelt", e && e.message); results.fail.push("gdelt"); logDone(line, false, e.message); }
   }
 
   await sleep(5500); // GDELT limita a 1 consulta a cada 5s por IP — sem essa
@@ -2809,7 +2889,7 @@ async function refreshMarketData(){
       setAuto("eventos","volumeSpike", volumeSpikeToScore(spike), `volume ${spike>=0?"+":""}${spike.toFixed(0)}% vs. normal`, { bruto: spike });
       results.ok.push("gdelt volume");
       logDone(line, true, `${spike>=0?"+":""}${spike.toFixed(0)}%`);
-    }catch(e){ setFailed("eventos","volumeSpike"); results.fail.push("gdelt volume"); logDone(line, false, e.message); }
+    }catch(e){ setFailed("eventos","volumeSpike", e && e.message); results.fail.push("gdelt volume"); logDone(line, false, e.message); }
   }
 
   await sleep(200);
@@ -2824,7 +2904,7 @@ async function refreshMarketData(){
         setAuto("onchain","mvrv", clamp((2 - mvrv) * 40, -100, 100), `MVRV ${mvrv.toFixed(2)} (${ultimo.date})`, { bruto: mvrv, referenceAt: ultimo.date });
         results.ok.push("mvrv (cryptoquant)");
         logDone(line, true, mvrv.toFixed(2));
-      }catch(e){ setFailed("onchain","mvrv"); results.fail.push("mvrv (cryptoquant)"); logDone(line, false, e.message); }
+      }catch(e){ setFailed("onchain","mvrv", e && e.message); results.fail.push("mvrv (cryptoquant)"); logDone(line, false, e.message); }
     }
 
     { const line = logStep("consultando exchange netflow (CryptoQuant)");
@@ -2845,7 +2925,7 @@ async function refreshMarketData(){
         } else {
           logDone(line, false, "amostra insuficiente (<5 dias)");
         }
-      }catch(e){ setFailed("onchain","exchangeFlow"); results.fail.push("exchange netflow (cryptoquant)"); logDone(line, false, e.message); }
+      }catch(e){ setFailed("onchain","exchangeFlow", e && e.message); results.fail.push("exchange netflow (cryptoquant)"); logDone(line, false, e.message); }
     }
   }
 
@@ -3765,11 +3845,14 @@ function montarSnapshot(results){
       const vig = valorVigente(mk, ik);
       indicadores[mk + "." + ik] = {
         valor: ind.value === undefined ? null : ind.value,
-        vigente: vig,                      // null = expirado ou ausente
+        vigente: vig,                      // null = expirado, ausente OU fonte caída (v91)
         origem: ind.source,
         nota: ind.note || "",
         falhou: !!ind.fetchFailed,
         saturado: !!ind.saturado,
+        // v91: o bruto entra na série. Score é transformação versionada; se a
+        // transformação mudar amanhã, só o bruto permite recalcular o passado.
+        bruto: (typeof ind.bruto === "number" && Number.isFinite(ind.bruto)) ? ind.bruto : null,
         em: ind.updatedAt || null
       };
     });
@@ -5686,49 +5769,154 @@ function cenarioVencido(sc){
 
 // cada gatilho vira uma função de teste sobre o estado atual.
 // devolve true (bateu), false (não bateu) ou null (sem dado pra saber).
-function avaliarGatilho(texto){
+/* =====================================================================
+   § GATILHOS ESTRUTURADOS (v91) — a lógica nunca lê uma frase em português
+   =====================================================================
+   Até a v90 o verificador procurava o número dentro do TEXTO da nota do
+   indicador, com expressão regular. Dois defeitos empilhados:
+
+   1. A nota diz "RSI-SMA(14) diário: 47" e o regex procurava "rsi(14)".
+      "rsi-sma(14)" não contém "rsi(14)", então a captura devolvia null e os
+      dois gatilhos de RSI ficavam permanentemente MUDOS — a tela exibia uma
+      condição que o sistema não conseguia verificar, marcada com "—".
+
+   2. Pior: consertar só o item 1 tornaria a coisa ativa e ERRADA. O limiar
+      saía de `/(\d{2})/` aplicado ao texto do gatilho depois de tentar
+      remover "rsi(14)" — remoção que falhava pelo mesmo motivo. O primeiro
+      número de dois dígitos que sobrava era o "14" de "RSI-SMA(14)", não o
+      60 da condição. O gatilho passaria a testar "RSI > 14", verdadeiro
+      quase sempre, e a tela mostraria ✓ em cima de nada.
+
+   Gatilho mudo é irritante; gatilho mentindo que bateu é o tipo de erro que
+   este sistema inteiro existe para não cometer. A saída não é um regex
+   melhor: é parar de derivar lógica de prosa. Cada gatilho passa a ser um
+   objeto com id, operador e limiar, e a frase em português vira uma
+   RENDERIZAÇÃO desse objeto — nunca a fonte dele.
+
+   Os textos antigos, que já estão salvos em cenários no aparelho, continuam
+   funcionando: são traduzidos para objeto uma vez, por interpretarLegado(),
+   e daí em diante seguem o mesmo caminho. Um avaliador só. */
+
+/* A leitura BRUTA que cada gatilho consulta, na unidade humana. Passa por
+   valorVigente() de propósito: fonte caída ou dado vencido não responde
+   gatilho, pela mesma regra que impede de pontuar. Um gatilho respondido por
+   dado morto é exatamente o problema que a v91 está corrigindo no score. */
+const GATILHO_FONTE = {
+  "tecnico.rsi": {
+    rotulo: "RSI-SMA(14) diário", unidade: "",
+    ler: function(){ return brutoVigente("tecnico", "rsi"); }
+  },
+  "tecnico.mediaMovel": {
+    rotulo: "preço vs. MM50 diária", unidade: "%",
+    ler: function(){ return brutoVigente("tecnico", "mediaMovel"); }
+  },
+  "derivativos.funding": {
+    rotulo: "funding rate", unidade: "%",
+    // o bruto da Binance vem como fração por período (0.0001 = 0,01%)
+    ler: function(){ const b = brutoVigente("derivativos", "funding"); return b === null ? null : b * 100; }
+  },
+  "score.geral": {
+    rotulo: "score geral", unidade: "",
+    /* memo curtíssimo: cada gatilho é lido duas vezes por render (uma para o
+       veredito, outra para exibir a medida) e computeMarketState() não é
+       barato. 250ms cobre uma renderização inteira e nunca atravessa uma
+       coleta — que dura segundos e reescreve o estado. */
+    ler: function(){
+      const t = Date.now();
+      if(!GATILHO_FONTE._msCache || t - GATILHO_FONTE._msCacheEm > 250){
+        GATILHO_FONTE._msCache = computeMarketState();
+        GATILHO_FONTE._msCacheEm = t;
+      }
+      const ms = GATILHO_FONTE._msCache;
+      return ms.cobertura >= COBERTURA_MINIMA ? ms.score : null;
+    }
+  },
+  _msCache: null,
+  _msCacheEm: 0
+};
+
+/* o bruto só existe a partir da v91; indicador coletado antes não tem. Nesse
+   caso o gatilho responde "não sei" em vez de chutar a partir do score, que
+   é transformação com sinal invertido em vários indicadores. */
+function brutoVigente(motorKey, indKey){
+  if(valorVigente(motorKey, indKey) === null) return null;
+  const ind = S.motors[motorKey] && S.motors[motorKey].indicators[indKey];
+  if(!ind || ind.bruto === null || ind.bruto === undefined || !Number.isFinite(ind.bruto)) return null;
+  return ind.bruto;
+}
+
+function comparaGatilho(valor, op, limiar){
+  if(op === ">")  return valor >  limiar;
+  if(op === "<")  return valor <  limiar;
+  if(op === ">=") return valor >= limiar;
+  if(op === "<=") return valor <= limiar;
+  return null;
+}
+
+/* Traduz um gatilho salvo como texto (v90 e anteriores) para objeto. Devolve
+   null quando não reconhece — e null aqui vira "—" na tela, que é a resposta
+   honesta: o sistema não sabe verificar aquela frase. */
+function interpretarLegado(texto){
   const t = String(texto).toLowerCase();
-  const p = S.market.price;
-  const rsiInd = S.motors.tecnico.indicators.rsi;
-  const mmInd = S.motors.tecnico.indicators.mediaMovel;
-  const fundInd = S.motors.derivativos.indicators.funding;
-
-  // RSI: o valor cru está na nota ("RSI-SMA(14) diário: 47")
-  const rsiCru = (()=>{ const m = /rsi\(14\)[^:]*:\s*(-?\d+(?:\.\d+)?)/i.exec(rsiInd.note || ""); return m ? Number(m[1]) : null; })();
-  // distância pra MM50 idem ("preço +3.2% vs. MM50 diária")
-  const distMM = (()=>{ const m = /preço\s*([+-]?\d+(?:\.\d+)?)%\s*vs\.?\s*mm50/i.exec(mmInd.note || ""); return m ? Number(m[1]) : null; })();
-  const fundScore = valorVigente("derivativos","funding");
-
   if(t.includes("média móvel 50d") || t.includes("mm50")){
-    if(distMM === null) return null;
-    if(t.includes("acima")) return distMM > 0;
-    if(t.includes("abaixo")) return distMM < 0;
+    if(t.includes("acima")) return { id:"tecnico.mediaMovel", op:">", limiar:0, texto:texto };
+    if(t.includes("abaixo")) return { id:"tecnico.mediaMovel", op:"<", limiar:0, texto:texto };
     return null;
   }
   if(t.includes("rsi")){
-    if(rsiCru === null) return null;
-    const alvo = /(\d{2})/.exec(t.replace(/rsi\(14\)/i,""));
-    const n = alvo ? Number(alvo[1]) : null;
-    if(n === null) return null;
-    if(t.includes("acima")) return rsiCru > n;
-    if(t.includes("abaixo") || t.includes("cai")) return rsiCru < n;
+    // remove QUALQUER parêntese antes de procurar o limiar — era daqui que
+    // saía o "14" no lugar do "60"
+    const semParenteses = t.replace(/\([^)]*\)/g, " ");
+    const m = /(\d{2})/.exec(semParenteses);
+    if(!m) return null;
+    const n = Number(m[1]);
+    if(t.includes("acima") || t.includes("sobe")) return { id:"tecnico.rsi", op:">", limiar:n, texto:texto };
+    if(t.includes("abaixo") || t.includes("cai"))  return { id:"tecnico.rsi", op:"<", limiar:n, texto:texto };
     return null;
   }
   if(t.includes("funding")){
-    if(fundScore === null) return null;
-    // score do funding é invertido: negativo = funding alto/esticado
-    if(t.includes("dispara") || t.includes("sobre-alavancagem")) return fundScore < -30;
-    if(t.includes("saudável") || t.includes("normaliza")) return fundScore > -30;
-    if(t.includes("negativo") || t.includes("comprimido")) return fundScore > 30;
+    if(t.includes("dispara") || t.includes("sobre-alavancagem")) return { id:"derivativos.funding", op:">",  limiar:0.03, texto:texto };
+    if(t.includes("negativo") || t.includes("comprimido"))       return { id:"derivativos.funding", op:"<",  limiar:-0.03, texto:texto };
+    if(t.includes("saudável") || t.includes("normaliza"))        return { id:"derivativos.funding", op:"<=", limiar:0.03, texto:texto };
     return null;
   }
   return null;
 }
 
+/* aceita objeto (v91+) ou texto (legado). true / false / null, onde null é
+   "não dá pra verificar agora" e nunca deve ser confundido com false. */
+function avaliarGatilho(g){
+  const gat = (g && typeof g === "object") ? g : interpretarLegado(g);
+  if(!gat || !gat.id) return null;
+  const fonte = GATILHO_FONTE[gat.id];
+  if(!fonte || typeof fonte.ler !== "function") return null;  // barra o memo interno
+  const valor = fonte.ler();
+  if(valor === null || valor === undefined || !Number.isFinite(valor)) return null;
+  return comparaGatilho(valor, gat.op, gat.limiar);
+}
+
+// o texto que aparece na tela, com o valor medido junto quando existe
+function textoDoGatilho(g){
+  const gat = (g && typeof g === "object") ? g : null;
+  return gat && gat.texto ? gat.texto : String(g);
+}
+
+function medidaDoGatilho(g){
+  const gat = (g && typeof g === "object") ? g : interpretarLegado(g);
+  if(!gat || !gat.id) return "";
+  const fonte = GATILHO_FONTE[gat.id];
+  if(!fonte || typeof fonte.ler !== "function") return "";
+  const valor = fonte.ler();
+  if(valor === null || valor === undefined || !Number.isFinite(valor)) return "sem leitura";
+  const casas = Math.abs(valor) < 1 ? 3 : 1;
+  return `${fonte.rotulo}: ${valor.toFixed(casas)}${fonte.unidade} (limiar ${gat.op} ${gat.limiar})`;
+}
+
 // placar de um cenário: quantos gatilhos de confirmação e de invalidação
 // estão batidos AGORA, mais um veredito em português
 function placarDoCenario(sc){
-  const avalia = arr => (arr || []).map(t=>({ texto:t, estado: avaliarGatilho(t) }));
+  const avalia = arr => (arr || []).map(g=>({
+    texto: textoDoGatilho(g), medida: medidaDoGatilho(g), estado: avaliarGatilho(g) }));
   const conf = avalia(sc.confirmTriggers);
   const inval = avalia(sc.invalidateTriggers);
   const cOk = conf.filter(x=>x.estado === true).length;
@@ -5791,40 +5979,52 @@ function generateAutoScenario(){
   const invalidateTriggers = [];
   const ehBear = type === "bear";
 
+  /* v91: cada gatilho nasce como objeto {id, op, limiar, texto}. A frase é
+     escrita a partir do limiar, e não o contrário — assim os dois nunca
+     divergem, que é como o "60" da frase virou "14" na verificação. */
+  const gat = (id, op, limiar, texto) => ({ id, op, limiar, texto });
+
   if(tec.mediaMovel.value !== null){
     if(ehBear){
-      confirmTriggers.push("Preço fecha e se mantém abaixo da Média Móvel 50d");
-      invalidateTriggers.push("Preço recupera e fecha acima da Média Móvel 50d");
+      confirmTriggers.push(gat("tecnico.mediaMovel", "<", 0, "Preço fecha e se mantém abaixo da Média Móvel 50d"));
+      invalidateTriggers.push(gat("tecnico.mediaMovel", ">", 0, "Preço recupera e fecha acima da Média Móvel 50d"));
     } else {
-      confirmTriggers.push("Preço se mantém acima da Média Móvel 50d");
-      invalidateTriggers.push("Preço fecha abaixo da Média Móvel 50d");
+      confirmTriggers.push(gat("tecnico.mediaMovel", ">", 0, "Preço se mantém acima da Média Móvel 50d"));
+      invalidateTriggers.push(gat("tecnico.mediaMovel", "<", 0, "Preço fecha abaixo da Média Móvel 50d"));
     }
   }
   if(tec.rsi.value !== null){
     // leitura contrária (evidência de calibração): RSI baixo favorece alta,
     // RSI alto favorece queda — os gatilhos respeitam isso, não o oposto
     if(ehBear){
-      confirmTriggers.push("RSI-SMA(14) diário permanece acima de 60 (sobrecompra sustentando a queda)");
-      invalidateTriggers.push("RSI-SMA(14) diário cai abaixo de 35 (sobrevenda pode reverter a tese)");
+      confirmTriggers.push(gat("tecnico.rsi", ">", 60, "RSI-SMA(14) diário permanece acima de 60 (sobrecompra sustentando a queda)"));
+      invalidateTriggers.push(gat("tecnico.rsi", "<", 35, "RSI-SMA(14) diário cai abaixo de 35 (sobrevenda pode reverter a tese)"));
     } else {
-      confirmTriggers.push("RSI-SMA(14) diário permanece abaixo de 40 (sobrevenda sustentando a alta)");
-      invalidateTriggers.push("RSI-SMA(14) diário sobe acima de 65 (sobrecompra pode reverter a tese)");
+      confirmTriggers.push(gat("tecnico.rsi", "<", 40, "RSI-SMA(14) diário permanece abaixo de 40 (sobrevenda sustentando a alta)"));
+      invalidateTriggers.push(gat("tecnico.rsi", ">", 65, "RSI-SMA(14) diário sobe acima de 65 (sobrecompra pode reverter a tese)"));
     }
   }
   if(der.funding.value !== null){
     if(ehBear){
       // num cenário de queda, funding esticado PRA BAIXO (shorts pagando) é o
       // que sustenta a tese; funding voltando ao normal é sinal de que passou
-      confirmTriggers.push("Funding rate segue negativo ou comprimido (shorts no comando)");
-      invalidateTriggers.push("Funding rate normaliza para terreno positivo saudável");
+      confirmTriggers.push(gat("derivativos.funding", "<", -0.03, "Funding rate segue negativo ou comprimido, abaixo de −0,03% (shorts no comando)"));
+      invalidateTriggers.push(gat("derivativos.funding", ">=", 0, "Funding rate normaliza para terreno positivo"));
     } else {
-      confirmTriggers.push("Funding rate permanece saudável (sem alavancagem excessiva)");
-      invalidateTriggers.push("Funding rate dispara, indicando sobre-alavancagem");
+      confirmTriggers.push(gat("derivativos.funding", "<=", 0.03, "Funding rate permanece saudável, até 0,03% (sem alavancagem excessiva)"));
+      invalidateTriggers.push(gat("derivativos.funding", ">", 0.03, "Funding rate dispara acima de 0,03%, indicando sobre-alavancagem"));
     }
   }
   if(!confirmTriggers.length){
-    confirmTriggers.push("Score de mercado permanece na mesma faixa (" + ms.label + ")");
-    invalidateTriggers.push("Score de mercado muda de faixa (deixa de ser " + ms.label + ")");
+    /* fallback: sem indicador técnico nem funding, o gatilho é o próprio
+       score permanecer na faixa. Os limiares saem dos MESMOS cortes do
+       Decision Engine, escritos aqui em número e não em rótulo. */
+    const piso = ms.score >= 15 ? 15 : (ms.score <= -15 ? -100 : -15);
+    const teto = ms.score >= 15 ? 100 : (ms.score <= -15 ? -15 : 15);
+    confirmTriggers.push(gat("score.geral", ms.score >= 15 ? ">=" : "<=", ms.score >= 15 ? piso : teto,
+      "Score de mercado permanece na mesma faixa (" + ms.label + ")"));
+    invalidateTriggers.push(gat("score.geral", ms.score >= 15 ? "<" : ">", ms.score >= 15 ? piso : teto,
+      "Score de mercado muda de faixa (deixa de ser " + ms.label + ")"));
   }
 
   // probabilidade cresce com a força do score NA DIREÇÃO do tipo do próprio
@@ -6044,6 +6244,21 @@ function computeDecision(){
 
   reasoning.push(`Cobertura: ${(ms.cobertura*100).toFixed(0)}% dos indicadores preenchidos e vigentes · ${(ms.completeness*100).toFixed(0)}% do peso tem pelo menos um dado · divergência ponderada entre motores: ${ms.divergence.toFixed(0)} · desvio-padrão diário dos retornos, janela de 30 fechamentos (sem anualizar): ${volatilityLabel()}`);
 
+  /* v91: fonte caída sai da conta e é declarada — antes do aviso de vencido,
+     porque é a informação mais acionável das duas. Até a v90 este bloco não
+     existia, e não existia porque o valor antigo continuava votando: não
+     havia nada para avisar. O aviso é a prova de que o voto morreu. */
+  {
+    const falhos = indicadoresComFalha();
+    if(falhos.length){
+      const amostra = falhos.slice(0,3).map(function(v){
+        const quando = v.ultimoSucessoEm ? new Date(v.ultimoSucessoEm).toLocaleString("pt-BR") : "sem registro";
+        return `${esc(v.label)} (último sucesso ${esc(quando)})`;
+      }).join(" · ");
+      reasoning.push(`⚠ ${falhos.length} indicador(es) com a FONTE FORA DO AR não estão pontuando nem contando como cobertura: ${amostra}${falhos.length>3?" …":""}. A última leitura conhecida continua na tela como histórico, mas não vota — fonte caída não é leitura de agora.`);
+    }
+  }
+
   // dado vencido não some em silêncio — ele sai da conta e é declarado
   {
     const vencidos = indicadoresExpirados();
@@ -6195,15 +6410,24 @@ function renderIndicatorRow(motorKey, indKey, d){
   let srcLabel = d.source;
   if(isAuto && d.locked) srcLabel = "manual (travado)";
   else if(isAuto && d.fetchFailed) srcLabel = "falhou — preencha";
+  else if(f.falhou) srcLabel = "fonte caiu — não pontua";
   else if(f.expirado) srcLabel = f.manual ? "sua leitura venceu — revise" : "vencido — não pontua";
-  // valor vencido é desenhado apagado e no meio da barra: ele não está mais
-  // votando, e a barra não pode sugerir que está
-  const pct = (d.value === null || f.expirado) ? 50 : ((d.value + 100) / 200) * 100;
+  // valor vencido OU com fonte caída é desenhado apagado e no meio da barra:
+  // ele não está mais votando, e a barra não pode sugerir que está
+  const foraDaConta = f.expirado || f.falhou;   // v91
+  const pct = (d.value === null || foraDaConta) ? 50 : ((d.value + 100) / 200) * 100;
   const idadeTxt = f.idadeHoras === null ? "" :
     (f.idadeHoras < 1 ? ` · há ${Math.round(f.idadeHoras*60)}min`
       : f.idadeHoras < 48 ? ` · há ${f.idadeHoras.toFixed(0)}h`
       : ` · há ${Math.round(f.idadeHoras/24)}d`);
+  /* v91: fonte caída mostra o número riscado com a data do último sucesso.
+     Não some (a informação histórica é útil) e não se disfarça de leitura
+     nova (que era o bug). "última leitura" é rótulo, não eufemismo. */
+  const ultima = f.falhou ? ultimaLeituraConhecida(motorKey, indKey) : null;
   const valorTxt = d.value === null ? "—"
+    : f.falhou ? `<span style="opacity:.5;text-decoration:line-through;">${d.value.toFixed(0)}</span> <span style="color:${COLOR.brick};">fonte fora do ar — não vota</span>`
+        + (ultima && ultima.em ? ` <span style="color:var(--text-faint);">· última leitura ${esc(new Date(ultima.em).toLocaleString("pt-BR"))}</span>` : "")
+        + (f.motivoFalha ? ` <span style="color:var(--text-faint);">· ${esc(f.motivoFalha)}</span>` : "")
     : (f.expirado ? `<span style="opacity:.5;text-decoration:line-through;">${d.value.toFixed(0)}</span> vencido (limite ${f.limite}h)`
       : d.value.toFixed(0)) + (f.semCarimbo ? ' <span style="color:var(--gold);">· sem data de digitação</span>' : "");
   return `
@@ -6211,7 +6435,7 @@ function renderIndicatorRow(motorKey, indKey, d){
       <div>
         <div class="ind-top">
           <span class="ind-name">${esc(d.label)}</span>
-          <span class="ind-src ${isAuto && !d.locked && !d.fetchFailed && !f.expirado ? "auto" : "manual"}">${esc(srcLabel)}</span>
+          <span class="ind-src ${isAuto && !d.locked && !d.fetchFailed && !f.expirado && !f.falhou ? "auto" : "manual"}">${esc(srcLabel)}</span>
         </div>
         <div class="ind-bar-track">
           <div class="ind-bar-mid"></div>
@@ -6764,7 +6988,11 @@ function renderScenarios(){
         const marca = e => e === true ? `<span style="color:${COLOR.teal};">✓</span>`
                         : e === false ? `<span style="color:${COLOR.brick};">✗</span>`
                         : `<span style="color:var(--text-faint);">—</span>`;
-        const lista = arr => arr.map(x=>`<li>${marca(x.estado)} ${esc(x.texto)}</li>`).join("") || "<li>—</li>";
+        // v91: mostra o número que decidiu, não só o veredito. Gatilho que não
+        // exibe a medida é um gatilho que ninguém consegue conferir.
+        const lista = arr => arr.map(x=>`<li>${marca(x.estado)} ${esc(x.texto)}`
+          + (x.medida ? `<div style="font-family:var(--font-mono);font-size:9.5px;color:var(--text-faint);margin-left:14px;">${esc(x.medida)}</div>` : "")
+          + `</li>`).join("") || "<li>—</li>";
         return `
         <div style="margin:12px 0;padding:11px 14px;border-left:3px solid ${pl.cor};background:rgba(0,0,0,.25);">
           <div style="font-family:var(--font-mono);font-size:13px;color:${pl.cor};">${esc(pl.veredito)}</div>
@@ -7183,6 +7411,9 @@ function fraseDoEstado(ms, hs){
       }
     }
   }
+
+  const falhos = indicadoresComFalha();
+  if(falhos.length) partes.push(`${falhos.length} indicador(es) com a fonte fora do ar — não votam e não contam cobertura.`);
 
   const vencidos = indicadoresExpirados();
   if(vencidos.length) partes.push(`${vencidos.length} indicador(es) com dado vencido fora da conta — atualize pra recuperar.`);
@@ -7824,15 +8055,35 @@ function sanitizarBackup(p){
       if(typeof ind.value !== "number" || !Number.isFinite(ind.value)) ind.value = null;
       ind.locked = !!ind.locked;
       ind.fetchFailed = !!ind.fetchFailed;
+      // v91: campos novos, higienizados com o mesmo rigor dos antigos
+      ind.falhouEm = (typeof ind.falhouEm === "string") ? txt(ind.falhouEm, 40) : null;
+      ind.motivoFalha = txt(ind.motivoFalha, 200) || "";
+      if(typeof ind.bruto !== "number" || !Number.isFinite(ind.bruto)) ind.bruto = null;
+      ind.brutoAt = (typeof ind.brutoAt === "string") ? txt(ind.brutoAt, 40) : null;
     });
   });
+  /* v91: gatilho agora pode ser OBJETO. Passar tudo por txt() como antes
+     transformaria {id,op,limiar} em "[object Object]" — o backup viraria a
+     ferramenta que apaga a correção. Objeto é validado campo a campo; texto
+     legado continua sendo aceito e encurtado como sempre. */
+  const OPS_GATILHO = { ">":1, "<":1, ">=":1, "<=":1 };
+  const limparGatilho = function(x){
+    if(x && typeof x === "object" && !Array.isArray(x)){
+      const id = txt(x.id, 60);
+      if(!id || !OPS_GATILHO[x.op] || typeof x.limiar !== "number" || !Number.isFinite(x.limiar)) return null;
+      return { id: id, op: x.op, limiar: x.limiar, texto: txt(x.texto, 300) || id };
+    }
+    return txt(x) || null;
+  };
   (p.scenarios || []).forEach(sc=>{
     if(!sc || typeof sc !== "object") return;
     ["title","description","horizon","status","type","confidence"].forEach(c=>{ if(sc[c] !== undefined) sc[c] = txt(sc[c]); });
-    ["confirmTriggers","invalidateTriggers","premiseIds"].forEach(c=>{
+    ["confirmTriggers","invalidateTriggers"].forEach(c=>{
       if(!Array.isArray(sc[c])) sc[c] = [];
-      else sc[c] = sc[c].map(x=>txt(x)).filter(Boolean);
+      else sc[c] = sc[c].map(limparGatilho).filter(Boolean);
     });
+    if(!Array.isArray(sc.premiseIds)) sc.premiseIds = [];
+    else sc.premiseIds = sc.premiseIds.map(x=>txt(x)).filter(Boolean);
     if(typeof sc.probability !== "number" || !Number.isFinite(sc.probability)) sc.probability = 50;
     sc.probability = Math.max(0, Math.min(100, sc.probability));
   });
@@ -8355,7 +8606,13 @@ document.addEventListener("click", (e)=>{
           note: i.note || "",
           updatedAt: i.updatedAt || null,
           fetchFailed: !!i.fetchFailed,
-          saturado: !!i.saturado
+          saturado: !!i.saturado,
+          // v91: sem estes campos o replay não reproduz a leitura. O bruto
+          // decide gatilho; a falha decide se o indicador vota.
+          falhouEm: i.falhouEm || null,
+          motivoFalha: i.motivoFalha || "",
+          bruto: (typeof i.bruto === "number" && Number.isFinite(i.bruto)) ? i.bruto : null,
+          brutoAt: i.brutoAt || null
         };
       });
     });
@@ -8372,6 +8629,10 @@ document.addEventListener("click", (e)=>{
       const g = mapa[chave];
       i.value = g.value; i.note = g.note; i.updatedAt = g.updatedAt;
       i.fetchFailed = g.fetchFailed; i.saturado = g.saturado;
+      i.falhouEm = g.falhouEm === undefined ? null : g.falhouEm;
+      i.motivoFalha = g.motivoFalha === undefined ? "" : g.motivoFalha;
+      i.bruto = g.bruto === undefined ? null : g.bruto;
+      i.brutoAt = g.brutoAt === undefined ? null : g.brutoAt;
     });
   }
 

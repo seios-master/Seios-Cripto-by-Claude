@@ -979,12 +979,12 @@ const STORAGE_KEY = "seios_btc_v2";
 // fonte única da versão — usada no rodapé, no histórico e nos exports.
 // Muda toda vez que a fórmula de score/pesos muda, pra nunca misturar
 // decisões de regras diferentes como se fossem comparáveis.
-const BUILD_VERSION = "2026-08-15.100-finito-nao-e-valido";
+const BUILD_VERSION = "2026-08-16.101-periodo-fechado";
 /* v78: versão do MODELO separada da versão do BUILD. Mudança visual não é
    mudança de semântica: só sobe quando peso, fórmula, corte ou trava mudam.
    Toda observação gravada carrega as duas, pra que seis meses depois dê pra
    saber sob qual regra aquela leitura foi produzida. */
-const MODEL_VERSION = "m5-2026-08-15";
+const MODEL_VERSION = "m6-2026-08-16";
 
 // indicador padrão — auto = tenta buscar sozinho; manual = você preenche
 function ind(label, source, note, excludeFromScore){
@@ -1652,8 +1652,15 @@ async function fetchGdeltVolumeSpike(){
   const series = data.timeline && data.timeline[0];
   const points = series && (series.data || series.Data);
   if(!points || points.length < 4) throw new Error("GDELT volume sem dado suficiente");
-  const vals = points.map(p => Number(p.value ?? p.Value ?? p["norm-count"] ?? p.count ?? p.Count)).filter(v=>!Number.isNaN(v));
-  if(vals.length < 4) throw new Error("GDELT volume formato inesperado");
+  /* v101 — o último bucket da linha do tempo do GDELT termina em "agora": é
+     SEMPRE período em formação. Aqui não dá para filtrar por data como nas
+     outras séries (o campo vem em formatos diferentes conforme o modo), mas
+     não é preciso: por construção da API, o aberto é o último. Descartar um
+     de catorze custa 7% da amostra e remove um viés de direção fixa — o dia
+     parcial sempre parece menos volume, e menos volume vira bullish. */
+  const todos = points.map(p => Number(p.value ?? p.Value ?? p["norm-count"] ?? p.count ?? p.Count)).filter(v=>!Number.isNaN(v));
+  if(todos.length < 5) throw new Error("GDELT volume formato inesperado");
+  const vals = todos.slice(0, -1);
   const recentN = Math.max(2, Math.floor(vals.length*0.15));
   const recent = vals.slice(-recentN);
   const baseline = vals.slice(0, vals.length - recentN);
@@ -1677,16 +1684,55 @@ function volumeSpikeToScore(spikePct){
   return clamp(-excess * 0.9, -100, 100);
 }
 
+/* O PERÍODO EM FORMAÇÃO (v101) — a segunda metade da regra da v100.
+   A v100 disse que finito não é válido e pôs faixa de plausibilidade sobre a
+   GRANDEZA. Faltava a outra metade: o último ponto de uma série precisa ser um
+   período FECHADO. Um bucket diário que ainda está sendo preenchido não é uma
+   leitura menor — é uma leitura de um pedaço do dia comparada contra dias
+   inteiros, e o viés tem direção fixa.
+
+   Onde doía, medido:
+   · hash rate — o bucket do dia corrente tem menos blocos observados. A
+     variação de 90d andou −2,8% → −8,6% → −10,8% em duas horas do mesmo dia.
+   · volume GDELT — o dia parcial contra a média de 14 dias deu −58%, e a
+     leitura contrária transformou isso em +38 de bullish.
+   · endereços ativos — mesma origem, e ainda com a janela contada por índice
+     de registro (`rows.length-91`), que é o defeito que a v93 curou no FRED.
+
+   O backtest já estava certo nos três: `ultimoConhecidoAte()` escolhe por data.
+   Era só o caminho vivo que lia o dia em formação — a mesma assimetria da v93.
+
+   A régua é uma só: descartar todo ponto cuja data seja hoje (UTC) ou depois.
+   Não é "o último ponto": é "todo período que ainda não fechou". */
+function dataUTCDe(ms){
+  return new Date(ms).toISOString().slice(0,10);
+}
+function hojeUTC(agoraMs){
+  return dataUTCDe(agoraMs === undefined ? Date.now() : agoraMs);
+}
+function soPeriodosFechados(pontos, agoraMs){
+  const hoje = hojeUTC(agoraMs);
+  return (pontos || []).filter(function(p){ return p && p.date && p.date < hoje; });
+}
+
 async function fetchHashrateTrend(){
   const res = await smartFetch("https://mempool.space/api/v1/mining/hashrate/3m");
   if(!res.ok) throw new Error("mempool.space hashrate falhou");
   const data = await res.json();
   const series = data.hashrates;
   if(!series || series.length < 2) throw new Error("série de hashrate vazia");
-  const first = series[0].avgHashrate;
-  const last = series[series.length-1].avgHashrate;
-  const pct = ((last - first) / first) * 100;
-  return pct; // variação % do hash rate nos últimos ~90 dias
+  const todos = series.map(function(p){
+    return { date: dataUTCDe(Number(p.timestamp) * 1000), value: Number(p.avgHashrate) };
+  }).filter(function(p){ return Number.isFinite(p.value) && p.value > 0; });
+  const fechados = soPeriodosFechados(todos)
+    .sort(function(a,b){ return a.date < b.date ? 1 : -1; });   // DESC, como janelaCalendario espera
+  if(fechados.length < 2) throw new Error("hashrate sem período fechado suficiente");
+  const j = janelaCalendario(fechados, 90);
+  const pct = ((fechados[0].value - j.ponto.value) / j.ponto.value) * 100;
+  /* o que a v100 mediria: primeiro e último do lote, bucket aberto incluído */
+  const antigo = ((todos[todos.length-1].value - todos[0].value) / todos[0].value) * 100;
+  return { pct: pct, dias: j.dias, ate: fechados[0].date,
+           descartados: todos.length - fechados.length, antigo: antigo };
 }
 
 /* FINITO NÃO É VÁLIDO (v100)
@@ -1708,7 +1754,17 @@ async function fetchHashrateTrend(){
 const BRUTO_PLAUSIVEL = {
   "onchain.mvrv":            { min: 0.05, max: 20,       nome: "MVRV" },
   "onchain.activeAddresses": { min: 1000, max: 5000000,  nome: "endereços ativos" },
-  "onchain.hashrate":        { min: 1,    max: 5000,     nome: "hash rate (EH/s)" },
+  /* v101 — ACHADO: a faixa da v100 declarava `onchain.hashrate` como NÍVEL em
+     EH/s (1 a 5000). Mas esse id não é o nível: é a variação percentual de 90
+     dias (`rawUnit:"percent"`, `transform:"clamp(pct*6)"`). A faixa estava
+     certa para uma grandeza que o sistema não guarda nesse id, e errada para a
+     que guarda. Nunca disparou porque ninguém a chamava — o hash rate era o
+     único bruto que não passava por `brutoValido`. Ao ligar a chamada, ela
+     recusaria TODA leitura real: −10,8% não está entre 1 e 5000.
+     Uma faixa que nunca é exercitada não é uma defesa; é uma opinião guardada.
+     Agora é a faixa da variação: a rede já caiu ~50% num trimestre (China,
+     2021) e já subiu bem acima disso. Fora daí é defeito de série. */
+  "onchain.hashrate":        { min: -70,  max: 200,      nome: "variação do hash rate em 90d" },
   "derivativos.putCall":     { min: 0.01, max: 100,      nome: "put/call" },
   "derivativos.longShort":   { min: 0.01, max: 100,      nome: "long/short" },
   "derivativos.takerRatio":  { min: 0.01, max: 100,      nome: "taker buy/sell" }
@@ -1744,8 +1800,14 @@ async function fetchCoinMetricsOnchain(){
     time: r.time, mvrv: limpo(r.CapMVRVCur), addr: limpo(r.AdrActCnt)
   })).filter(r=>r.mvrv !== null || r.addr !== null)
     .sort((a,b)=> a.time < b.time ? -1 : 1);
-  if(!rows.length) throw new Error("CoinMetrics sem dado");
-  return rows;
+  /* v101 — zero já virava null na v100; falta o dia parcial que vem com um
+     número PLAUSÍVEL. Um MVRV de meio-dia é uma razão de capitalizações
+     legítima, só que de um período que ainda não fechou. Sai pela data. */
+  const fechadas = soPeriodosFechados(rows.map(function(r){
+    return { date: String(r.time).slice(0,10), row: r };
+  })).map(function(x){ return x.row; });
+  if(!fechadas.length) throw new Error("CoinMetrics sem dia fechado");
+  return fechadas;
 }
 
 /* --- Deribit — livro de opções público, sem chave. Put/Call por open interest. --- */
@@ -2718,12 +2780,25 @@ async function refreshMarketData(){
         if(!res.ok) throw new Error("PAXG falhou (" + res.status + ")");
         const rows = await res.json();
         if(!rows || rows.length < 60) throw new Error("série de PAXG muito curta");
-        const latest = parseFloat(rows[rows.length-1][4]);
-        const past   = parseFloat(rows[Math.max(0, rows.length-91)][4]);
+        /* v101 — o QUARTO caso do período em formação, achado pelo próprio
+           banco de provas ao procurar `rows.length-91`. O candle diário da
+           Binance fecha às 00:00 UTC: o último da lista é o de hoje, ainda
+           aberto. E a janela era contada em registros. O ouro é sensor e não
+           pontua, então isto não muda score nenhum — mas a regra de promoção
+           diz que sensor vira variável de laboratório, e ninguém promove um
+           sensor com defeito conhecido. */
+        const velas = soPeriodosFechados(rows.map(function(r){
+          return { date: dataUTCDe(Number(r[0])), value: parseFloat(r[4]) };
+        }).filter(function(p){ return Number.isFinite(p.value) && p.value > 0; }))
+          .sort(function(a,b){ return a.date < b.date ? 1 : -1; });   // DESC
+        if(velas.length < 2) throw new Error("PAXG sem dia fechado suficiente");
+        const jOuro = janelaCalendario(velas, 90);
+        const latest = velas[0].value;
+        const past   = jOuro.ponto.value;
         const pct = past ? ((latest-past)/past)*100 : 0;
         setAuto("ativosGlobais","ouro", norm("ativosGlobais.ouro", pct),
-          `$${latest.toFixed(0)}/oz (${pct>=0?"+":""}${pct.toFixed(1)}% em ~90d) — sensor, não pontua`,
-          { bruto: pct, referenceAt: new Date(rows[rows.length-1][0]).toISOString() });
+          `$${latest.toFixed(0)}/oz (${pct>=0?"+":""}${pct.toFixed(1)}% em ${jOuro.dias}d, até ${velas[0].date}) — sensor, não pontua`,
+          { bruto: pct, referenceAt: velas[0].date });
         results.ok.push("ouro (PAXG)");
         logDone(line, true, `$${latest.toFixed(0)} · ${pct>=0?"+":""}${pct.toFixed(1)}%`);
       }catch(e){ setFailed("ativosGlobais","ouro", e && e.message); results.fail.push("ouro (PAXG)"); logDone(line, false, e.message); }
@@ -2950,10 +3025,14 @@ async function refreshMarketData(){
   // hash rate — segurança/saúde da rede, dado público direto da blockchain
   { const line = logStep("consultando hash rate (mempool.space)");
     try{
-      const pct = await fetchHashrateTrend();
-      setAuto("onchain","hashrate", clamp(pct * 6, -100, 100), `hash rate ${pct>=0?"+":""}${pct.toFixed(1)}% em 90d`, { bruto: pct });
+      const hr = await fetchHashrateTrend();
+      const pct = brutoValido("onchain.hashrate", hr.pct);
+      setAuto("onchain","hashrate", clamp(pct * 6, -100, 100),
+        `hash rate ${pct>=0?"+":""}${pct.toFixed(1)}% em ${hr.dias}d (até ${hr.ate}, dia em formação fora)`,
+        { bruto: pct, referenceAt: hr.ate });
       results.ok.push("hash rate");
-      logDone(line, true, `${pct>=0?"+":""}${pct.toFixed(1)}% em 90d`);
+      logDone(line, true, comparaJanela({ dias: hr.dias, diasDoLote: hr.dias }, pct, hr.antigo, "%")
+        .replace("mesma janela", "sem o dia em formação"));
     }catch(e){ setFailed("onchain","hashrate", e && e.message); results.fail.push("hash rate"); logDone(line, false, e.message); }
   }
 
@@ -2988,11 +3067,26 @@ async function refreshMarketData(){
         ndMvrv.note = `NUPL ${nupl.toFixed(2)} — derivado do MVRV por identidade (1 − 1/MVRV). Exibido como referência; não pontua, pra não contar o MVRV duas vezes.`;
         extra = `MVRV ${latest.mvrv.toFixed(2)}`;
       }
-      const past = rows[Math.max(0, rows.length-91)];
-      if(latestAddr && past && past.addr && brutoValido("onchain.activeAddresses", latestAddr.addr)){
-        const pct = ((latestAddr.addr - past.addr) / past.addr) * 100;
-        setAuto("onchain","activeAddresses", clamp(pct*5, -100, 100), `endereços ativos ${pct>=0?"+":""}${pct.toFixed(1)}% em 90d`, { bruto: pct });
+      /* v101 — era `rows[rows.length-91]`: janela contada em REGISTROS, o
+         defeito que a v93 curou no FRED e que sobreviveu aqui. Com uma lacuna
+         de publicação, 91 registros deixam de ser 90 dias. Falha própria: uma
+         janela curta demais não pode derrubar o MVRV junto. */
+      try{
+        const addrObs = soPeriodosFechados(rows
+          .filter(function(r){ return r.addr !== null; })
+          .map(function(r){ return { date: String(r.time).slice(0,10), value: r.addr }; }))
+          .sort(function(a,b){ return a.date < b.date ? 1 : -1; });   // DESC
+        if(addrObs.length < 2) throw new Error("endereços ativos sem série suficiente");
+        const j = janelaCalendario(addrObs, 90);
+        const atual = brutoValido("onchain.activeAddresses", addrObs[0].value);
+        const pct = ((atual - j.ponto.value) / j.ponto.value) * 100;
+        setAuto("onchain","activeAddresses", clamp(pct*5, -100, 100),
+          `endereços ativos ${pct>=0?"+":""}${pct.toFixed(1)}% em ${j.dias}d (até ${addrObs[0].date})`,
+          { bruto: pct, referenceAt: addrObs[0].date });
         results.ok.push("endereços ativos");
+      }catch(eAddr){
+        setFailed("onchain","activeAddresses", eAddr && eAddr.message);
+        results.fail.push("endereços ativos");
       }
       logDone(line, true, extra);
     }catch(e){

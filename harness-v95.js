@@ -1,8 +1,5 @@
 /* =====================================================================
-   harness-v95.js — o funding entra na tabela canônica, e a distribuição
-   é medida antes de qualquer limiar ser escolhido
-   =====================================================================
-   Uso:  node harness-v95.js index.html
+   harness-v95.js — o funding entra na tabela canônica
    ===================================================================== */
 const fs = require("fs");
 const HTML = fs.readFileSync(process.argv[2] || "index.html", "utf8");
@@ -78,10 +75,6 @@ t("a leitura é contrária: funding positivo puxa o score pra baixo", ()=>{
 });
 
 t("nem o vivo nem o backtest escrevem a fórmula à mão", ()=>{
-  /* fora da própria tabela canônica e da ficha técnica (onde a fórmula aparece
-     como TEXTO descritivo, não como código executável), não pode sobrar nenhuma
-     escrita da conta. Tirar os dois blocos antes de olhar é a mesma disciplina
-     de tirar comentários: não confundir a definição com a duplicata. */
   const limpo = semComentarios(HTML)
     .replace(semComentarios(constDe("NORMALIZACAO")), " ")
     .replace(semComentarios(constDe("INDICATOR_SPECS")), " ");
@@ -113,15 +106,23 @@ t("a distribuição NÃO altera nenhum score: é só leitura", ()=>{
     throw new Error("o bloco de medição está escrevendo estado");
 });
 
-t("o limiar provisório continua provisório — nenhuma build mudou o número sozinha", ()=>{
+t("o limiar provisório continua provisório", ()=>{
   eq(API.FUNDING_ESTICADO, 0.015, "FUNDING_ESTICADO:");
-  // e ele é exatamente onde a fórmula cruza |score| = 15
   perto(Math.abs(API.norm("derivativos.funding", API.FUNDING_ESTICADO/100)), 15, "cruzamento:");
 });
 
-t("o modelo NÃO foi bumpado — nada do que decide mudou", ()=>{
-  const m = /const MODEL_VERSION = "([^"]+)"/.exec(HTML);
-  if(m[1].indexOf("m5") !== 0) throw new Error("modelo mudou sem mudança de score: " + m[1]);
+/* v101 — este teste dizia `MODEL_VERSION começa com "m5"`. Isso não é uma
+   invariante: é um fato sobre o instante em que a v95 nasceu, e ele expirou
+   no primeiro bump legítimo (m6, v101). O que a v95 queria proteger é que ELA
+   não mexeu na fórmula que vota. É isso que passa a ser afirmado. */
+t("a v95 não mexeu na fórmula que vota — só no lugar onde ela mora", ()=>{
+  const limpo = semComentarios(HTML);
+  if(!/"derivativos\.funding":\s*rate\s*=>\s*clamp\(-rate \* 100000/.test(limpo))
+    throw new Error("a fórmula canônica do funding foi alterada");
+  [0.0001, -0.0003, 0.002].forEach(r=>{
+    perto(API.norm("derivativos.funding", r), Math.max(-100, Math.min(100, -r*100000)),
+          "taxa " + r + ":");
+  });
 });
 
 console.log("\n" + "=".repeat(62));

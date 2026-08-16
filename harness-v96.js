@@ -1,7 +1,5 @@
 /* =====================================================================
    harness-v96.js — o percentil expandido não pode olhar para frente
-   =====================================================================
-   Uso:  node harness-v96.js index.html
    ===================================================================== */
 const fs = require("fs");
 const HTML = fs.readFileSync(process.argv[2] || "index.html", "utf8");
@@ -37,7 +35,7 @@ function t(n,f){ try{ f(); ok++; console.log("  ✓ "+n); }
   catch(e){ bad++; falhas.push(n+": "+e.message); console.log("  ✗ "+n+"  — "+e.message); } }
 function eq(a,b,m){ if(a!==b) throw new Error((m||"")+" esperado "+b+", veio "+a); }
 function perto(a,b,m){ if(Math.abs(a-b)>1e-9) throw new Error((m||"")+" "+a+" ≠ "+b); }
-const cem = Array.from({length:100}, (_,i)=> i/100);   // 0.00 … 0.99
+const cem = Array.from({length:100}, (_,i)=> i/100);
 
 console.log("\nBLOCO A — o percentil é do passado, e só dele (v96)");
 
@@ -58,7 +56,6 @@ t("os extremos dão ±100, e a leitura é CONTRÁRIA como a escala absoluta", ()
 });
 
 t("valor futuro NÃO entra na própria distribuição", ()=>{
-  // o dia avaliado não pode se comparar consigo mesmo
   const anteriores = [1,2,3,4].concat(Array(60).fill(2));
   const r1 = API.percentilExpandido(5, anteriores, 60);
   const r2 = API.percentilExpandido(5, anteriores.concat([5]), 60);
@@ -85,10 +82,7 @@ t("o percentil do funding entra na calibração, e só nela", ()=>{
     throw new Error("não entra na tabela de calibração");
 });
 
-t("fundingPct aparece em exatamente três lugares: declarar, calcular, registrar", ()=>{
-  /* contar as aparições é o que separa "existe no laboratório" de "vazou pro
-     score". Se um quarto uso nascer, este teste quebra e alguém tem que
-     explicar qual é. */
+t("fundingPct aparece em exatamente três lugares", ()=>{
   const limpo = semComentarios(HTML);
   const n = (limpo.match(/fundingPct/g) || []).length;
   if(n !== 3) throw new Error("fundingPct aparece " + n + " vez(es), esperava 3");
@@ -110,9 +104,10 @@ t("a distribuição acumulada é alimentada DEPOIS de calcular o percentil", ()=
   if(!(i < j)) throw new Error("empurra o valor do dia antes de medir o dia — look-ahead de um dia");
 });
 
-t("nem o score nem o modelo mudaram nesta build", ()=>{
-  const m = /const MODEL_VERSION = "([^"]+)"/.exec(HTML);
-  if(m[1].indexOf("m5") !== 0) throw new Error("modelo bumpado sem mudar decisão: " + m[1]);
+/* v101 — idem v95: a asserção sobre `MODEL_VERSION` começar com "m5" era um
+   fato datado, não uma invariante, e expirou no bump para m6. O que a v96
+   precisa garantir é que o laboratório não vazou para a fórmula que vota. */
+t("o percentil não mexeu na fórmula que vota", ()=>{
   const limpo = semComentarios(HTML);
   if(!/"derivativos\.funding":\s*rate\s*=>\s*clamp\(-rate \* 100000/.test(limpo))
     throw new Error("a fórmula que vota foi alterada");

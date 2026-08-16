@@ -979,7 +979,7 @@ const STORAGE_KEY = "seios_btc_v2";
 // fonte única da versão — usada no rodapé, no histórico e nos exports.
 // Muda toda vez que a fórmula de score/pesos muda, pra nunca misturar
 // decisões de regras diferentes como se fossem comparáveis.
-const BUILD_VERSION = "2026-08-16.101-periodo-fechado";
+const BUILD_VERSION = "2026-08-16.102-uma-regua-por-vez";
 /* v78: versão do MODELO separada da versão do BUILD. Mudança visual não é
    mudança de semântica: só sobe quando peso, fórmula, corte ou trava mudam.
    Toda observação gravada carrega as duas, pra que seis meses depois dê pra
@@ -4249,6 +4249,13 @@ async function lerSnapshots(){
    em algo que deveria oscilar. */
 function indicadoresCongelados(snaps, minRepeticoes){
   const min = minRepeticoes || 3;
+  /* v102 — o detector comparava leituras de modelos diferentes. Nas duas
+     direções: uma mudança de fórmula fazia um indicador travado PARECER que
+     variou (e some do alerta), e um indicador que a nova fórmula zerou podia
+     parecer travado por coincidência. Depois de um bump o detector fica mudo
+     até haver `min` dias sob o modelo novo — que é a resposta certa: não há o
+     que comparar ainda. */
+  snaps = separarPorModelo(snaps).atual;
   // v65 — comparar LEITURAS consecutivas dava falso positivo em cascata: rodar
   // três vezes no mesmo dia acusava juros, hash rate, F&G e EPU como congelados,
   // quando todos são séries de granularidade diária lidas várias vezes no mesmo
@@ -4370,11 +4377,31 @@ function relatorioTexto(snap, snaps){
     if(cong.length){
       L.push("sem variação em 3 dias: " + cong.map(function(c){ return c.chave; }).join(", "));
     }
-    if(snaps.length > 1){
-      const ant = snaps[snaps.length-2];
+    /* v102 — este delta subtraía um score do modelo NOVO de um score do modelo
+       ANTIGO e imprimia a diferença como se fosse movimento do mercado. Na
+       primeira leitura sob m6 ele disse "11,01 (−0,75)": os 0,75 eram a
+       correção do período em formação, não o mercado andando. É a mesma
+       família do bug que a v94.1 tirou da contagem — comparação entre réguas
+       diferentes — reaparecendo num leitor que ninguém tinha olhado.
+
+       Também deixa de assumir que `snap` é o último de `snaps`: em
+       `copiarDiagnostico` ele pode ser um snapshot recém-montado, fora da
+       lista, e aí `length-2` pulava a leitura anterior de verdade. */
+    const anteriores = separarPorModelo(snaps).atual
+      .filter(function(s){ return s.ts !== snap.ts; });
+    if(anteriores.length){
+      const ant = anteriores[anteriores.length-1];
       const d = snap.score - ant.score;
       L.push("score na leitura anterior: " + num(ant.score,2) +
              " (" + (d>=0?"+":"") + d.toFixed(2) + ")");
+    } else if(snaps.length > 1){
+      /* mesma escolha por identidade do ramo de cima — usar `length-2` aqui
+         seria manter viva, num canto, a regra que esta build removeu. */
+      const previas = snaps.filter(function(s){ return s.ts !== snap.ts; });
+      const previa = previas.length ? previas[previas.length-1] : null;
+      L.push("score na leitura anterior: não comparável — a anterior é de " +
+             (previa && previa.modelo ? previa.modelo : "modelo desconhecido") +
+             " e esta é " + MODEL_VERSION + ". Réguas diferentes, diferença sem significado.");
     }
   }
   return L.join("\n");

@@ -25,6 +25,13 @@
    estabilidade, não por segredo.
    ===================================================================== */
 
+/* v98.2 — TETO DE DURAÇÃO EXPLÍCITO.
+   Função de servidor na Vercel morre por padrão em 10 segundos. O GDELT leva
+   de 10 a 20 por natureza — ou seja, no padrão ele NUNCA caberia, e a espera
+   entre tentativas caberia menos ainda. Sem esta linha, a rota estaria
+   condenada a falhar por relógio, não por fonte. */
+export const config = { maxDuration: 60 };
+
 const BASE = "https://api.gdeltproject.org/api/v2/doc/doc";
 
 /* As duas consultas do SEIOS ficam AQUI, não no cliente. Motivo: query de
@@ -83,7 +90,21 @@ export default async function handler(req, res) {
       const controle = new AbortController();
       const corta = setTimeout(() => controle.abort(), 25000);
       try {
-        r = await fetch(url, { signal: controle.signal });
+        /* v98.2 — IDENTIFICAR-SE.
+           `fetch failed` seco, sem status, veio da PRIMEIRA tentativa e rápido
+           demais para ser tempo esgotado: é conexão recusada antes de haver
+           resposta HTTP. O cliente HTTP do Node se apresenta como "undici" e
+           muitos serviços públicos recusam agente desconhecido vindo de
+           datacenter — o navegador nunca passou por isso porque sempre mandou
+           um User-Agent de gente. Aqui a rota se identifica pelo que é. */
+        r = await fetch(url, {
+          signal: controle.signal,
+          headers: {
+            "User-Agent": "SEIOS-Cripto/1.0 (instrumento pessoal de pesquisa; contato via github.com/seios-master)",
+            "Accept": "application/json, text/plain, */*",
+            "Accept-Language": "en-US,en;q=0.9"
+          }
+        });
       } finally { clearTimeout(corta); }
       ultimoStatus = r.status;
       if (r.ok) break;
@@ -128,11 +149,18 @@ export default async function handler(req, res) {
     return res.status(200).json(dados);
 
   } catch (e) {
+    /* "fetch failed" sozinho não diz nada — a causa real mora em `e.cause`
+       (ECONNREFUSED, ENOTFOUND, ECONNRESET, certificado...). Esconder isso
+       custou uma rodada inteira de adivinhação. Erro legível vale mais que
+       erro raro. */
+    const causa = e && e.cause;
     res.setHeader("X-SEIOS-Fonte", "gdelt-falhou");
     return res.status(504).json({
       error: (e && e.name === "AbortError")
-        ? "GDELT não respondeu em 45s"
-        : "falha ao consultar o GDELT: " + (e && e.message)
+        ? "GDELT não respondeu em 25s"
+        : "falha ao consultar o GDELT: " + (e && e.message),
+      causa: causa ? (causa.code || causa.message || String(causa)) : null,
+      url_tentada: url
     });
   }
 }

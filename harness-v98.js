@@ -66,6 +66,21 @@ t("o prazo da rota própria é maior que o do servidor esperando o GDELT", ()=>{
   if(Number(m[1]) <= 45000) throw new Error("prazo do cliente (" + m[1] + "ms) menor que o do servidor (45000ms): o cliente desiste antes da resposta chegar");
 });
 
+console.log("\nBLOCO A2 — 429 não é motivo para insistir (v98.1)");
+
+t("429 entra na lista de status que não geram nova tentativa", ()=>{
+  const m = /const STATUS_SEM_RETRY = \[([^\]]+)\]/.exec(semComentarios(HTML));
+  if(!m) throw new Error("não achei a lista");
+  if(!/429/.test(m[1]))
+    throw new Error("o cliente ainda insiste no 429 — cada tentativa alimenta o próprio limite");
+});
+
+t("o 429 tem mensagem própria, não vira falha genérica", ()=>{
+  const f = semComentarios(fonteDe("erroRotaPropria"));
+  if(!/status === 429/.test(f)) throw new Error("429 cai na mensagem genérica");
+  if(!/limitou a taxa/.test(f)) throw new Error("a mensagem não explica o que houve");
+});
+
 console.log("\nBLOCO B — o replay declara o que não testou");
 
 t("o relatório mede a cobertura real dia a dia", ()=>{

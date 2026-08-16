@@ -979,7 +979,7 @@ const STORAGE_KEY = "seios_btc_v2";
 // fonte única da versão — usada no rodapé, no histórico e nos exports.
 // Muda toda vez que a fórmula de score/pesos muda, pra nunca misturar
 // decisões de regras diferentes como se fossem comparáveis.
-const BUILD_VERSION = "2026-08-15.98-gdelt-proprio";
+const BUILD_VERSION = "2026-08-15.98.1-gdelt-429";
 /* v78: versão do MODELO separada da versão do BUILD. Mudança visual não é
    mudança de semântica: só sobe quando peso, fórmula, corte ou trava mudam.
    Toda observação gravada carrega as duas, pra que seis meses depois dê pra
@@ -1298,7 +1298,15 @@ const CORS_PROXIES = [
    e nenhuma segunda cadeia para erro que não vai mudar. */
 const TIMEOUT_DIRETO_MS = 8000;
 const TIMEOUT_PROXY_MS = 12000;
-const STATUS_SEM_RETRY = [400, 401, 403, 404, 451];
+/* v98.1 — o 429 entra na lista, e o motivo é o oposto da intuição.
+   Os outros status aqui são definitivos: insistir não muda nada. O 429 é
+   transitório — mas insistir PIORA, porque cada tentativa conta contra o
+   próprio limite que causou o erro. E a rota /api/gdelt já tentou três vezes
+   com espera crescente antes de devolver 429; o cliente insistir por cima
+   disso são mais quatro pedidos que garantem o próximo 429.
+   Quem espera é o servidor. O cliente aceita a resposta e a leitura seguinte
+   tenta de novo. */
+const STATUS_SEM_RETRY = [400, 401, 403, 404, 429, 451];
 
 /* PRAZO POR FONTE.
    Um prazo único era simples demais e errado: o GDELT varre um índice global de
@@ -1397,7 +1405,11 @@ function urlProprioServidor(url){
 /* 404 numa rota própria quase sempre significa uma coisa só: o SEIOS foi
    aberto fora da Vercel (GitHub Pages, arquivo local), onde não existe
    servidor para responder. Sem esta mensagem, o Macro morre calado. */
+/* v98.1 — 429 na rota própria não é "o SEIOS está fora do ar": é o GDELT
+   pedindo intervalo. A mensagem tem que dizer isso, senão vira mais uma
+   falha genérica que ninguém sabe se é grave. */
 function erroRotaPropria(url, status){
+  if(status === 429) return new Error("fonte limitou a taxa (429) — o servidor já esperou e tentou 3×; a próxima leitura provavelmente passa");
   if(status === 404){
     return new Error("rota " + url.split("?")[0] + " não existe neste endereço — "
       + "o SEIOS precisa rodar na Vercel (seios-cripto-by-claude.vercel.app) "

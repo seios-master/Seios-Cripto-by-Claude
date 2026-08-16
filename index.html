@@ -979,7 +979,7 @@ const STORAGE_KEY = "seios_btc_v2";
 // fonte única da versão — usada no rodapé, no histórico e nos exports.
 // Muda toda vez que a fórmula de score/pesos muda, pra nunca misturar
 // decisões de regras diferentes como se fossem comparáveis.
-const BUILD_VERSION = "2026-08-16.102-uma-regua-por-vez";
+const BUILD_VERSION = "2026-08-16.103-orcamento-escrito";
 /* v78: versão do MODELO separada da versão do BUILD. Mudança visual não é
    mudança de semântica: só sobe quando peso, fórmula, corte ou trava mudam.
    Toda observação gravada carrega as duas, pra que seis meses depois dê pra
@@ -1409,7 +1409,11 @@ function urlProprioServidor(url){
    pedindo intervalo. A mensagem tem que dizer isso, senão vira mais uma
    falha genérica que ninguém sabe se é grave. */
 function erroRotaPropria(url, status){
-  if(status === 429) return new Error("fonte limitou a taxa (429) — o servidor já esperou e tentou 3×; a próxima leitura provavelmente passa");
+  /* v103 — dizia "tentou 3×". O servidor tenta 2 (`BACKOFF` tem dois
+     elementos). Mensagem de erro que descreve errado a própria defesa é a
+     mesma família de bug que a auditoria nomeou: erro ilegível custa uma
+     rodada de adivinhação. */
+  if(status === 429) return new Error("fonte limitou a taxa (429) — o servidor esperou e tentou 2×; a próxima leitura provavelmente passa");
   if(status === 404){
     return new Error("rota " + url.split("?")[0] + " não existe neste endereço — "
       + "o SEIOS precisa rodar na Vercel (seios-cripto-by-claude.vercel.app) "
@@ -1421,7 +1425,7 @@ function erroRotaPropria(url, status){
 // tenta direto, depois os dois proxies CORS em sequência; se tudo falhar
 // (comum sob rajada de chamadas seguidas, não é a fonte "quebrada"), espera
 // e tenta a sequência inteira mais uma vez antes de desistir de verdade
-async function smartFetch(url){
+async function smartFetch(url, extra){
   // chamadas com chave só passam por proxy se você tiver ligado a opção;
   // chamadas sem chave (preço, funding, hash rate...) seguem como sempre
   const opts = urlProprioServidor(url)
@@ -1430,6 +1434,10 @@ async function smartFetch(url){
   try{
     return await smartFetchOnce(url, opts);
   }catch(firstErr){
+    /* v103 — fonte com limite de taxa: insistir do cliente é o oposto de
+       ajudar. Cada retentativa é um MISS de cache que volta à fonte e RENOVA
+       a janela do limite. Quem espera é o servidor, que sabe esperar. */
+    if(extra && extra.semRetry) throw firstErr;
     // erro estrutural (bloqueio geográfico, chave inválida, rota inexistente)
     // não melhora com insistência — só gasta o tempo da rodada
     if(firstErr && firstErr.semRetry) throw firstErr;
@@ -1625,9 +1633,70 @@ async function comSegundaChance(fn, esperaMs){
    legível e o indicador morre declarado, em vez de morrer calado. */
 const GDELT_ROTA = "/api/gdelt";
 
+/* O ORÇAMENTO DO GDELT (v103) — a mesma falha de raciocínio, quarta aparição.
+   v55: prazo de 8s matando uma fonte que leva 20.
+   v98.3: 3 × 25s de retentativa contra teto de 60s da função.
+   v98.4: prazo único para consultas de 3 e de 14 dias.
+   E agora esta, que é a pior das quatro porque ninguém a contou: as defesas
+   MULTIPLICAM. Por indicador, o pior caso era
+
+       comSegundaChance (×2) · retry do smartFetch (×2) · BACKOFF do servidor (×2) = 8
+
+   e, com tom e volume, ATÉ 16 pedidos ao GDELT numa rodada — contra um limite
+   de 1 consulta a cada 5 segundos por IP. Pior: resposta 429 não é cacheável,
+   então cada retentativa é um MISS que volta à fonte e renova a janela do
+   limite. O cache de borda (`s-maxage`) nunca chega a encher, porque só
+   sucesso enche cache. A defesa alimentava a falha que existe para evitar.
+
+   O orçamento agora está ESCRITO, contado e impresso ao lado do resultado:
+   2 pedidos por rodada, um por indicador. Quem espera e tenta de novo é o
+   servidor — lá a espera é de verdade (4s entre tentativas) e não custa uma
+   ida extra à fonte.
+
+   `ultimo` guarda o que a Vercel respondeu sobre o próprio cache. Sem isso a
+   discussão sobre "o cache não funciona" é opinião: `x-vercel-cache` diz HIT,
+   MISS ou STALE, e `age` diz de quando é o dado. */
+const GDELT_ORCAMENTO = 2;
+const GDELT_DIAG = { pedidos: 0, ultimo: null };
+
+function zerarOrcamentoGdelt(){
+  GDELT_DIAG.pedidos = 0;
+  GDELT_DIAG.ultimo = null;
+}
+
+async function pedirGdelt(url){
+  if(GDELT_DIAG.pedidos >= GDELT_ORCAMENTO)
+    throw new Error("orçamento de " + GDELT_ORCAMENTO + " pedido(s) por rodada esgotado — " +
+                    "insistir aqui renova o limite de taxa em vez de furá-lo");
+  GDELT_DIAG.pedidos++;
+  const res = await smartFetch(url, { semRetry: true });
+  /* mesma origem: todos os cabeçalhos são legíveis, sem CORS no caminho */
+  const cache = res.headers.get("x-vercel-cache");
+  const idade = res.headers.get("age");
+  GDELT_DIAG.ultimo = {
+    cache: cache || "sem cabeçalho",
+    idadeS: idade === null ? null : Number(idade),
+    buscadoEm: res.headers.get("x-seios-buscado-em"),
+    fonte: res.headers.get("x-seios-fonte")
+  };
+  return res;
+}
+
+/* o que vai para o log, para a discussão parar de ser sobre impressão */
+function textoCacheGdelt(){
+  const u = GDELT_DIAG.ultimo;
+  if(!u) return "";
+  const partes = ["cache " + u.cache];
+  if(u.idadeS !== null && !Number.isNaN(u.idadeS)){
+    partes.push(u.idadeS < 60 ? u.idadeS + "s" : Math.round(u.idadeS/60) + "min de idade");
+  }
+  partes.push(GDELT_DIAG.pedidos + "/" + GDELT_ORCAMENTO + " pedidos");
+  return " · " + partes.join(" · ");
+}
+
 async function fetchGdeltTone(){
   const url = `${GDELT_ROTA}?mode=timelinetone&timespan=3d&set=geo`;
-  const res = await smartFetch(url);
+  const res = await pedirGdelt(url);
   if(!res.ok) throw new Error("GDELT falhou (" + res.status + ")");
   const data = await readGdeltJson(res);
   // parsing defensivo — a doc pública não detalha o schema exato de timelinetone,
@@ -1646,7 +1715,7 @@ async function fetchGdeltTone(){
 // É essa ideia de "aceleração" que o texto sobre motores geopolíticos trouxe.
 async function fetchGdeltVolumeSpike(){
   const url = `${GDELT_ROTA}?mode=timelinevolraw&timespan=14d&set=crise`;
-  const res = await smartFetch(url);
+  const res = await pedirGdelt(url);
   if(!res.ok) throw new Error("GDELT volume falhou (" + res.status + ")");
   const data = await readGdeltJson(res);
   const series = data.timeline && data.timeline[0];
@@ -2615,6 +2684,8 @@ async function refreshMarketData(){
   logClear();
   const results = { ok:[], fail:[] };
   novoRunId(); // v78: toda observação desta rodada carrega o mesmo carimbo
+  zerarOrcamentoGdelt(); // v103: o orçamento é POR RODADA — sem isto, o
+  // GDELT roda uma vez e morre até a página ser recarregada
   const tec = S.motors.tecnico.indicators;
   const der = S.motors.derivativos.indicators;
   const sen = S.motors.sentimento.indicators;
@@ -3156,22 +3227,25 @@ async function refreshMarketData(){
   // GDELT — radar de notícia global, sem chave nenhuma
   { const line = logStep("consultando tom das notícias globais (GDELT)");
     try{
-      const tone = await comSegundaChance(fetchGdeltTone, 3000);
+      /* v103 — sem segunda chance aqui: o servidor já tenta duas vezes, com
+         espera de verdade. A segunda chance do cliente dobrava os pedidos
+         numa fonte cujo problema É o número de pedidos. */
+      const tone = await fetchGdeltTone();
       setAuto("geopolitico","gdelt", norm("geopolitico.gdelt", tone), `tom médio: ${tone.toFixed(2)}`, { bruto: tone });
       results.ok.push("gdelt");
-      logDone(line, true, tone.toFixed(2));
-    }catch(e){ setFailed("geopolitico","gdelt", e && e.message); results.fail.push("gdelt"); logDone(line, false, e.message); }
+      logDone(line, true, tone.toFixed(2) + textoCacheGdelt());
+    }catch(e){ setFailed("geopolitico","gdelt", e && e.message); results.fail.push("gdelt"); logDone(line, false, (e && e.message) + textoCacheGdelt()); }
   }
 
   await sleep(5500); // GDELT limita a 1 consulta a cada 5s por IP — sem essa
   // pausa, a segunda chamada quase sempre esbarra no limite da primeira
   { const line = logStep("consultando pico de volume de notícias de crise (GDELT)");
     try{
-      const spike = await comSegundaChance(fetchGdeltVolumeSpike, 6000);
+      const spike = await fetchGdeltVolumeSpike();
       setAuto("eventos","volumeSpike", volumeSpikeToScore(spike), `volume ${spike>=0?"+":""}${spike.toFixed(0)}% vs. normal`, { bruto: spike });
       results.ok.push("gdelt volume");
-      logDone(line, true, `${spike>=0?"+":""}${spike.toFixed(0)}%`);
-    }catch(e){ setFailed("eventos","volumeSpike", e && e.message); results.fail.push("gdelt volume"); logDone(line, false, e.message); }
+      logDone(line, true, `${spike>=0?"+":""}${spike.toFixed(0)}%` + textoCacheGdelt());
+    }catch(e){ setFailed("eventos","volumeSpike", e && e.message); results.fail.push("gdelt volume"); logDone(line, false, (e && e.message) + textoCacheGdelt()); }
   }
 
   await sleep(200);

@@ -85,7 +85,17 @@ export default async function handler(req, res) {
      virando a causa da falha, que é o mesmo erro da v55 (prazo de 8s matando o
      GDELT) numa camada acima.
      Agora o pior caso cabe: 2 × 20s + 5s de espera = 45s, com folga. */
-  const BACKOFF = [0, 5000];          // duas tentativas, orçamento de 45s
+  const BACKOFF = [0, 4000];          // duas tentativas
+
+  /* v98.4 — AS DUAS CONSULTAS NÃO CUSTAM O MESMO.
+     O tom varre 3 dias; o volume varre 14. Com o mesmo prazo de 20s, o tom
+     passa e o volume estoura — foi exatamente o que a tela mostrou: uma linha
+     verde e uma vermelha, na mesma rodada, na mesma rota. Prazo único para
+     trabalhos de tamanhos diferentes é o mesmo erro de fixar 8s para tudo, só
+     que mais fino.
+     O orçamento continua cabendo no teto de 60s da função:
+     volume no pior caso 25 + 4 + 25 = 54s. */
+  const PRAZO = (mode === "timelinevolraw") ? 25000 : 20000;
 
   try {
     let r = null, ultimoStatus = 0;
@@ -95,7 +105,7 @@ export default async function handler(req, res) {
       /* O GDELT leva de 10 a 20 segundos por natureza — o prazo aqui é
          generoso de propósito. Prazo curto foi o que matou o motor na v55. */
       const controle = new AbortController();
-      const corta = setTimeout(() => controle.abort(), 20000);
+      const corta = setTimeout(() => controle.abort(), PRAZO);
       try {
         /* v98.2 — IDENTIFICAR-SE.
            `fetch failed` seco, sem status, veio da PRIMEIRA tentativa e rápido
@@ -150,7 +160,13 @@ export default async function handler(req, res) {
        porque a idade vai junto: `X-SEIOS-Idade-S` diz há quantos segundos
        o dado foi buscado, e o cliente conta a validade a partir daí.
        Dado velho pode ser útil; dado velho disfarçado de novo, não. */
-    res.setHeader("Cache-Control", "s-maxage=900, stale-while-revalidate=86400");
+    /* O volume compara os últimos dias contra uma janela de 14 — meia hora de
+       cache não muda a leitura e corta pela metade as idas ao GDELT, que é a
+       única defesa real contra o 429. O tom, de 3 dias, é mais sensível. */
+    res.setHeader("Cache-Control",
+      (mode === "timelinevolraw")
+        ? "s-maxage=1800, stale-while-revalidate=86400"
+        : "s-maxage=900, stale-while-revalidate=86400");
     res.setHeader("X-SEIOS-Fonte", "gdelt");
     res.setHeader("X-SEIOS-Ms", String(Date.now() - t0));
     res.setHeader("X-SEIOS-Buscado-Em", new Date().toISOString());
@@ -167,7 +183,7 @@ export default async function handler(req, res) {
     return res.status(504).json({
       ms: Date.now() - t0,
       error: (e && e.name === "AbortError")
-        ? "GDELT não respondeu em 20s por tentativa"
+        ? ("GDELT não respondeu em " + (PRAZO/1000) + "s por tentativa")
         : "falha ao consultar o GDELT: " + (e && e.message),
       causa: causa ? (causa.code || causa.message || String(causa)) : null,
       url_tentada: url

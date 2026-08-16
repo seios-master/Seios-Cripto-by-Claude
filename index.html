@@ -979,7 +979,7 @@ const STORAGE_KEY = "seios_btc_v2";
 // fonte única da versão — usada no rodapé, no histórico e nos exports.
 // Muda toda vez que a fórmula de score/pesos muda, pra nunca misturar
 // decisões de regras diferentes como se fossem comparáveis.
-const BUILD_VERSION = "2026-08-15.98.1-gdelt-429";
+const BUILD_VERSION = "2026-08-15.99-relogio-do-fred";
 /* v78: versão do MODELO separada da versão do BUILD. Mudança visual não é
    mudança de semântica: só sobe quando peso, fórmula, corte ou trava mudam.
    Toda observação gravada carrega as duas, pra que seis meses depois dê pra
@@ -5048,8 +5048,32 @@ function hashrateScoreAtDate(series, dateStr){
    hoje foi — devolveu realtime_start real, linha a linha. Semanticamente é o
    mesmo pedido, porque não existe vintage no futuro. Não estou trocando por
    elegância: estou trocando o não-verificado pelo verificado. */
+/* v99 — O RELÓGIO ERRADO APAGOU TODOS OS VINTAGES.
+   Às 19:49 o backtest reportava "SP500 sem vintage · 111 observações com data
+   REAL informada pelo FRED". Às 21:07, no mesmo dia, com o mesmo código:
+   TODAS as doze séries "não existem no ALFRED" e ZERO datas reais.
+
+   Nada no código do FRED mudou entre as duas rodadas. O que mudou foi o
+   relógio: 21:07 no Brasil é 00:07 do dia SEGUINTE em UTC, e
+   `toISOString()` devolve a data em UTC. O `realtime_end` virou amanhã —
+   uma data que ainda não existe para o FRED, que responde 400 para todas as
+   séries. O `erroSemVintage()` então classifica os doze 400 como
+   "estrutural: não existe no ALFRED", que é a explicação certa para o SP500 e
+   errada para as outras onze.
+
+   Um bug que só aparece depois das 21h e some antes das 21h do dia seguinte,
+   e que se disfarça de diagnóstico plausível. Se ninguém rodasse o backtest à
+   noite, ele viveria para sempre.
+
+   O relógio que vale é o do FRED, não o do iPad nem o de Greenwich. O FRED
+   opera no horário central dos EUA; UTC−6 nunca fica à frente dele. Ficar uma
+   hora atrás durante o horário de verão custa, no pior caso, os vintages
+   publicados nessa hora — muito menos que perder os doze. */
+function dataFredHoje(){
+  return new Date(Date.now() - 6*3600e3).toISOString().slice(0,10);
+}
 function fredRealtime(startDate){
-  return { realtime_start: startDate, realtime_end: new Date().toISOString().slice(0,10) };
+  return { realtime_start: startDate, realtime_end: dataFredHoje() };
 }
 
 /* =====================================================================

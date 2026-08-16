@@ -979,7 +979,7 @@ const STORAGE_KEY = "seios_btc_v2";
 // fonte única da versão — usada no rodapé, no histórico e nos exports.
 // Muda toda vez que a fórmula de score/pesos muda, pra nunca misturar
 // decisões de regras diferentes como se fossem comparáveis.
-const BUILD_VERSION = "2026-08-15.99.1-diagnostico-nao-acumula";
+const BUILD_VERSION = "2026-08-15.100-finito-nao-e-valido";
 /* v78: versão do MODELO separada da versão do BUILD. Mudança visual não é
    mudança de semântica: só sobe quando peso, fórmula, corte ou trava mudam.
    Toda observação gravada carrega as duas, pra que seis meses depois dê pra
@@ -1689,6 +1689,45 @@ async function fetchHashrateTrend(){
   return pct; // variação % do hash rate nos últimos ~90 dias
 }
 
+/* FINITO NÃO É VÁLIDO (v100)
+   Às 23:04 a tela mostrou `MVRV 0.00` pontuando **+80**, o valor mais
+   otimista que o On-chain consegue produzir, e `NUPL -Infinity` ao lado.
+   A causa: a última linha do CoinMetrics vinha com zero — dia em formação,
+   ainda sem cálculo — e o único guarda era `Number.isFinite()`. Zero é
+   finito. Passou, entrou em `(2 − MVRV) × 40` e saturou no teto bullish.
+
+   É a pior forma de fail-open que este projeto encontrou: não devolve um
+   valor errado por pouco, devolve o EXTREMO na direção contrária ao que o
+   dado ausente significaria. Um MVRV de verdade nunca é zero — é razão
+   entre duas capitalizações, estritamente positiva. O limite não é opinião
+   sobre o mercado, é sobre a grandeza.
+
+   Daí a lista abaixo: para cada bruto, a faixa fora da qual o número não
+   pode ser leitura, só defeito. Faixa larga de propósito — a função existe
+   para pegar zero, negativo e absurdo, não para julgar regime. */
+const BRUTO_PLAUSIVEL = {
+  "onchain.mvrv":            { min: 0.05, max: 20,       nome: "MVRV" },
+  "onchain.activeAddresses": { min: 1000, max: 5000000,  nome: "endereços ativos" },
+  "onchain.hashrate":        { min: 1,    max: 5000,     nome: "hash rate (EH/s)" },
+  "derivativos.putCall":     { min: 0.01, max: 100,      nome: "put/call" },
+  "derivativos.longShort":   { min: 0.01, max: 100,      nome: "long/short" },
+  "derivativos.takerRatio":  { min: 0.01, max: 100,      nome: "taker buy/sell" }
+};
+
+/* Devolve o valor se ele for leitura; LEVANTA erro se for defeito. Levantar é
+   o ponto: quem chama já tem `catch` que marca a fonte como falha, e falha
+   declarada tira o voto (v91). O caminho do dado ruim passa a ser o mesmo
+   caminho da fonte fora do ar — que é o que ele é. */
+function brutoValido(id, valor){
+  const faixa = BRUTO_PLAUSIVEL[id];
+  if(!Number.isFinite(valor))
+    throw new Error((faixa ? faixa.nome : id) + " não é número");
+  if(faixa && (valor < faixa.min || valor > faixa.max))
+    throw new Error(faixa.nome + " fora da faixa plausível: " + valor +
+                    " (esperado entre " + faixa.min + " e " + faixa.max + ")");
+  return valor;
+}
+
 /* --- CoinMetrics Community API — gratuita, sem chave, sem cadastro.
    MVRV + Endereços Ativos em uma chamada só. --- */
 async function fetchCoinMetricsOnchain(){
@@ -1696,9 +1735,14 @@ async function fetchCoinMetricsOnchain(){
   const res = await smartFetch(url);
   if(!res.ok) throw new Error("CoinMetrics falhou");
   const data = await res.json();
+  /* v100 — zero aqui é dia em formação, não leitura. O descarte é POR
+     MÉTRICA: o MVRV do dia pode ainda não existir enquanto os endereços já
+     existem, e vice-versa. Guardar `null` em vez de `0` faz o resto do
+     código, que já testa `Number.isFinite`, se comportar corretamente. */
+  const limpo = function(v){ const n = Number(v); return (Number.isFinite(n) && n > 0) ? n : null; };
   const rows = (data.data || []).map(r=>({
-    time: r.time, mvrv: Number(r.CapMVRVCur), addr: Number(r.AdrActCnt)
-  })).filter(r=>Number.isFinite(r.mvrv) || Number.isFinite(r.addr))
+    time: r.time, mvrv: limpo(r.CapMVRVCur), addr: limpo(r.AdrActCnt)
+  })).filter(r=>r.mvrv !== null || r.addr !== null)
     .sort((a,b)=> a.time < b.time ? -1 : 1);
   if(!rows.length) throw new Error("CoinMetrics sem dado");
   return rows;
@@ -2918,9 +2962,17 @@ async function refreshMarketData(){
   { const line = logStep("consultando on-chain — MVRV, NUPL, endereços ativos (CoinMetrics)");
     try{
       const rows = await fetchCoinMetricsOnchain();
-      const latest = rows[rows.length-1];
+      /* v100 — "a última linha" e "a última linha COM ESTA MÉTRICA" deixaram
+         de ser a mesma coisa no momento em que o dia em formação parou de
+         virar zero. Cada métrica busca a sua. */
+      const ultimoCom = function(campo){
+        for(let i = rows.length - 1; i >= 0; i--) if(rows[i][campo] !== null) return rows[i];
+        return null;
+      };
+      const latest = ultimoCom("mvrv") || rows[rows.length-1];
+      const latestAddr = ultimoCom("addr");
       let extra = "";
-      if(Number.isFinite(latest.mvrv)){
+      if(latest && latest.mvrv !== null && brutoValido("onchain.mvrv", latest.mvrv)){
         setAuto("onchain","mvrv", clamp((2-latest.mvrv)*40, -100, 100), `MVRV ${latest.mvrv.toFixed(2)} (CoinMetrics)`, { bruto: latest.mvrv, referenceAt: latest.time || null });
         results.ok.push("mvrv (coinmetrics)");
         // NUPL = 1 − 1/MVRV é IDENTIDADE MATEMÁTICA, não fonte nova. Os dois
@@ -2928,7 +2980,7 @@ async function refreshMarketData(){
         // votar separado dava dois votos à mesma informação dentro da média do
         // On-chain (double counting). Continua exibido, porque é leitura útil
         // e tem escala própria — mas com value null, fora da conta.
-        const nupl = 1 - (1/latest.mvrv);
+        const nupl = 1 - (1/latest.mvrv);   // MVRV já passou por brutoValido: nunca zero
         const ndMvrv = S.motors.onchain.indicators.nupl;
         ndMvrv.value = null;
         ndMvrv.fetchFailed = false;
@@ -2936,9 +2988,9 @@ async function refreshMarketData(){
         ndMvrv.note = `NUPL ${nupl.toFixed(2)} — derivado do MVRV por identidade (1 − 1/MVRV). Exibido como referência; não pontua, pra não contar o MVRV duas vezes.`;
         extra = `MVRV ${latest.mvrv.toFixed(2)}`;
       }
-      const past = rows.find(r=>Number.isFinite(r.addr)) && rows[Math.max(0, rows.length-91)];
-      if(Number.isFinite(latest.addr) && past && Number.isFinite(past.addr) && past.addr){
-        const pct = ((latest.addr - past.addr) / past.addr) * 100;
+      const past = rows[Math.max(0, rows.length-91)];
+      if(latestAddr && past && past.addr && brutoValido("onchain.activeAddresses", latestAddr.addr)){
+        const pct = ((latestAddr.addr - past.addr) / past.addr) * 100;
         setAuto("onchain","activeAddresses", clamp(pct*5, -100, 100), `endereços ativos ${pct>=0?"+":""}${pct.toFixed(1)}% em 90d`, { bruto: pct });
         results.ok.push("endereços ativos");
       }
@@ -2954,7 +3006,7 @@ async function refreshMarketData(){
   // Deribit — put/call real, via open interest de opções
   { const line = logStep("consultando put/call ratio (Deribit)");
     try{
-      const ratio = await fetchDeribitPutCall();
+      const ratio = brutoValido("derivativos.putCall", await fetchDeribitPutCall());
       setAuto("derivativos","putCall", clamp(-(ratio-1)*60, -100, 100), `put/call OI ${ratio.toFixed(2)}`, { bruto: ratio });
       results.ok.push("put/call (deribit)");
       logDone(line, true, ratio.toFixed(2));
@@ -2965,7 +3017,7 @@ async function refreshMarketData(){
   // Binance — posicionamento (long/short) e agressão (taker buy/sell)
   { const line = logStep("consultando long/short ratio (Binance)");
     try{
-      const ratio = await fetchBinanceLongShort();
+      const ratio = brutoValido("derivativos.longShort", await fetchBinanceLongShort());
       setAuto("derivativos","longShort", clamp(-(ratio-1)*40, -100, 100), `long/short ${ratio.toFixed(2)} (contrário: manada muito comprada = risco)`, { bruto: ratio });
       results.ok.push("long/short");
       logDone(line, true, ratio.toFixed(2));

@@ -63,47 +63,54 @@ export default async function handler(req, res) {
     + "&format=json"
     + "&timespan="  + timespan;
 
-  /* O 429 EXPLICA TUDO (v98.1).
+  /* O 429 EXPLICA PARTE (v98.1) — MAS NÃO TUDO (v104).
      A primeira chamada por esta rota devolveu `GDELT respondeu 429`: limite de
-     taxa por IP. É a resposta que o "Load failed" escondia — o navegador via
-     uma falha de rede genérica porque a chamada morria no CORS ou no
-     intermediário público antes de o status chegar. Nunca foi instabilidade
-     misteriosa do GDELT: era ele dizendo "devagar", e ninguém escutando.
+     taxa por IP. Isso era verdade e continua sendo, às vezes. Só que em
+     16/08, às 18:30, a mesma rota devolveu
 
-     Duas defesas, aqui no servidor, onde o cliente não precisa saber:
-     · espera e tenta de novo, com intervalo crescente — o limite do GDELT é
-       por janela curta, então esperar resolve o que insistir não resolve;
-     · cache de borda longo: com 15 minutos de `s-maxage` e um dia de
-       `stale-while-revalidate`, três leituras diárias batem no GDELT poucas
-       vezes por dia em vez de a cada clique. Menos pedido é o único jeito
-       honesto de não levar 429. */
+         {"ms":10489,"error":"falha ao consultar o GDELT: fetch failed",
+          "causa":"UND_ERR_CONNECT_TIMEOUT"}
+
+     que é OUTRA falha inteiramente: a conexão TCP nunca se estabeleceu. Não
+     houve HTTP, não houve status, não houve limite de taxa. E os 10.489 ms
+     denunciam o defeito: é UMA tentativa (o tempo de conexão padrão do
+     cliente HTTP do Node é ~10s), não duas.
+
+     O DEFEITO, agora corrigido: o laço abaixo tinha `try { fetch } finally {}`
+     — sem `catch`. Quando o `fetch` LEVANTA (conexão recusada, DNS, reset,
+     tempo de conexão), a exceção escapava do laço inteiro e caía no catch de
+     fora. O `BACKOFF` só cobria falhas que devolvem STATUS. Ou seja: a defesa
+     existia para o modo de falha raro e não cobria o comum.
+
+     É a quinta aparição da mesma família nesta semana — defesa escrita sem
+     medir contra o que ela defende. */
   const espera = (ms) => new Promise(r => setTimeout(r, ms));
-  /* v98.3 — O ORÇAMENTO PASSOU A SER O PROBLEMA.
-     Três tentativas de 25s com esperas de 6s e 12s somam até 93 segundos: mais
-     que o teto de 60 da função. Quando o GDELT ficava lento, a própria rota
-     era morta pelo relógio da Vercel e devolvia 504 — a defesa contra a falha
-     virando a causa da falha, que é o mesmo erro da v55 (prazo de 8s matando o
-     GDELT) numa camada acima.
-     Agora o pior caso cabe: 2 × 20s + 5s de espera = 45s, com folga. */
+
+  /* v98.3 — O ORÇAMENTO, ESCRITO AO LADO DA DEFESA.
+     Teto da função: 60s. Pior caso desta rota, com a correção:
+         tentativa 1 (até PRAZO) + espera 4s + tentativa 2 (até PRAZO)
+     tom     = 20 + 4 + 20 = 44s
+     volume  = 25 + 4 + 25 = 54s
+     Ambos cabem. Uma terceira tentativa NÃO cabe — por isso não existe. */
   const BACKOFF = [0, 4000];          // duas tentativas
 
   /* v98.4 — AS DUAS CONSULTAS NÃO CUSTAM O MESMO.
      O tom varre 3 dias; o volume varre 14. Com o mesmo prazo de 20s, o tom
-     passa e o volume estoura — foi exatamente o que a tela mostrou: uma linha
-     verde e uma vermelha, na mesma rodada, na mesma rota. Prazo único para
-     trabalhos de tamanhos diferentes é o mesmo erro de fixar 8s para tudo, só
-     que mais fino.
-     O orçamento continua cabendo no teto de 60s da função:
-     volume no pior caso 25 + 4 + 25 = 54s. */
+     passa e o volume estoura. Prazo único para trabalhos de tamanhos
+     diferentes é o mesmo erro de fixar 8s para tudo, só que mais fino. */
   const PRAZO = (mode === "timelinevolraw") ? 25000 : 20000;
 
+  /* v104 — o diagnóstico de cada tentativa vai para o cabeçalho e para o
+     corpo do erro. Sem isto, "fetch failed" é indistinguível de "429" na
+     tela, e as duas pedem respostas opostas: uma é esperar, a outra é rota. */
+  const tentativas = [];
+
   try {
-    let r = null, ultimoStatus = 0;
+    let r = null, ultimoStatus = 0, ultimoErro = null;
 
     for (let i = 0; i < BACKOFF.length; i++) {
       if (BACKOFF[i]) await espera(BACKOFF[i]);
-      /* O GDELT leva de 10 a 20 segundos por natureza — o prazo aqui é
-         generoso de propósito. Prazo curto foi o que matou o motor na v55. */
+      const tA = Date.now();
       const controle = new AbortController();
       const corta = setTimeout(() => controle.abort(), PRAZO);
       try {
@@ -122,25 +129,58 @@ export default async function handler(req, res) {
             "Accept-Language": "en-US,en;q=0.9"
           }
         });
+        ultimoStatus = r.status;
+        tentativas.push((i+1) + ":" + r.status + "@" + (Date.now()-tA) + "ms");
+        if (r.ok) break;
+        /* status que NÃO melhora com tempo: para aqui em vez de gastar o
+           orçamento e o limite de taxa da fonte por nada */
+        if (r.status !== 429 && r.status !== 503) break;
+        r = null;
+      } catch (erroDaTentativa) {
+        /* v104 — ESTE `catch` É A CORREÇÃO. Sem ele, tudo que o `fetch`
+           levantava abandonava o laço na primeira tentativa. */
+        const causa = erroDaTentativa && erroDaTentativa.cause;
+        ultimoErro = {
+          nome: erroDaTentativa && erroDaTentativa.name,
+          msg:  erroDaTentativa && erroDaTentativa.message,
+          codigo: causa ? (causa.code || causa.message || String(causa)) : null
+        };
+        tentativas.push((i+1) + ":" + (ultimoErro.codigo || ultimoErro.nome || "erro")
+                        + "@" + (Date.now()-tA) + "ms");
+        r = null;
       } finally { clearTimeout(corta); }
-      ultimoStatus = r.status;
-      if (r.ok) break;
-      if (r.status !== 429 && r.status !== 503) break;  // só espera pelo que passa com tempo
-      r = null;
     }
 
     if (!r || !r.ok) {
       res.setHeader("X-SEIOS-Fonte", "gdelt-erro");
-      res.setHeader("X-SEIOS-Tentativas", String(BACKOFF.length));
+      res.setHeader("X-SEIOS-Tentativas", tentativas.join(" · "));
       res.setHeader("X-SEIOS-Ms", String(Date.now() - t0));
+
       if (ultimoStatus === 429) {
         res.setHeader("Retry-After", "60");
         return res.status(429).json({
           error: "GDELT limitou a taxa (429) nas " + BACKOFF.length + " tentativas",
-          dica: "limite por IP, janela curta — a próxima leitura provavelmente passa"
+          dica: "limite por IP, janela curta — a próxima leitura provavelmente passa",
+          tentativas: tentativas
         });
       }
-      return res.status(502).json({ error: "GDELT respondeu " + ultimoStatus });
+      /* conexão que nunca se estabeleceu é diagnóstico diferente de resposta
+         recusada, e a tela precisa saber a diferença: uma passa com tempo, a
+         outra não passa nunca sem trocar de caminho */
+      if (ultimoErro) {
+        return res.status(504).json({
+          ms: Date.now() - t0,
+          error: (ultimoErro.nome === "AbortError")
+            ? ("GDELT não respondeu em " + (PRAZO/1000) + "s por tentativa, nas " + BACKOFF.length + " tentativas")
+            : ("não foi possível CONECTAR ao GDELT nas " + BACKOFF.length + " tentativas — "
+               + "a conexão falhou antes de haver resposta HTTP"),
+          causa: ultimoErro.codigo,
+          tentativas: tentativas,
+          url_tentada: url
+        });
+      }
+      return res.status(502).json({ error: "GDELT respondeu " + ultimoStatus,
+                                    tentativas: tentativas });
     }
 
     /* O GDELT às vezes devolve HTML de erro com status 200. Ler como texto
@@ -157,36 +197,33 @@ export default async function handler(req, res) {
 
     /* Cache curto de borda. `stale-while-revalidate` faz a rota continuar
        respondendo enquanto o GDELT está fora — mas isso só é aceitável
-       porque a idade vai junto: `X-SEIOS-Idade-S` diz há quantos segundos
-       o dado foi buscado, e o cliente conta a validade a partir daí.
-       Dado velho pode ser útil; dado velho disfarçado de novo, não. */
-    /* O volume compara os últimos dias contra uma janela de 14 — meia hora de
-       cache não muda a leitura e corta pela metade as idas ao GDELT, que é a
-       única defesa real contra o 429. O tom, de 3 dias, é mais sensível. */
+       porque a idade vai junto: o cliente lê `age` e `x-vercel-cache` e
+       imprime no log. Dado velho pode ser útil; dado velho disfarçado de
+       novo, não.
+       O volume compara os últimos dias contra uma janela de 14 — meia hora de
+       cache não muda a leitura. O tom, de 3 dias, é mais sensível. */
     res.setHeader("Cache-Control",
       (mode === "timelinevolraw")
         ? "s-maxage=1800, stale-while-revalidate=86400"
         : "s-maxage=900, stale-while-revalidate=86400");
     res.setHeader("X-SEIOS-Fonte", "gdelt");
     res.setHeader("X-SEIOS-Ms", String(Date.now() - t0));
+    res.setHeader("X-SEIOS-Tentativas", tentativas.join(" · "));
     res.setHeader("X-SEIOS-Buscado-Em", new Date().toISOString());
     return res.status(200).json(dados);
 
   } catch (e) {
-    /* "fetch failed" sozinho não diz nada — a causa real mora em `e.cause`
-       (ECONNREFUSED, ENOTFOUND, ECONNRESET, certificado...). Esconder isso
-       custou uma rodada inteira de adivinhação. Erro legível vale mais que
-       erro raro. */
+    /* aqui só chega o que NÃO é falha de tentativa — erro de programação,
+       basicamente. Se "fetch failed" voltar a aparecer nesta mensagem, o
+       `catch` do laço parou de funcionar. */
     const causa = e && e.cause;
-    res.setHeader("X-SEIOS-Fonte", "gdelt-falhou");
+    res.setHeader("X-SEIOS-Fonte", "gdelt-falhou-fora-do-laco");
     res.setHeader("X-SEIOS-Ms", String(Date.now() - t0));
-    return res.status(504).json({
+    return res.status(500).json({
       ms: Date.now() - t0,
-      error: (e && e.name === "AbortError")
-        ? ("GDELT não respondeu em " + (PRAZO/1000) + "s por tentativa")
-        : "falha ao consultar o GDELT: " + (e && e.message),
+      error: "falha fora do laço de tentativas: " + (e && e.message),
       causa: causa ? (causa.code || causa.message || String(causa)) : null,
-      url_tentada: url
+      tentativas: tentativas
     });
   }
 }

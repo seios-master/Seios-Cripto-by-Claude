@@ -78,7 +78,14 @@ export default async function handler(req, res) {
        vezes por dia em vez de a cada clique. Menos pedido é o único jeito
        honesto de não levar 429. */
   const espera = (ms) => new Promise(r => setTimeout(r, ms));
-  const BACKOFF = [0, 6000, 12000];   // três tentativas dentro do orçamento
+  /* v98.3 — O ORÇAMENTO PASSOU A SER O PROBLEMA.
+     Três tentativas de 25s com esperas de 6s e 12s somam até 93 segundos: mais
+     que o teto de 60 da função. Quando o GDELT ficava lento, a própria rota
+     era morta pelo relógio da Vercel e devolvia 504 — a defesa contra a falha
+     virando a causa da falha, que é o mesmo erro da v55 (prazo de 8s matando o
+     GDELT) numa camada acima.
+     Agora o pior caso cabe: 2 × 20s + 5s de espera = 45s, com folga. */
+  const BACKOFF = [0, 5000];          // duas tentativas, orçamento de 45s
 
   try {
     let r = null, ultimoStatus = 0;
@@ -88,7 +95,7 @@ export default async function handler(req, res) {
       /* O GDELT leva de 10 a 20 segundos por natureza — o prazo aqui é
          generoso de propósito. Prazo curto foi o que matou o motor na v55. */
       const controle = new AbortController();
-      const corta = setTimeout(() => controle.abort(), 25000);
+      const corta = setTimeout(() => controle.abort(), 20000);
       try {
         /* v98.2 — IDENTIFICAR-SE.
            `fetch failed` seco, sem status, veio da PRIMEIRA tentativa e rápido
@@ -115,6 +122,7 @@ export default async function handler(req, res) {
     if (!r || !r.ok) {
       res.setHeader("X-SEIOS-Fonte", "gdelt-erro");
       res.setHeader("X-SEIOS-Tentativas", String(BACKOFF.length));
+      res.setHeader("X-SEIOS-Ms", String(Date.now() - t0));
       if (ultimoStatus === 429) {
         res.setHeader("Retry-After", "60");
         return res.status(429).json({
@@ -155,9 +163,11 @@ export default async function handler(req, res) {
        erro raro. */
     const causa = e && e.cause;
     res.setHeader("X-SEIOS-Fonte", "gdelt-falhou");
+    res.setHeader("X-SEIOS-Ms", String(Date.now() - t0));
     return res.status(504).json({
+      ms: Date.now() - t0,
       error: (e && e.name === "AbortError")
-        ? "GDELT não respondeu em 25s"
+        ? "GDELT não respondeu em 20s por tentativa"
         : "falha ao consultar o GDELT: " + (e && e.message),
       causa: causa ? (causa.code || causa.message || String(causa)) : null,
       url_tentada: url

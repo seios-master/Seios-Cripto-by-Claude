@@ -979,7 +979,7 @@ const STORAGE_KEY = "seios_btc_v2";
 // fonte única da versão — usada no rodapé, no histórico e nos exports.
 // Muda toda vez que a fórmula de score/pesos muda, pra nunca misturar
 // decisões de regras diferentes como se fossem comparáveis.
-const BUILD_VERSION = "2026-08-15.99-relogio-do-fred";
+const BUILD_VERSION = "2026-08-15.99.1-diagnostico-nao-acumula";
 /* v78: versão do MODELO separada da versão do BUILD. Mudança visual não é
    mudança de semântica: só sobe quando peso, fórmula, corte ou trava mudam.
    Toda observação gravada carrega as duas, pra que seis meses depois dê pra
@@ -5217,6 +5217,19 @@ function fredRegistra(seriesId, erro){
 async function fetchMacroHistoryMaps(){
   FRED_DIAG.ok = []; FRED_DIAG.falhou = [];
   VINTAGE_USO.medido = 0; VINTAGE_USO.estimado = 0; VINTAGE_USO.series = {};
+  /* v99.1 — A LISTA DE FALHAS SÓ CRESCIA.
+     Dois contadores lado a lado, um zerado a cada rodada e o outro não: depois
+     da v99, a contagem voltou a dizer "111 datas REAIS" — rodada nova, correta
+     — enquanto a lista logo acima continuava acusando as doze séries como
+     "não existe no ALFRED", porque `fredSemVintage` nunca era limpo e ainda
+     guardava o estrago da rodada quebrada das 21:07. Pior: ela vive dentro do
+     `S`, então ia para o localStorage e sobreviveria a recarregar a página, ao
+     backup e à restauração.
+     Um diagnóstico que só acumula deixa de ser diagnóstico: vira memória de
+     um erro que já foi corrigido, no lugar mais visível da tela. Falha de
+     rodada anterior não é falha desta rodada — é a mesma regra do dado velho
+     que não pode votar, aplicada ao texto que explica os dados. */
+  S.market.fredSemVintage = [];
   const startDaily = new Date(Date.now() - 400*24*3600*1000).toISOString().slice(0,10);
   // 900 dias garante observações suficientes pra que o preenchimento por
   // meses cubra o ano inteiro do backtest (bug anterior: só cobria ~2 meses)

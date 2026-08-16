@@ -114,6 +114,31 @@ t("nenhum outro ponto do código monta realtime_end por conta própria", ()=>{
     throw new Error("a janela não usa dataFredHoje()");
 });
 
+console.log("\nBLOCO C — diagnóstico não acumula entre rodadas (v99.1)");
+
+t("a lista de séries sem vintage é zerada no início de cada backtest", ()=>{
+  const f = semComentarios(fonteDe("fetchMacroHistoryMaps"));
+  if(!/S\.market\.fredSemVintage = \[\]/.test(f))
+    throw new Error("a lista sobrevive à rodada seguinte — mostra falha velha como se fosse de agora");
+});
+
+t("os três acumuladores do relatório zeram no MESMO lugar", ()=>{
+  /* estavam desalinhados: dois zeravam, um não, e a tela exibia os dois
+     lado a lado se contradizendo. Se um novo acumulador nascer sem reset,
+     este teste não pega — mas o alinhamento dos três fica declarado aqui. */
+  const f = semComentarios(fonteDe("fetchMacroHistoryMaps"));
+  ["FRED_DIAG.ok = \\[\\]", "VINTAGE_USO.medido = 0", "S.market.fredSemVintage = \\[\\]"]
+    .forEach(function(p){
+      if(!new RegExp(p).test(f)) throw new Error("faltou zerar: " + p);
+    });
+});
+
+t("a lista é gravada dentro do estado — por isso o reset importa", ()=>{
+  const limpo = semComentarios(HTML);
+  if(!/S\.market\.fredSemVintage\.push/.test(limpo))
+    throw new Error("mudou de lugar; reconferir se ainda persiste no localStorage");
+});
+
 console.log("\n" + "=".repeat(62));
 console.log(`${ok} passaram · ${bad} falharam`);
 if(bad){ console.log("\nFALHAS:"); falhas.forEach(f=>console.log("  "+f)); process.exit(1); }

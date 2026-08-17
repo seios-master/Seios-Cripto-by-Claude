@@ -43,8 +43,9 @@ let API;
 try{
   API = new Function([
     constDe("M2_LONGO"), declDe("clamp"), declDe("escalaSuave"),
+    declDe("percentilExpandido"), declDe("scoreDoPercentil"),
     constDe("NORMALIZACAO"), declDe("norm"),
-    "return { M2_LONGO, norm, escalaSuave };"
+    "return { M2_LONGO, norm, escalaSuave, scoreDoPercentil, percentilExpandido };"
   ].join("\n"))();
 }catch(e){ console.error("FALHA AO MONTAR:", e.message); process.exit(1); }
 
@@ -54,57 +55,52 @@ function t(n,f){ try{ f(); ok++; console.log("  ✓ "+n); }
 function eq(a,b,m){ if(a!==b) throw new Error((m||"")+" esperado "+b+", veio "+a); }
 function perto(a,b,tol,m){ if(Math.abs(a-b)>(tol||0.05)) throw new Error((m||"")+" "+a+" ≠ "+b); }
 
-console.log("\nBLOCO A — o defeito, medido pela própria fórmula do arquivo");
+console.log("\nBLOCO A — o defeito que esta build mediu, e a v105 removeu");
 
-t("a régua da liquidez tem centro em ZERO", ()=>{
-  eq(API.norm("macro.liquidez", 0), 0, "M2 parado:");
+/* ATENÇÃO — ESTES TESTES FORAM REESCRITOS NA v105, E O MOTIVO IMPORTA.
+   O bloco A original afirmava propriedades da régua ANTIGA: centro em zero,
+   bearish só abaixo de −1,01%, o normal pontuando acima de 70. Eram afirmações
+   verdadeiras sobre um defeito — e o propósito da v104 era medi-lo, não
+   corrigi-lo. A v105 corrigiu. Manter as asserções antigas faria a bateria
+   exigir de volta o defeito; apagá-las deixaria a correção sem guarda.
+   Então elas viram o contrário: afirmam que a régua antiga NÃO está mais no
+   caminho que decide, e guardam os números medidos como referência histórica. */
+
+t("a régua da liquidez NÃO tem mais centro em zero — ela normaliza um rank", ()=>{
+  /* entrada agora é percentil (0..1): rank 0,5 é o normal e dá score 0 */
+  if(API.norm("macro.liquidez", 0.5) !== 0)
+    throw new Error("rank mediano deveria dar 0, deu " + API.norm("macro.liquidez", 0.5));
+  /* e o zero absoluto de YoY, que antes dava 0, agora é rank 0 = extremo baixo */
+  if(API.norm("macro.liquidez", 0) !== -100)
+    throw new Error("rank 0 deveria dar −100, deu " + API.norm("macro.liquidez", 0));
 });
 
-t("o M2 precisa ENCOLHER mais de 1% ao ano para marcar bearish", ()=>{
-  /* o limiar exato é −1,008%. Um M2 encolhendo 1,0% ao ano AINDA é neutro
-     para este sistema. (A primeira versão deste teste tinha a comparação
-     invertida e acusou o código; o código estava certo.) */
-  if(API.norm("macro.liquidez", -1.0) <= -15)
-    throw new Error("−1,0% marcou bearish; o limiar mudou, revisar este teste");
-  if(API.norm("macro.liquidez", -1.05) > -15)
-    throw new Error("−1,05% não marcou bearish: a fórmula não é a que este teste descreve");
-  // o corredor neutro é simétrico, e tem dois pontos de largura
-  if(API.norm("macro.liquidez", 1.0) >= 15)
-    throw new Error("o corredor neutro não é simétrico como se supõe");
-  if(API.norm("macro.liquidez", 1.05) < 15)
-    throw new Error("o outro lado do corredor não fecha onde deveria");
+t("o sentido é DIRETO: crescer acima do próprio normal é bullish", ()=>{
+  /* o erro que este teste impede é silencioso e caro: `scoreDoPercentil`
+     nasceu contrária, para o funding. Reaproveitá-la sem sentido declarado
+     inverteria o indicador de maior peso do sistema sem levantar erro. */
+  if(!(API.norm("macro.liquidez", 0.9) > 0)) throw new Error("percentil alto deveria ser bullish");
+  if(!(API.norm("macro.liquidez", 0.1) < 0)) throw new Error("percentil baixo deveria ser bearish");
+  /* e a versão contrária continua contrária para quem depende dela */
+  if(!(API.scoreDoPercentil(0.9) < 0)) throw new Error("o padrão contrário mudou — o funding inverteu");
 });
 
-t("o crescimento NORMAL do M2 é lido como extremo bullish", ()=>{
-  /* mediana histórica do M2 YoY fica perto de +6%. Se o normal pontua acima
-     de 70, o indicador não está medindo desvio nenhum — está medindo que a
-     economia existe. */
-  const normal = API.norm("macro.liquidez", 6.3);
-  if(!(normal > 70)) throw new Error("o normal deu " + normal + ", esperava >70");
-  const hoje = API.norm("macro.liquidez", 5.5);
-  perto(hoje, 67.76, 0.5, "leitura de hoje:");
+t("a régua ANTIGA não sobrou em lugar nenhum que decide", ()=>{
+  /* medido e registrado quando ela ainda rodava: M2 +5,5% dava +67,8;
+     o normal histórico (+6,3%) dava +73,7; para marcar bearish o M2 tinha
+     que encolher mais de 1,01% ao ano, o que ocorreu em 15 de 426 meses. */
+  const limpo = semComentarios(HTML);
+  if(/"macro\.liquidez":\s*yoy\s*=>\s*escalaSuave/.test(limpo))
+    throw new Error("a porta canônica voltou a receber YoY em vez de rank");
+  perto(API.escalaSuave(5.5, 6.67), 67.76, 0.5, "referência histórica da régua antiga:");
 });
 
-t("recentrar na mediana move o número em dezenas de pontos", ()=>{
-  /* não é proposta — é a ordem de grandeza do defeito */
-  const comZero    = API.norm("macro.liquidez", 5.5);
-  const comMediana = API.escalaSuave(5.5 - 6.3, 6.67);
-  if(Math.abs(comZero - comMediana) < 50)
-    throw new Error("a diferença é de só " + Math.abs(comZero-comMediana) + " pontos");
-  if(!(Math.abs(comMediana) < 15))
-    throw new Error("recentrado deveria cair na faixa neutra, deu " + comMediana);
-});
-
-t("os OUTROS quatro do Macro medem variação, e por isso zero é centro legítimo", ()=>{
-  /* este teste existe para impedir a correção de vazar para quem não tem o
-     defeito: juros, inflação e dxy são DELTAS; curva é nível, mas o zero
-     dela é a inversão, um marco real. */
+t("os OUTROS quatro do Macro continuam intactos", ()=>{
+  /* a correção não pode vazar para quem não tinha o defeito: juros, inflação
+     e dxy são DELTAS; a curva é nível, mas o zero dela é a inversão. */
   ["macro.juros","macro.inflacao","macro.dxy","macro.curva"].forEach(function(id){
     eq(API.norm(id, 0), 0, id + " em repouso:");
   });
-  // e nenhum deles vira extremo com o valor típico de repouso
-  if(Math.abs(API.norm("macro.juros", 0)) >= 15) throw new Error("juros extremo em repouso");
-  if(Math.abs(API.norm("macro.dxy", 0)) >= 15) throw new Error("dxy extremo em repouso");
 });
 
 console.log("\nBLOCO B — a medição existe, e é só medição");
@@ -145,10 +141,16 @@ t("a busca longa não derruba o backtest se falhar", ()=>{
     throw new Error("sem catch próprio: 35 anos de M2 fora do ar matariam a calibração inteira");
 });
 
-t("o backtest continua usando a janela CURTA para pontuar", ()=>{
+/* v105 — este teste exigia que o backtest continuasse na janela CURTA, porque
+   na v104 mudar a janela seria mudar o histórico em silêncio. A v105 mudou de
+   propósito e declarado: o percentil precisa do prior longo, e 18 leituras não
+   fazem percentil. A asserção inverte junto. */
+t("o backtest pontua a liquidez pela série LONGA, não pela janela de 900 dias", ()=>{
   const f = semComentarios(declDe("fetchMacroHistoryMaps"));
-  if(!/fetchFredSeriesRange\("M2SL", startMonthly\)/.test(f))
-    throw new Error("a janela do score mudou junto — isto mudaria o histórico em silêncio");
+  if(/fetchFredSeriesRange\("M2SL", startMonthly\)/.test(f))
+    throw new Error("a janela curta voltou a alimentar maps.liquidez");
+  if(!/const serie = M2_LONGO\.yoy/.test(f))
+    throw new Error("o backtest não usa a série longa");
 });
 
 console.log("\nBLOCO C — o que a tela diz, e o que ela se recusa a dizer");
@@ -159,39 +161,48 @@ t("a tabela exige amostra antes de aparecer", ()=>{
     throw new Error("a distribuição apareceria com meia dúzia de meses");
 });
 
-t("a tela conta quantos meses marcariam cada lado", ()=>{
+t("a tela conta cada lado nas DUAS réguas", ()=>{
   const limpo = semComentarios(HTML);
-  ["produziriam leitura BEARISH", "Distribuição do M2"].forEach(function(s){
+  ["Distribuição do M2", "Régua antiga:", "Régua nova:"].forEach(function(s){
     if(limpo.indexOf(s) === -1) throw new Error("falta na tela: " + s);
   });
 });
 
-t("a tela declara que a ilustração NÃO é proposta", ()=>{
+t("a tela declara o que a troca NÃO afirma", ()=>{
   const limpo = semComentarios(HTML);
-  if(!/não proposta|não é proposta/.test(limpo))
-    throw new Error("o número recentrado apareceria como recomendação");
-  if(!/Nenhuma das três entra sem bump declarado/.test(limpo))
-    throw new Error("não declara que trocar a régua exige bump");
+  if(!/não<\/strong> afirma que o M2 assim prevê melhor|não afirma que o M2 assim prevê melhor/.test(limpo))
+    throw new Error("a troca apareceria como promessa de previsão");
+  if(!/a resposta pode muito bem\s*\n?\s*ser não|pode muito bem/.test(limpo))
+    throw new Error("não admite que o resultado pode ser negativo");
 });
 
-t("as três alternativas ficam nomeadas, nenhuma escolhida", ()=>{
+/* v105 — a v104 nomeava três alternativas sem escolher. A escolha foi feita
+   (percentil expandido) e as duas não escolhidas continuam nomeadas na tela,
+   como alternativas não testadas. É isso que este teste passa a guardar. */
+t("as alternativas NÃO escolhidas continuam nomeadas na tela", ()=>{
   const limpo = semComentarios(HTML);
-  ["mediana", "percentil expandido", "z-score por regime"].forEach(function(s){
-    if(limpo.indexOf(s) === -1) throw new Error("alternativa não nomeada: " + s);
+  ["mediana", "z-score por regime", "não testadas"].forEach(function(s){
+    if(limpo.indexOf(s) === -1) throw new Error("alternativa esquecida: " + s);
   });
 });
 
 console.log("\nBLOCO D — nada que decide mudou");
 
-t("MODEL_VERSION continua m6 — a série NÃO zera nesta build", ()=>{
-  const m = /const MODEL_VERSION = "([^"]+)"/.exec(HTML);
-  if(m[1] !== "m6-2026-08-16") throw new Error("modelo bumpado numa build de medição: " + m[1]);
+/* v105 — de fato datado para invariante, como nos harnesses v102 e v103. */
+t("MODEL_VERSION nunca regride — a v104 nasceu no m6", ()=>{
+  const m = /const MODEL_VERSION = "m(\d+)-/.exec(HTML);
+  if(Number(m[1]) < 6) throw new Error("modelo regrediu para m" + m[1]);
 });
 
-t("a fórmula da liquidez continua exatamente a mesma", ()=>{
+/* v105 — a v104 exigia que a fórmula NÃO mudasse, porque era build de
+   medição. Cumpriu-se: a v104 foi ao ar com a régua antiga intacta e a
+   medição na tela. A v105 trocou a régua com o número já publicado, que era
+   exatamente a sequência combinada. O que sobra como invariante é a ORDEM:
+   a medição está no arquivo antes de a régua mudar, e continua nele. */
+t("a medição que justificou a troca continua na tela", ()=>{
   const limpo = semComentarios(HTML);
-  if(!/"macro\.liquidez":\s*yoy\s*=>\s*escalaSuave\(yoy, 6\.67\)/.test(limpo))
-    throw new Error("a régua foi alterada numa build que se propôs a só medir");
+  if(limpo.indexOf("Distribuição do M2") === -1)
+    throw new Error("a régua mudou e a evidência que a justificou sumiu");
 });
 
 t("o BUILD mudou", ()=>{
@@ -202,4 +213,4 @@ t("o BUILD mudou", ()=>{
 console.log("\n" + "=".repeat(62));
 console.log(`${ok} passaram · ${bad} falharam`);
 if(bad){ console.log("\nFALHAS:"); falhas.forEach(f=>console.log("  "+f)); process.exit(1); }
-console.log("v104 verde — o defeito está medido, e a régua intacta.");
+console.log("v104 verde — o defeito medido, e a régua trocada com a evidência na tela.");

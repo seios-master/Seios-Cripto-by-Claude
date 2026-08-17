@@ -215,9 +215,11 @@ t("o 429 não promete mais 3 tentativas onde o servidor faz 2", ()=>{
   if(!/tentou 2×/.test(f)) throw new Error("não diz quantas são");
 });
 
-t("nada do que decide mudou: MODEL_VERSION intacto", ()=>{
-  const m = /const MODEL_VERSION = "([^"]+)"/.exec(HTML);
-  if(m[1] !== "m6-2026-08-16") throw new Error("modelo mexido numa build de coleta: " + m[1]);
+/* v105 — mesma correção do harness-v102: de fato datado para invariante. */
+t("MODEL_VERSION nunca regride — a v103 nasceu no m6", ()=>{
+  const m = /const MODEL_VERSION = "m(\d+)-/.exec(HTML);
+  if(!m) throw new Error("MODEL_VERSION fora do formato mN-data");
+  if(Number(m[1]) < 6) throw new Error("modelo regrediu para m" + m[1]);
 });
 
 console.log("\n" + "=".repeat(62));

@@ -134,9 +134,16 @@ t("lista vazia e lista só de legado não estouram", ()=>{
 
 console.log("\nBLOCO C — o que não podia mudar não mudou");
 
-t("MODEL_VERSION continua m6 — esta build não toca em nada que decide", ()=>{
-  const m = /const MODEL_VERSION = "([^"]+)"/.exec(HTML);
-  if(m[1] !== M) throw new Error("modelo mudou numa build de apresentação: " + m[1]);
+/* v105 — este teste dizia `MODEL_VERSION === "m6-2026-08-16"`. É o mesmo erro
+   que a v101 encontrou nos harnesses v95 e v96: um fato DATADO escrito como
+   invariante, que expira no primeiro bump legítimo. A v102 de fato não mexeu
+   em nada que decide — mas isso é um fato sobre a v102, não sobre o arquivo
+   para sempre. O que vale para sempre é que o modelo nunca ANDA PARA TRÁS:
+   versão congelada não volta, senão a série de observações mistura réguas. */
+t("MODEL_VERSION nunca regride — a v102 nasceu no m6, e daqui não se volta", ()=>{
+  const m = /const MODEL_VERSION = "m(\d+)-/.exec(HTML);
+  if(!m) throw new Error("MODEL_VERSION fora do formato mN-data");
+  if(Number(m[1]) < 6) throw new Error("modelo regrediu para m" + m[1]);
 });
 
 t("o BUILD mudou", ()=>{

@@ -979,12 +979,12 @@ const STORAGE_KEY = "seios_btc_v2";
 // fonte única da versão — usada no rodapé, no histórico e nos exports.
 // Muda toda vez que a fórmula de score/pesos muda, pra nunca misturar
 // decisões de regras diferentes como se fossem comparáveis.
-const BUILD_VERSION = "2026-08-16.104-o-normal-nao-e-zero";
+const BUILD_VERSION = "2026-08-16.105-liquidez-relativa";
 /* v78: versão do MODELO separada da versão do BUILD. Mudança visual não é
    mudança de semântica: só sobe quando peso, fórmula, corte ou trava mudam.
    Toda observação gravada carrega as duas, pra que seis meses depois dê pra
    saber sob qual regra aquela leitura foi produzida. */
-const MODEL_VERSION = "m6-2026-08-16";
+const MODEL_VERSION = "m7-2026-08-16";
 
 // indicador padrão — auto = tenta buscar sozinho; manual = você preenche
 function ind(label, source, note, excludeFromScore){
@@ -1853,6 +1853,9 @@ const BRUTO_PLAUSIVEL = {
      Agora é a faixa da variação: a rede já caiu ~50% num trimestre (China,
      2021) e já subiu bem acima disso. Fora daí é defeito de série. */
   "onchain.hashrate":        { min: -70,  max: 200,      nome: "variação do hash rate em 90d" },
+  /* v105 — o M2 YoY medido em 426 meses foi de −4,9% a +26,6%. A faixa é
+     generosa dos dois lados; fora dela é defeito de série, não economia. */
+  "macro.m2yoy":             { min: -25,  max: 60,       nome: "M2 YoY" },
   "derivativos.putCall":     { min: 0.01, max: 100,      nome: "put/call" },
   "derivativos.longShort":   { min: 0.01, max: 100,      nome: "long/short" },
   "derivativos.takerRatio":  { min: 0.01, max: 100,      nome: "taker buy/sell" }
@@ -2125,11 +2128,18 @@ function percentilExpandido(valor, anteriores, minimo){
   return abaixo / anteriores.length;   // 0 a 1
 }
 
-/* rank em [0,1] vira score de −100 a +100, com a MESMA leitura contrária da
-   escala absoluta: funding alto = manada comprada = risco = score negativo. */
-function scoreDoPercentil(rank){
+/* rank em [0,1] vira score de −100 a +100.
+
+   v105 — O SENTIDO PASSA A SER DECLARADO. Até aqui esta função era só
+   contrária, porque nasceu para o funding: funding alto = manada comprada =
+   risco = score negativo. O M2 é o oposto — mais liquidez é bullish — e
+   reaproveitar a função sem parâmetro inverteria o sinal do indicador de
+   maior peso do sistema, em silêncio, sem erro nenhum.
+   `sentido` segue −1 por padrão para que nada do que já existe mude. */
+function scoreDoPercentil(rank, sentido){
   if(rank === null || rank === undefined) return null;
-  return (0.5 - rank) * 200;
+  const s = (sentido === undefined || sentido === null) ? -1 : (sentido >= 0 ? 1 : -1);
+  return s * (rank - 0.5) * 200;
 }
 
 function janelaCalendario(obs, dias){
@@ -2257,7 +2267,23 @@ const NORMALIZACAO = {
   // macro
   "macro.juros":            d      => escalaSuave(-d, 2.5),          // Δ Fed Funds, pp em ~90d
   "macro.inflacao":         d      => escalaSuave(-d, 4),            // Δ do CPI YoY, pp vs ~3 meses
-  "macro.liquidez":         yoy    => escalaSuave(yoy, 6.67),        // M2 YoY, %
+  /* v105 — A LIQUIDEZ DEIXA DE SER NÍVEL COM CENTRO INVENTADO.
+     Era `escalaSuave(yoy, 6.67)`: centro fixo em zero. A v104 mediu o que
+     isso produzia em 426 meses desde 1991 — 398 bullish (93,4%), 15 bearish
+     (3,5%) — e o caso que fecha o argumento: o M2 de hoje cresce +5,2%, que é
+     o percentil 48 da própria série (ABAIXO da mediana), e a régua antiga
+     pontuava isso como +64,8, extremo bullish, com 35,9% do peso efetivo.
+     Um indicador que responde a mesma coisa a qualquer pergunta não separa
+     nada — por aritmética, não por falta de dados.
+
+     A entrada agora é o RANK, não o YoY: posição do crescimento atual na
+     própria distribuição passada (percentil expandido, mínimo de 120 meses,
+     sem olhar um único mês à frente — a mesma máquina da v96). Sentido
+     DIRETO: crescimento acima do próprio normal é bullish.
+
+     Isto não afirma que o M2 assim prevê melhor. Afirma que agora ele PODE
+     ser testado, o que a versão anterior não podia. */
+  "macro.liquidez":         rank   => scoreDoPercentil(rank, +1),     // percentil do M2 YoY, 0..1
   "macro.dxy":              pct    => escalaSuave(-pct, 12.5),       // variação do dólar, % em ~90d
   "macro.curva":            spread => escalaSuave(spread, 2.5),      // spread 10y-2y, pp
   // geopolítico
@@ -2758,13 +2784,29 @@ async function refreshMarketData(){
     await sleep(400);
 
     { const line = logStep("consultando liquidez — M2 (FRED)");
-      try{ // M2 — crescimento YoY da oferta monetária; mais liquidez = bullish (correlação documentada)
-        const obs = await fetchFredSeries("M2SL", 16);
-        if(obs.length < 13) throw new Error(`M2: só ${obs.length} meses válidos retornados (precisa de 13)`);
-        const yoy = (obs[0].value / obs[12].value - 1) * 100;
-        setAuto("macro","liquidez", norm("macro.liquidez", yoy), `M2 YoY ${yoy>=0?"+":""}${yoy.toFixed(1)}%`, { bruto: yoy, referenceAt: obs[0].date });
+      try{
+        /* v105 — 500 meses em vez de 16. O percentil precisa de história para
+           ter contra o que comparar; 16 meses davam um rank sem significado.
+           É a mesma série e a mesma rota, só a janela mudou. */
+        const obs = await fetchFredSeries("M2SL", 500);
+        if(obs.length < 133) throw new Error(`M2: só ${obs.length} meses retornados (precisa de 133 para o percentil)`);
+        const yoyEm = function(i){ return (obs[i].value / obs[i+12].value - 1) * 100; };
+        const yoy = brutoValido("macro.m2yoy", yoyEm(0));
+        /* obs vem do mais recente para o mais antigo: i=1 em diante é
+           ESTRITAMENTE o passado. O mês avaliado não entra na própria
+           distribuição — é a regra que a v96 testou. */
+        const anteriores = [];
+        for(let i = 1; i + 12 < obs.length; i++){
+          const v = yoyEm(i);
+          if(Number.isFinite(v)) anteriores.push(v);
+        }
+        const rank = percentilExpandido(yoy, anteriores, 120);
+        if(rank === null) throw new Error(`M2: ${anteriores.length} meses de histórico, precisa de 120 para o percentil`);
+        setAuto("macro","liquidez", norm("macro.liquidez", rank),
+          `M2 YoY ${yoy>=0?"+":""}${yoy.toFixed(1)}% — percentil ${(rank*100).toFixed(0)} de ${anteriores.length} meses`,
+          { bruto: yoy, referenceAt: obs[0].date });
         results.ok.push("liquidez/M2 (FRED)");
-        logDone(line, true, `YoY ${yoy>=0?"+":""}${yoy.toFixed(1)}%`);
+        logDone(line, true, `YoY ${yoy>=0?"+":""}${yoy.toFixed(1)}% · percentil ${(rank*100).toFixed(0)}`);
       }catch(e){ setFailed("macro","liquidez", e && e.message); results.fail.push("liquidez/M2 (FRED)"); logDone(line, false, e.message); }
     }
     await sleep(400);
@@ -5560,22 +5602,44 @@ async function fetchMacroHistoryMaps(){
     if(longo && longo.length > 24){
       for(let i = 12; i < longo.length; i++){
         const yoy = (longo[i].value / longo[i-12].value - 1) * 100;
-        if(Number.isFinite(yoy)) M2_LONGO.yoy.push({ date: longo[i].date, yoy: yoy });
+        /* v105 — `availableAt` vem junto: sem ele, `disponivelEm` cai no
+           fallback estimado e o backtest volta a entregar o M2 semanas antes
+           de ele existir. A série longa deixou de ser só medição. */
+        if(Number.isFinite(yoy)) M2_LONGO.yoy.push({
+          date: longo[i].date, yoy: yoy, availableAt: longo[i].availableAt || null
+        });
       }
       M2_LONGO.desde = M2_LONGO.yoy.length ? M2_LONGO.yoy[0].date : null;
     }
   }catch(e){ M2_LONGO.erro = (e && e.message) || "falhou"; }
 
+  /* v105 — O BACKTEST USA O MESMO PERCENTIL DO VIVO, com o prior de 1991.
+     A janela curta de 900 dias continua existindo para nada mais: quem
+     alimenta `maps.liquidez` agora é a série longa, porque um percentil sobre
+     18 leituras não é percentil. O `anteriores` de cada mês é ESTRITAMENTE o
+     que veio antes dele — o mês avaliado nunca entra na própria distribuição,
+     e nenhum mês futuro entra em mês nenhum.
+     O preenchimento diário continua limitado à janela do teste: ranquear 426
+     meses é barato, preencher 35 anos de dias não é. */
   try{
-    const obs = await fetchFredSeriesRange("M2SL", startMonthly);
+    const serie = M2_LONGO.yoy;
+    if(!serie || serie.length < 133)
+      throw new Error("série longa do M2 indisponível (" + (serie ? serie.length : 0) + " meses)");
     fredRegistra("M2SL", null);
     maps.liquidez = {};
-    for(let idx=12; idx<obs.length; idx++){
-      const yoy = (obs[idx].value/obs[idx-12].value - 1)*100;
-      const score = norm("macro.liquidez", yoy);
-      const desde = disponivelEm(obs[idx], DEFASAGEM_PUBLICACAO_DIAS.M2SL, "M2SL");
-      const to = idx+1 < obs.length ? disponivelEm(obs[idx+1], DEFASAGEM_PUBLICACAO_DIAS.M2SL, "M2SL") : new Date();
-      fillDailyRange(maps.liquidez, desde, to, score);
+    const inicioJanela = new Date(startMonthly + "T00:00:00Z");
+    for(let idx = 0; idx < serie.length; idx++){
+      const anteriores = [];
+      for(let k = 0; k < idx; k++) anteriores.push(serie[k].yoy);
+      const rank = percentilExpandido(serie[idx].yoy, anteriores, 120);
+      if(rank === null) continue;           // os primeiros 120 meses são só prior
+      const score = norm("macro.liquidez", rank);
+      const desde = disponivelEm(serie[idx], DEFASAGEM_PUBLICACAO_DIAS.M2SL, "M2SL");
+      const to = idx+1 < serie.length
+        ? disponivelEm(serie[idx+1], DEFASAGEM_PUBLICACAO_DIAS.M2SL, "M2SL")
+        : new Date();
+      if(to < inicioJanela) continue;       // fora do teste: rank calculado, dia não preenchido
+      fillDailyRange(maps.liquidez, desde < inicioJanela ? inicioJanela : desde, to, score);
     }
   }catch(e){ fredRegistra("M2SL", e); }
 
@@ -6471,7 +6535,17 @@ async function runScoreBacktest(){
         if(!S2 || S2.length < 60) return "";
         const vals = S2.map(function(x){ return x.yoy; }).sort(function(a,b){ return a-b; });
         const pct = function(p){ return vals[Math.min(vals.length-1, Math.floor(vals.length*p))]; };
-        const score = function(y){ return norm("macro.liquidez", y); };
+        /* v105 — a tabela passa a mostrar as duas réguas lado a lado. A antiga
+           não existe mais no código que decide; fica aqui, escrita à mão e
+           rotulada, porque uma mudança de escala sem o antes na tela é uma
+           mudança que ninguém consegue conferir. */
+        const scoreAntigo = function(y){ return escalaSuave(y, 6.67); };
+        const rankDe = function(y){
+          let abaixo = 0;
+          for(let i = 0; i < vals.length; i++) if(vals[i] < y) abaixo++;
+          return abaixo / vals.length;
+        };
+        const score = function(y){ return norm("macro.liquidez", rankDe(y)); };
         const faixas = [
           { y: vals[0],               nome: "mínimo (o aperto mais forte da série)" },
           { y: pct(0.05),             nome: "p05" },
@@ -6481,57 +6555,68 @@ async function runScoreBacktest(){
           { y: pct(0.95),             nome: "p95" },
           { y: vals[vals.length-1],   nome: "máximo (a expansão de 2021)" }
         ];
-        const bear   = vals.filter(function(v){ return score(v) <= -15; }).length;
-        const neutro = vals.filter(function(v){ return Math.abs(score(v)) < 15; }).length;
-        const bull   = vals.filter(function(v){ return score(v) >= 15; }).length;
+        const bear   = vals.filter(function(v){ return scoreAntigo(v) <= -15; }).length;
+        const neutro = vals.filter(function(v){ return Math.abs(scoreAntigo(v)) < 15; }).length;
+        const bull   = vals.filter(function(v){ return scoreAntigo(v) >= 15; }).length;
+        const bearN   = vals.filter(function(v){ return score(v) <= -15; }).length;
+        const neutroN = vals.filter(function(v){ return Math.abs(score(v)) < 15; }).length;
+        const bullN   = vals.filter(function(v){ return score(v) >= 15; }).length;
         const hoje   = S2[S2.length-1];
         const rankHoje = vals.filter(function(v){ return v < hoje.yoy; }).length / vals.length;
         const mediana = pct(0.50);
+        const pinta = function(s){
+          return s >= 15 ? "var(--teal)" : (s <= -15 ? "var(--brick)" : "var(--text-faint)");
+        };
         const linha = function(f){
-          const s = score(f.y);
-          const cor = s >= 15 ? "var(--teal)" : (s <= -15 ? "var(--brick)" : "var(--text-faint)");
-          const rot = s >= 15 ? "bullish" : (s <= -15 ? "bearish" : "neutro");
+          const sA = scoreAntigo(f.y), sN = score(f.y);
+          const rot = sN >= 15 ? "bullish" : (sN <= -15 ? "bearish" : "neutro");
           return `<tr><td>${f.nome}</td>
                       <td>${f.y >= 0 ? "+" : ""}${f.y.toFixed(1)}%</td>
-                      <td style="color:${cor};">${s.toFixed(1)}</td>
-                      <td style="color:${cor};">${rot}</td></tr>`;
+                      <td style="color:${pinta(sA)};">${sA.toFixed(1)}</td>
+                      <td style="color:${pinta(sN)};">${sN.toFixed(1)}</td>
+                      <td style="color:${pinta(sN)};">${rot}</td></tr>`;
         };
         return `
           <div style="font-family:var(--font-mono);font-size:10px;color:var(--text-faint);text-transform:uppercase;letter-spacing:.06em;margin:22px 0 10px;border-top:1px solid var(--line-soft);padding-top:16px;">
             Distribuição do M2 — o normal de uma variável que nunca é zero, em ${vals.length} meses desde ${esc(M2_LONGO.desde || "?")}
           </div>
           <div style="font-family:var(--font-mono);font-size:10.5px;color:var(--text-faint);margin-bottom:10px;">
-            Crescimento anual do M2 e o score que a fórmula atual
-            (<code>tanh(YoY / 6,67) × 100</code>, centro em zero) produz em cada faixa.
-            Nada aqui muda o score: é a medição que falta pra decidir a escala com
-            número, não com julgamento.
+            Crescimento anual do M2, o score que a régua ANTIGA produzia
+            (<code>tanh(YoY / 6,67) × 100</code>, centro fixo em zero) e o que a régua
+            NOVA produz (<code>percentil expandido</code>, mínimo de 120 meses, sentido
+            direto). A coluna antiga não existe mais no código que decide: está aqui
+            para a mudança poder ser conferida.
           </div>
           <table class="hist">
-            <thead><tr><th>Faixa</th><th>M2 YoY</th><th>Score que a fórmula dá</th><th>Lado</th></tr></thead>
+            <thead><tr><th>Faixa</th><th>M2 YoY</th><th>Régua antiga (v104)</th><th>Régua nova (v105)</th><th>Lado hoje</th></tr></thead>
             <tbody>${faixas.map(linha).join("")}</tbody>
           </table>
           <p style="font-family:var(--font-mono);font-size:10.5px;color:var(--text-faint);margin-top:10px;">
-            <strong style="color:${bear ? "var(--gold)" : "var(--brick)"};">
-              ${bear} de ${vals.length} meses (${(bear/vals.length*100).toFixed(1)}%)
-            </strong>
-            produziriam leitura BEARISH · ${neutro} neutro (${(neutro/vals.length*100).toFixed(1)}%) ·
-            <strong>${bull} bullish (${(bull/vals.length*100).toFixed(1)}%)</strong>.
-            O indicador precisa que a oferta monetária dos EUA ENCOLHA mais de 1,01% ao ano
-            para marcar contra — e ela quase nunca encolhe. Hoje o M2 cresce
-            ${hoje.yoy >= 0 ? "+" : ""}${hoje.yoy.toFixed(1)}%, que é o percentil
-            ${(rankHoje*100).toFixed(0)} da própria série: uma leitura
-            ${rankHoje > 0.5 ? "acima" : "abaixo"} do normal histórico, pontuada como
-            ${score(hoje.yoy).toFixed(1)} — ${Math.abs(score(hoje.yoy)) >= 15 ? "extremo" : "neutro"}.
+            <strong>Régua antiga:</strong> ${bear} de ${vals.length} meses bearish
+            (${(bear/vals.length*100).toFixed(1)}%) · ${neutro} neutro
+            (${(neutro/vals.length*100).toFixed(1)}%) ·
+            <strong style="color:var(--teal);">${bull} bullish (${(bull/vals.length*100).toFixed(1)}%)</strong>.
+            <br>
+            <strong>Régua nova:</strong> ${bearN} bearish (${(bearN/vals.length*100).toFixed(1)}%) ·
+            ${neutroN} neutro (${(neutroN/vals.length*100).toFixed(1)}%) ·
+            ${bullN} bullish (${(bullN/vals.length*100).toFixed(1)}%).
+            <br><br>
+            Hoje o M2 cresce ${hoje.yoy >= 0 ? "+" : ""}${hoje.yoy.toFixed(1)}%, percentil
+            ${(rankHoje*100).toFixed(0)} da própria série — ${rankHoje > 0.5 ? "acima" : "abaixo"}
+            do normal histórico. A régua antiga pontuava
+            <strong>${scoreAntigo(hoje.yoy).toFixed(1)}</strong>; a nova pontua
+            <strong>${score(hoje.yoy).toFixed(1)}</strong>.
           </p>
           <p style="font-family:var(--font-mono);font-size:10.5px;color:var(--text-faint);margin-top:8px;">
-            <strong>O que isto mede, e o que NÃO decide:</strong> um centro em zero num indicador
-            de NÍVEL faz o normal parecer extremo. Se o centro fosse a mediana da série
-            (${mediana >= 0 ? "+" : ""}${mediana.toFixed(1)}%), o mesmo M2 de hoje daria
-            ${escalaSuave(hoje.yoy - mediana, 6.67).toFixed(1)} em vez de ${score(hoje.yoy).toFixed(1)}.
-            Este número é ilustração da ordem de grandeza, não proposta: recentrar na mediana
-            de 35 anos é escolher um regime só, e a decisão entre isso, percentil expandido
-            (a régua da v96) ou z-score por regime precisa de teste próprio, com a série de
-            volta ao ponto de partida. Nenhuma das três entra sem bump declarado.
+            <strong>O que a troca afirma, e o que NÃO afirma:</strong> a distribuição da régua
+            nova é aproximadamente uniforme por construção — é isso que um percentil faz, e é
+            exatamente o ponto: o indicador voltou a poder dizer "abaixo do normal". Isto
+            <strong>não</strong> afirma que o M2 assim prevê melhor. Afirma que agora ele PODE ser
+            testado, o que a versão anterior não podia: uma constante não separa nada por
+            aritmética, independentemente de a teoria por trás estar certa. Se o M2 relativo
+            antecede o BTC é o que as observações vão responder — e a resposta pode muito bem
+            ser não. A mediana da série (${mediana >= 0 ? "+" : ""}${mediana.toFixed(1)}%) e o
+            z-score por regime continuam sobre a mesa como alternativas não testadas.
           </p>
         `;
       })()}

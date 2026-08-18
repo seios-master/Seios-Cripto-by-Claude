@@ -227,13 +227,18 @@ t("a tela declara que ruído baixo NÃO absolve quem tem N≤2 em série lisa", 
 
 console.log("\nBLOCO E — build de medição não muda modelo");
 
-t("MODEL_VERSION continua m9 — nenhum score mudou de valor", ()=>{
+  /* v110 — DE FATO DATADO PARA INVARIANTE. Este teste dizia "continua m9", que
+     é um fato sobre o instante em que esta build nasceu, não uma invariante:
+     expirou no primeiro bump legítimo (m10, v110). Mesmo erro que a v101
+     corrigiu nos harnesses v95/v96 e a v105 nos v102/v103/v104 — e que eu
+     repeti três vezes no mesmo dia, depois de ler os comentários que o
+     descreviam. O que vale para sempre é que o modelo não anda para trás; o
+     que esta build garantia — não ter mexido na fórmula que vota — já é
+     afirmado pelo teste vizinho. */
+t("MODEL_VERSION nunca regride — a v107 nasceu no m9", ()=>{
   const m = /const MODEL_VERSION = "m(\d+)-/.exec(HTML);
   if(!m) throw new Error("MODEL_VERSION fora do formato mN-data");
   if(Number(m[1]) < 9) throw new Error("modelo regrediu para m" + m[1]);
-  if(Number(m[1]) > 9)
-    throw new Error("m" + m[1] + ": a v107 é build de MEDIÇÃO e não pode bumpar — " +
-                    "bump zera a contagem das 777 sem que nada tenha mudado de valor");
 });
 
 t("o BUILD mudou", ()=>{

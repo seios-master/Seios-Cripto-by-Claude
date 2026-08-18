@@ -979,12 +979,12 @@ const STORAGE_KEY = "seios_btc_v2";
 // fonte única da versão — usada no rodapé, no histórico e nos exports.
 // Muda toda vez que a fórmula de score/pesos muda, pra nunca misturar
 // decisões de regras diferentes como se fossem comparáveis.
-const BUILD_VERSION = "2026-08-18.109-barra-de-erro";
+const BUILD_VERSION = "2026-08-18.110-fred-fechado";
 /* v78: versão do MODELO separada da versão do BUILD. Mudança visual não é
    mudança de semântica: só sobe quando peso, fórmula, corte ou trava mudam.
    Toda observação gravada carrega as duas, pra que seis meses depois dê pra
    saber sob qual regra aquela leitura foi produzida. */
-const MODEL_VERSION = "m9-2026-08-18";
+const MODEL_VERSION = "m10-2026-08-18";
 
 // indicador padrão — auto = tenta buscar sozinho; manual = você preenche
 function ind(label, source, note, excludeFromScore){
@@ -2128,6 +2128,47 @@ function fredUrl(params){
 /* --- FRED — leitura ao vivo. Retorna observações mais recentes primeiro;
    ignora pontos ausentes (marcados como "."). Não recebe mais chave: ela
    vive no servidor. --- */
+/* =====================================================================
+   v110 — O DIA EM FORMAÇÃO TAMBÉM EXISTE NO FRED
+   =====================================================================
+   MEDIDO ao vivo, entre duas leituras separadas por 53 minutos:
+
+       geopolitico.epu   −50,49 → +87,86     (138 pontos de score)
+       EPU bruto            396 → 182        (o índice caiu pela metade)
+
+   O ponto mais recente de uma série diária do FRED pode ser provisório e
+   ser revisado no mesmo dia. `obs[0]` lia esse ponto.
+
+   É A v101 OUTRA VEZ. Aquela build criou `soPeriodosFechados` e aplicou aos
+   quatro consumidores que a auditoria da época listou — hash rate,
+   CoinMetrics, GDELT e ouro. Nenhuma série do FRED estava na lista, e
+   ninguém foi conferir se havia mais. Ficaram oito de fora: DFF, DTWEXBGS,
+   USEPUINDXD, DCOILWTICO, DEXUSEU, SP500, DGS10 e DFII10 — juros, dólar,
+   EPU, petróleo, euro, S&P, 10 anos e o sensor de juro real. Somadas, ~30%
+   do peso do sistema.
+
+   A correção vai na FONTE, não nos oito chamadores. Consumidor novo nasce
+   protegido, e um nono não escapa por não estar numa lista — que foi
+   exatamente como estes oito escaparam.
+
+   Séries mensais não são afetadas: o mês corrente já vem datado no dia 1,
+   que é sempre anterior a hoje. */
+const FRED_FORMACAO = { descartados: 0, series: [] };
+
+function fredSoFechados(obs, seriesId){
+  const fechados = soPeriodosFechados(obs);
+  const cortados = obs.length - fechados.length;
+  if(cortados > 0){
+    FRED_FORMACAO.descartados += cortados;
+    if(FRED_FORMACAO.series.indexOf(seriesId) === -1) FRED_FORMACAO.series.push(seriesId);
+  }
+  /* série que fica vazia é FALHA, não lote mudo: a mesma regra da v93 para
+     janela que não alcança. */
+  if(!fechados.length)
+    throw new Error("FRED sem período fechado: " + seriesId);
+  return fechados;
+}
+
 async function fetchFredSeries(seriesId, limit){
   const url = fredUrl({ series_id: seriesId, sort_order: "desc", limit: limit });
   const res = await smartFetch(url);
@@ -2137,7 +2178,7 @@ async function fetchFredSeries(seriesId, limit){
     .filter(o => o.value !== ".")
     .map(o => ({ date:o.date, value:Number(o.value) }));
   if(!obs.length) throw new Error("FRED sem dado: " + seriesId);
-  return obs; // obs[0] = mais recente
+  return fredSoFechados(obs, seriesId); // obs[0] = mais recente FECHADO
 }
 
 /* JANELA DE CALENDÁRIO AO VIVO (v93) — o defeito de granularidade, terceira aparição.
@@ -4548,6 +4589,15 @@ function relatorioTexto(snap, snaps){
   });
   L.push("");
 
+  if(FRED_FORMACAO.series.length){
+    L.push("DIA EM FORMAÇÃO DESCARTADO (v110): " + FRED_FORMACAO.descartados +
+           " ponto(s) em " + FRED_FORMACAO.series.join(", "));
+    L.push("  o ponto mais recente de uma série diária do FRED pode ser provisório e ser");
+    L.push("  revisado no mesmo dia. Medido: o EPU marcou 396 numa leitura e 182 apenas");
+    L.push("  53 minutos depois — 138 pontos de score num indicador de 90 dias.");
+    L.push("");
+  }
+
   if(snap.falhas && snap.falhas.length){
     L.push("FALHAS NESTA RODADA (" + snap.falhas.length + ")");
     snap.falhas.forEach(function(f){ L.push("  " + f); });
@@ -5515,7 +5565,11 @@ async function fetchFredSeriesRange(seriesId, startDate){
   // uma data de referência pode ter várias linhas (revisões); fica a primeira,
   // que é a divulgação inicial — o que existia naquele momento
   const vistos = new Set();
-  return (data.observations || [])
+  /* v110 — o HISTÓRICO filtra igual ao vivo. Se o vivo descarta o dia em
+     formação e o backtest não, os dois voltam a medir coisas diferentes com o
+     mesmo nome — que é exatamente o defeito que a v93 e a v101 já corrigiram,
+     em consumidores diferentes, duas vezes. */
+  return fredSoFechados((data.observations || [])
     .filter(o=>o.value !== "." && Number.isFinite(Number(o.value)))
     .map(function(o){
       return {
@@ -5527,7 +5581,7 @@ async function fetchFredSeriesRange(seriesId, startDate){
       };
     })
     .filter(o=>{ if(vistos.has(o.date)) return false; vistos.add(o.date); return true; })
-    .sort((a,b)=> a.date < b.date ? -1 : 1);
+    .sort((a,b)=> a.date < b.date ? -1 : 1), seriesId);
 }
 
 function fillDailyRange(map, fromDate, toDate, value){
@@ -5600,6 +5654,9 @@ async function fetchMacroHistoryMaps(){
      rodada anterior não é falha desta rodada — é a mesma regra do dado velho
      que não pode votar, aplicada ao texto que explica os dados. */
   S.market.fredSemVintage = [];
+  /* v110 — mesmo lugar, mesma regra da v99.1: acumulador que não zera vira
+     memória de erro corrigido. */
+  FRED_FORMACAO.descartados = 0; FRED_FORMACAO.series = [];
   const startDaily = new Date(Date.now() - 400*24*3600*1000).toISOString().slice(0,10);
   // 900 dias garante observações suficientes pra que o preenchimento por
   // meses cubra o ano inteiro do backtest (bug anterior: só cobria ~2 meses)

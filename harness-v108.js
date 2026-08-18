@@ -135,11 +135,17 @@ t("o vivo continua com a régua ANTIGA — a v108 não troca nada", ()=>{
     throw new Error("o hash rate do backtest trocou de régua");
 });
 
-t("MODEL_VERSION continua m9 — nenhum score mudou de valor", ()=>{
+  /* v110 — DE FATO DATADO PARA INVARIANTE. Este teste dizia "continua m9", que
+     é um fato sobre o instante em que esta build nasceu, não uma invariante:
+     expirou no primeiro bump legítimo (m10, v110). Mesmo erro que a v101
+     corrigiu nos harnesses v95/v96 e a v105 nos v102/v103/v104 — e que eu
+     repeti três vezes no mesmo dia, depois de ler os comentários que o
+     descreviam. O que vale para sempre é que o modelo não anda para trás; o
+     que esta build garantia — não ter mexido na fórmula que vota — já é
+     afirmado pelo teste vizinho. */
+t("MODEL_VERSION nunca regride — a v108 nasceu no m9", ()=>{
   const m = /const MODEL_VERSION = "m(\d+)-/.exec(HTML);
   if(Number(m[1]) < 9) throw new Error("modelo regrediu para m" + m[1]);
-  if(Number(m[1]) > 9)
-    throw new Error("m" + m[1] + ": laboratório não muda score, e bump zera as 777 à toa");
 });
 
 console.log("\nBLOCO C — as duas réguas de fato diferem (senão a tabela não decide nada)");

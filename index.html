@@ -979,12 +979,12 @@ const STORAGE_KEY = "seios_btc_v2";
 // fonte única da versão — usada no rodapé, no histórico e nos exports.
 // Muda toda vez que a fórmula de score/pesos muda, pra nunca misturar
 // decisões de regras diferentes como se fossem comparáveis.
-const BUILD_VERSION = "2026-08-16.105-liquidez-relativa";
+const BUILD_VERSION = "2026-08-17.106-book-sensor";
 /* v78: versão do MODELO separada da versão do BUILD. Mudança visual não é
    mudança de semântica: só sobe quando peso, fórmula, corte ou trava mudam.
    Toda observação gravada carrega as duas, pra que seis meses depois dê pra
    saber sob qual regra aquela leitura foi produzida. */
-const MODEL_VERSION = "m7-2026-08-16";
+const MODEL_VERSION = "m8-2026-08-17";
 
 // indicador padrão — auto = tenta buscar sozinho; manual = você preenche
 function ind(label, source, note, excludeFromScore){
@@ -1056,7 +1056,20 @@ function defaultState(){
         momentum:  ind("Momentum 24h", "auto"),
         rsi:       ind("RSI-SMA (14, média simples)", "auto"),
         mediaMovel:ind("Preço vs. Média Móvel 50d", "auto"),
-        bookImbalance: ind("Desequilíbrio do livro de ofertas (Binance)", "auto")
+        /* v106 — BOOK IMBALANCE vira SENSOR, como o ouro na v68. Continua
+           sendo coletado e gravado na série todo dia; para de entrar no score.
+           MEDIDO ao vivo, não suposto: +27,95 → +66,38 → −54,16 → −78,33 em
+           poucas horas — 120 pontos em 25 minutos, sozinho jogando o motor
+           Técnico de +9,86 para −14,50.
+           Três defeitos empilhados: soma quantidade dos 100 níveis sem
+           converter em notional; pesa igual o topo do livro e o nível a 3% do
+           meio; e, o que nenhuma fórmula conserta, mede UM INSTANTE num
+           sistema que lê de 8 em 8 horas.
+           Isto NÃO afirma que a microestrutura não informa nada. Afirma que
+           um instantâneo não é observação no relógio deste instrumento. A
+           série de sensor decide, com as 777 janelas. Refazer com notional,
+           distância do meio e vários snapshots é classe C — depois. */
+        bookImbalance: ind("Desequilíbrio do livro de ofertas (Binance) · sensor, não pontua", "auto", "", true)
       }},
       sentimento:    { label:"Sentimento",                   weight:.05, indicators:{
         fearGreed: ind("Fear & Greed (contém volatilidade e momentum — sobrepõe o Técnico)", "auto"),
@@ -1097,6 +1110,34 @@ function defaultState(){
     history: [],
     nextId: 1
   };
+}
+
+/* v106 — DADO SALVO NÃO DECIDE QUESTÃO DE MODELO.
+   `loadState()` funde o salvo por cima do padrão com
+   `Object.assign({}, base.ind, parsed.ind)`. `excludeFromScore` é campo do
+   indicador e viaja no localStorage — então trocar o padrão para `true` não
+   teria efeito NENHUM num navegador que já rodou a build anterior: o `false`
+   gravado venceria o código novo, a tela diria "sensor, não pontua" e o
+   indicador continuaria votando. Erro sem exceção, sem log, só no resultado.
+
+   Quem vota é decisão de MODELO, versionada junto com o MODEL_VERSION —
+   nunca preferência do usuário nem herança de estado. O padrão manda, sempre.
+   (O ouro, sensor desde a v68, estava exposto ao mesmo buraco.)
+
+   Mesma família da v99.1 — acumulador que não zera — e da v102 — leitura de
+   régua antiga decidindo sob régua nova. */
+function forcarSensores(merged, base){
+  if(!merged || !base || !merged.motors || !base.motors) return merged;
+  Object.keys(base.motors).forEach(function(mk){
+    const bm = base.motors[mk], mm = merged.motors[mk];
+    if(!bm || !bm.indicators || !mm || !mm.indicators) return;
+    Object.keys(bm.indicators).forEach(function(ik){
+      if(!mm.indicators[ik]) return;
+      // só o direito de voto é reimposto — valor, nota e bruto salvos ficam
+      mm.indicators[ik].excludeFromScore = !!bm.indicators[ik].excludeFromScore;
+    });
+  });
+  return merged;
 }
 
 function loadState(){
@@ -1145,6 +1186,9 @@ function loadState(){
     merged.events = parsed.events || [];
     merged.market = Object.assign({}, base.market, parsed.market || {});
     merged.apiKeys = Object.assign({}, base.apiKeys, parsed.apiKeys || {});
+    /* v106 — DEPOIS do merge, e por isso funciona: o Object.assign acima
+       acabou de deixar o salvo sobrescrever o padrão. */
+    forcarSensores(merged, base);
     return merged;
   }catch(e){
     console.warn("Falha ao ler localStorage, usando estado padrão.", e);
@@ -3276,7 +3320,10 @@ async function refreshMarketData(){
   { const line = logStep("consultando desequilíbrio do book (Binance)");
     try{
       const imb = await fetchBinanceBookImbalance();
-      setAuto("tecnico","bookImbalance", clamp(imb, -100, 100), `desequilíbrio do book ${imb>=0?"+":""}${imb.toFixed(1)}%`, { bruto: imb });
+      setAuto("tecnico","bookImbalance", clamp(imb, -100, 100),
+        `desequilíbrio do book ${imb>=0?"+":""}${imb.toFixed(1)}% — sensor, não pontua `
+        + `(oscilou 120 pontos em 25min; instantâneo demais para leituras de 8 em 8h — `
+        + `pode ter sinal, a série decide)`, { bruto: imb });
       results.ok.push("book imbalance");
       logDone(line, true, `${imb>=0?"+":""}${imb.toFixed(1)}%`);
     }catch(e){ setFailed("tecnico","bookImbalance", e && e.message); results.fail.push("book imbalance"); logDone(line, false, e.message); }
@@ -4922,7 +4969,10 @@ const FAMILIA_TETO = {
   cambial:            0.08,   // DXY e euro medem a mesma coisa
   uso_rede:           0.08,
   mineracao:          0.05,
-  microestrutura:     0.05    // book imbalance oscilou 43 pontos numa hora
+  /* v106 — a família ficou SEM VOTANTE: o book imbalance era o único membro
+     e virou sensor. O teto continua declarado para o dia em que a
+     microestrutura voltar a votar com uma medida que caiba no relógio de 8h. */
+  microestrutura:     0.05
 };
 
 function familiaDoIndicador(motorKey, indKey){

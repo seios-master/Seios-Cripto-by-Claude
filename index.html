@@ -979,12 +979,12 @@ const STORAGE_KEY = "seios_btc_v2";
 // fonte única da versão — usada no rodapé, no histórico e nos exports.
 // Muda toda vez que a fórmula de score/pesos muda, pra nunca misturar
 // decisões de regras diferentes como se fossem comparáveis.
-const BUILD_VERSION = "2026-08-17.106-book-sensor";
+const BUILD_VERSION = "2026-08-18.106.1-sensor-alias";
 /* v78: versão do MODELO separada da versão do BUILD. Mudança visual não é
    mudança de semântica: só sobe quando peso, fórmula, corte ou trava mudam.
    Toda observação gravada carrega as duas, pra que seis meses depois dê pra
    saber sob qual regra aquela leitura foi produzida. */
-const MODEL_VERSION = "m8-2026-08-17";
+const MODEL_VERSION = "m9-2026-08-18";
 
 // indicador padrão — auto = tenta buscar sozinho; manual = você preenche
 function ind(label, source, note, excludeFromScore){
@@ -1126,8 +1126,20 @@ function defaultState(){
 
    Mesma família da v99.1 — acumulador que não zera — e da v102 — leitura de
    régua antiga decidindo sob régua nova. */
-function forcarSensores(merged, base){
-  if(!merged || !base || !merged.motors || !base.motors) return merged;
+function forcarSensores(merged){
+  /* v106.1 — O PADRÃO VEM DE DENTRO, e o motivo custou uma build.
+     A v106 recebia `base` de fora e confiava nele. Só que `loadState` faz
+     `merged.motors = base.motors` — MESMA REFERÊNCIA — e o laço de merge
+     escreve nos dois ao mesmo tempo. Quando o reforço rodava, o "padrão"
+     já tinha sido sobrescrito pelo estado salvo: ele copiava `false` sobre
+     `false`, executava, e não fazia nada.
+     MEDIDO ao vivo na v106: o Técnico marcou −6,90, que é a média dos CINCO
+     indicadores (13,61 − 48,09)/5; sem o book seriam +3,40. O ouro escapou
+     por acidente — o valor salvo dele já era `true`.
+     `defaultState()` constrói do zero a cada chamada. Ninguém pode
+     contaminá-lo antes, porque ele não existe antes. */
+  const base = defaultState();
+  if(!merged || !merged.motors) return merged;
   Object.keys(base.motors).forEach(function(mk){
     const bm = base.motors[mk], mm = merged.motors[mk];
     if(!bm || !bm.indicators || !mm || !mm.indicators) return;
@@ -1188,7 +1200,7 @@ function loadState(){
     merged.apiKeys = Object.assign({}, base.apiKeys, parsed.apiKeys || {});
     /* v106 — DEPOIS do merge, e por isso funciona: o Object.assign acima
        acabou de deixar o salvo sobrescrever o padrão. */
-    forcarSensores(merged, base);
+    forcarSensores(merged);
     return merged;
   }catch(e){
     console.warn("Falha ao ler localStorage, usando estado padrão.", e);

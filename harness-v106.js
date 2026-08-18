@@ -134,11 +134,10 @@ t("a microestrutura não tem OUTRO votante escondido", ()=>{
 console.log("\nBLOCO B — o estado salvo NÃO ressuscita o voto");
 
 t("forcarSensores devolve o book ao estado de sensor, mesmo com `false` salvo", ()=>{
-  const base = API.defaultState();
   const salvo = API.defaultState();
   salvo.motors.tecnico.indicators.bookImbalance.excludeFromScore = false; // v105 no disco
   salvo.motors.tecnico.indicators.bookImbalance.value = -78.33;
-  API.forcarSensores(salvo, base);
+  API.forcarSensores(salvo);
   eq(salvo.motors.tecnico.indicators.bookImbalance.excludeFromScore, true,
      "depois do reforço:");
   eq(salvo.motors.tecnico.indicators.bookImbalance.value, -78.33,
@@ -146,35 +145,75 @@ t("forcarSensores devolve o book ao estado de sensor, mesmo com `false` salvo", 
 });
 
 t("o ouro estava exposto ao mesmo buraco desde a v68 — e agora não está", ()=>{
-  const base = API.defaultState();
   const salvo = API.defaultState();
   salvo.motors.ativosGlobais.indicators.ouro.excludeFromScore = false;
-  API.forcarSensores(salvo, base);
+  API.forcarSensores(salvo);
   eq(salvo.motors.ativosGlobais.indicators.ouro.excludeFromScore, true, "ouro:");
 });
 
 t("quem VOTA continua votando — o reforço não é um interruptor geral", ()=>{
-  const base = API.defaultState();
   const salvo = API.defaultState();
-  API.forcarSensores(salvo, base);
+  API.forcarSensores(salvo);
   eq(salvo.motors.tecnico.indicators.rsi.excludeFromScore, false, "rsi:");
   eq(salvo.motors.macro.indicators.liquidez.excludeFromScore, false, "liquidez:");
 });
 
 t("indicador que só existe no salvo não estoura o reforço", ()=>{
-  const base = API.defaultState();
   const salvo = API.defaultState();
   salvo.motors.tecnico.indicators.inventado = { excludeFromScore: false };
   salvo.motors.inventado = { indicators: { x: { excludeFromScore: false } } };
-  API.forcarSensores(salvo, base);   // não pode levantar
+  API.forcarSensores(salvo);   // não pode levantar
+});
+
+/* ===================================================================
+   O TESTE QUE FALTAVA NA v106 — e por isso a v106 foi ao ar quebrada.
+   A v106 chamava `forcarSensores(merged, base)` e eu testei passando DOIS
+   `defaultState()` independentes. No código real eles são O MESMO OBJETO:
+   `loadState` faz `merged.motors = base.motors`, e o laço de merge escreve
+   dentro dos dois ao mesmo tempo. Quando o reforço rodava, o `base` já
+   estava contaminado com o `false` salvo — ele copiava `false` sobre
+   `false`, executava, e não fazia nada.
+   MEDIDO ao vivo na v106: Técnico marcou −6,90, que é a média dos CINCO
+   (13,61 − 48,09)/5. Sem o book seriam +3,40. O ouro escapou por acidente:
+   o valor salvo dele já era `true`.
+   Este teste reproduz o loadState inteiro, com o aliasing. Testar a função
+   sozinha não bastava — foi testar a defesa sem o ataque. */
+t("O TESTE QUE FALTAVA: o reforço funciona com o `base` JÁ CONTAMINADO", ()=>{
+  const parsedNoDisco = JSON.parse(JSON.stringify(API.defaultState()));
+  parsedNoDisco.motors.tecnico.indicators.bookImbalance.excludeFromScore = false;
+  // réplica fiel do miolo do loadState, aliasing incluído
+  const base = API.defaultState();
+  const merged = Object.assign({}, base, parsedNoDisco);
+  merged.motors = base.motors;                        // <<< a mesma referência
+  Object.keys(base.motors).forEach(function(mk){
+    if(parsedNoDisco.motors[mk] && parsedNoDisco.motors[mk].indicators){
+      Object.keys(base.motors[mk].indicators).forEach(function(ik){
+        if(parsedNoDisco.motors[mk].indicators[ik]){
+          merged.motors[mk].indicators[ik] = Object.assign(
+            {}, base.motors[mk].indicators[ik], parsedNoDisco.motors[mk].indicators[ik]);
+        }
+      });
+    }
+  });
+  if(base.motors.tecnico.indicators.bookImbalance.excludeFromScore !== false)
+    throw new Error("o teste não reproduz o aliasing; o loadState mudou de forma");
+  API.forcarSensores(merged);
+  eq(merged.motors.tecnico.indicators.bookImbalance.excludeFromScore, true,
+     "depois do reforço, com o base contaminado:");
+});
+
+t("o reforço não confia em quem chama — ele deriva o padrão de dentro", ()=>{
+  const f = semComentarios(declDe("forcarSensores"));
+  if(!/defaultState\(\)/.test(f))
+    throw new Error("continua recebendo o padrão de fora, e fora ele pode já estar contaminado");
 });
 
 t("loadState CHAMA o reforço, e DEPOIS do merge", ()=>{
   const f = semComentarios(declDe("loadState"));
-  if(!/forcarSensores\(merged, base\)/.test(f))
+  if(!/forcarSensores\(merged\)/.test(f))
     throw new Error("o merge continua deixando o dado salvo decidir questão de modelo");
   const iMerge = f.indexOf("Object.assign(");
-  const iForca = f.indexOf("forcarSensores(merged, base)");
+  const iForca = f.indexOf("forcarSensores(merged)");
   if(!(iMerge > -1 && iForca > iMerge))
     throw new Error("o reforço acontece antes do merge — o Object.assign desfaz ele em seguida");
 });
@@ -191,16 +230,21 @@ t("a importação de backup passa pelo mesmo caminho", ()=>{
 
 console.log("\nBLOCO C — a mudança está declarada");
 
-t("MODEL_VERSION foi para m8 — 5,1% do peso deixou de votar", ()=>{
+/* v106.1 — a leitura coletada sob m8 foi produzida com o book AINDA VOTANDO:
+   o rótulo dizia sensor e o score somava cinco. Ela não é m8, é m7 com nome
+   errado. m9 separa a régua declarada da régua que de fato rodou. Custo real:
+   1 leitura e 0 janelas independentes. */
+t("MODEL_VERSION foi para m9 — o m8 rodou com o book votando", ()=>{
   const m = /const MODEL_VERSION = "m(\d+)-/.exec(HTML);
   if(!m) throw new Error("MODEL_VERSION fora do formato mN-data");
-  if(Number(m[1]) < 8)
+  if(Number(m[1]) < 9)
     throw new Error("continua m" + m[1] + ": o score muda de valor sem bump, e a série mistura réguas");
 });
 
 t("o BUILD mudou", ()=>{
   const m = /const BUILD_VERSION = "([^"]+)"/.exec(HTML);
   if(/\.105-/.test(m[1])) throw new Error("continua a v105: " + m[1]);
+  if(/^2026-08-17\.106-/.test(m[1])) throw new Error("continua a v106 quebrada: " + m[1]);
 });
 
 t("a nota da leitura diz que o número não entra no score", ()=>{

@@ -40,10 +40,112 @@
     --font-body:'Courier New',ui-monospace,"SF Mono",Consolas,monospace;
     --font-mono:ui-monospace,"SF Mono","Cascadia Code","JetBrains Mono",Consolas,monospace;
   }
+
+  /* =====================================================================
+     v114 — SEIS PELES ALTERNATIVAS
+     =====================================================================
+     O :root acima continua sendo o padrão: quem nunca escolheu nada abre
+     exatamente no tema de sempre. Cada bloco abaixo só redefine as MESMAS
+     variáveis — nenhum id, classe ou seletor muda, e por isso nenhum painel,
+     botão ou verificação de estrutura é afetado.
+
+     Uma pele que esqueça uma variável faz o painel dela sumir ou virar texto
+     da cor do fundo, sem erro e sem log. O harness-v114 varre as variáveis
+     que o CSS consome e exige que as seis definam todas. */
+
+  /* 1 · Papel milimetrado — o caderno de laboratório */
+  html[data-skin="milimetrado"]{
+    --bg:#F2EFE6; --bg-alt:#EAE6DA; --panel:#FBF9F3; --panel-raised:#F5F2E9;
+    --line:#B9B2A0; --line-soft:#DED8C8;
+    --text:#1E2A24; --text-dim:#5A6660; --text-faint:#8A9089;
+    --copper:#1B4D8F; --copper-soft:#1B4D8F22;
+    --teal:#1B6E4A; --teal-soft:#1B6E4A22;
+    --brick:#B3301F; --brick-soft:#B3301F1A;
+    --gold:#B07B12; --gold-soft:#B07B121A; --slate:#7C8580;
+    --font-display:"Iowan Old Style","Charter",Georgia,serif;
+    --font-body:"Iowan Old Style","Charter",Georgia,serif;
+    --font-mono:ui-monospace,"SF Mono","Menlo",monospace;
+  }
+  /* 2 · Âmbar de fósforo — o osciloscópio de bancada */
+  html[data-skin="ambar"]{
+    --bg:#14100C; --bg-alt:#1B1610; --panel:#1A1510; --panel-raised:#241D15;
+    --line:#5A452A; --line-soft:#332818;
+    --text:#FFC46B; --text-dim:#C79A54; --text-faint:#8A6B3C;
+    --copper:#FFB74D; --copper-soft:#FFB74D26;
+    --teal:#7FD4A8; --teal-soft:#7FD4A826;
+    --brick:#FF7A5C; --brick-soft:#FF7A5C26;
+    --gold:#FFD98A; --gold-soft:#FFD98A26; --slate:#7A6A52;
+    --font-display:"Avenir Next Condensed","Helvetica Neue",sans-serif;
+    --font-body:"Avenir Next","Helvetica Neue",system-ui,sans-serif;
+    --font-mono:ui-monospace,"SF Mono","Menlo",monospace;
+  }
+  /* 3 · Índigo de projeto — a prancha de desenho técnico */
+  html[data-skin="indigo"]{
+    --bg:#0E1A2B; --bg-alt:#132234; --panel:#132437; --panel-raised:#1A2E45;
+    --line:#2F5478; --line-soft:#1E3A55;
+    --text:#E8F1F8; --text-dim:#9FBBD4; --text-faint:#6D8CA8;
+    --copper:#5FC8E8; --copper-soft:#5FC8E826;
+    --teal:#5FE3B0; --teal-soft:#5FE3B026;
+    --brick:#FF8A80; --brick-soft:#FF8A8026;
+    --gold:#FFD37E; --gold-soft:#FFD37E26; --slate:#5B7898;
+    --font-display:"Futura","Avenir Next",system-ui,sans-serif;
+    --font-body:"Avenir Next",system-ui,sans-serif;
+    --font-mono:ui-monospace,"SF Mono","Menlo",monospace;
+  }
+  /* 5 · Terra de levantamento — o relatório de campo */
+  html[data-skin="terra"]{
+    --bg:#26241F; --bg-alt:#2E2B25; --panel:#2B2822; --panel-raised:#35312A;
+    --line:#5C5445; --line-soft:#3D382F;
+    --text:#EFE7D8; --text-dim:#B6AB95; --text-faint:#877E6C;
+    --copper:#D9A441; --copper-soft:#D9A44126;
+    --teal:#8FBF7F; --teal-soft:#8FBF7F26;
+    --brick:#D2694B; --brick-soft:#D2694B26;
+    --gold:#E8C46A; --gold-soft:#E8C46A26; --slate:#7E7666;
+    --font-display:"Optima","Palatino",Georgia,serif;
+    --font-body:"Palatino","Iowan Old Style",Georgia,serif;
+    --font-mono:ui-monospace,"SF Mono","Menlo",monospace;
+  }
+  /* 9 · Cianotipia — o processo, não a imitação */
+  html[data-skin="ciano"]{
+    --bg:#0A2A5E; --bg-alt:#0D3370; --panel:#0C2F68; --panel-raised:#103A7C;
+    --line:#8FBFE8; --line-soft:#2F5E9E;
+    --text:#EAF4FF; --text-dim:#A9C9E8; --text-faint:#7BA3C9;
+    --copper:#FFFFFF; --copper-soft:#FFFFFF26;
+    --teal:#9BE8C8; --teal-soft:#9BE8C826;
+    --brick:#FFB0A0; --brick-soft:#FFB0A026;
+    --gold:#FFE08A; --gold-soft:#FFE08A26; --slate:#6D93BC;
+    --font-display:"Optima","Avenir Next",system-ui,sans-serif;
+    --font-body:"Avenir Next",system-ui,sans-serif;
+    --font-mono:ui-monospace,"SF Mono","Menlo",monospace;
+  }
+  /* 11 · Carta batimétrica — a profundidade em curvas de nível */
+  html[data-skin="batimetria"]{
+    --bg:#EAF0EE; --bg-alt:#DDE7E5; --panel:#F5F8F7; --panel-raised:#E7EFED;
+    --line:#4E7C78; --line-soft:#B7CCC9;
+    --text:#132B2C; --text-dim:#456160; --text-faint:#7A9391;
+    --copper:#0F6E78; --copper-soft:#0F6E7820;
+    --teal:#1B7A5A; --teal-soft:#1B7A5A20;
+    --brick:#C05621; --brick-soft:#C0562118;
+    --gold:#B8860B; --gold-soft:#B8860B18; --slate:#6F8886;
+    --font-display:"Optima","Avenir Next",system-ui,sans-serif;
+    --font-body:"Avenir Next",system-ui,sans-serif;
+    --font-mono:ui-monospace,"SF Mono","Menlo",monospace;
+  }
+
+  /* a chuva de caracteres pertence ao padrão. Em qualquer pele escolhida ela
+     some da tela E para de desenhar — ver PELE_ATUAL no script. */
+  html[data-skin] #matrixCanvas{display:none !important;}
+
+  /* seletor de pele, no canto do cabeçalho */
+  .skin-picker{display:flex;gap:6px;align-items:center;flex-wrap:wrap;}
+  .skin-picker select{
+    font-family:var(--font-mono);font-size:11px;padding:5px 8px;border-radius:2px;
+    background:var(--panel-raised);color:var(--text-dim);border:1px solid var(--line);
+  }
   *{box-sizing:border-box;}
-  html,body{margin:0;padding:0;background:#000 !important;}
+  html,body{margin:0;padding:0;background:var(--bg);}
   body{
-    background:#000;
+    background:var(--bg);
     color:var(--text);
     font-family:var(--font-body);
     line-height:1.45;
@@ -57,7 +159,7 @@
 
   header.masthead{
     border-bottom:1px solid var(--line);
-    background:linear-gradient(180deg,#000000,#000000);
+    background:var(--bg-alt);
     padding:22px 0 16px;
   }
   .masthead-row{display:flex;align-items:flex-end;justify-content:space-between;flex-wrap:wrap;gap:14px;}
@@ -130,8 +232,8 @@
     transition:border-color .15s, color .15s;
   }
   button:hover{border-color:var(--copper);color:var(--copper);}
-  button.primary{background:var(--copper);border-color:var(--copper);color:#000000;}
-  button.primary:hover{color:#000000;filter:brightness(1.08);}
+  button.primary{background:var(--copper);border-color:var(--copper);color:var(--bg);}
+  button.primary:hover{color:var(--bg);filter:brightness(1.08);}
   button.ghost{background:transparent;}
   button.danger:hover{border-color:var(--brick);color:var(--brick);}
   button.small{padding:5px 9px;font-size:10.5px;}
@@ -303,7 +405,7 @@
   }
   .stamp.st-ativa{color:var(--gold);}
   .stamp.st-confirmada{color:var(--teal);}
-  .stamp.st-enfraquecida{color:#FFC53D;}
+  .stamp.st-enfraquecida{color:var(--gold);}
   .stamp.st-invalidada{color:var(--brick);}
   .stamp.st-expirada{color:var(--text-faint);}
   .stamp.ty-base{color:var(--text-dim);}
@@ -395,7 +497,7 @@
      10px, num iPad. A hierarquia aqui é deliberada: uma palavra grande,
      uma ação, uma frase em português. Todo o resto é apoio.
      ================================================================= */
-  .hero{border:1px solid var(--line);background:linear-gradient(180deg,#061009 0%,#040A06 100%);
+  .hero{border:1px solid var(--line);background:var(--panel);
         padding:24px 26px;margin-top:18px;box-shadow:0 0 32px rgba(51,255,110,.05), inset 0 0 40px rgba(0,0,0,.5);}
   .hero-grid{display:grid;grid-template-columns:minmax(300px,1.15fr) minmax(280px,.85fr);gap:28px;align-items:center;}
   .hero-verdict{font-family:var(--font-mono);font-size:64px;font-weight:700;line-height:.92;
@@ -464,7 +566,7 @@
      instrumento: precisa estar sempre à vista, sem roubar a hierarquia do
      veredito logo acima. */
   .live-strip{display:flex;align-items:center;gap:18px;margin-top:10px;padding:10px 18px;
-    border:1px solid var(--line-soft);background:#050B07;}
+    border:1px solid var(--line-soft);background:var(--panel);}
   .live-left{display:flex;align-items:baseline;gap:12px;flex-shrink:0;}
   .live-dot{font-family:var(--font-mono);font-size:13px;color:var(--teal);}
   .live-price{font-family:var(--font-mono);font-size:26px;font-weight:700;letter-spacing:-.01em;}
@@ -492,6 +594,23 @@
     .premise-row{grid-template-columns:1fr;}
   }
 </style>
+<script>
+/* v114 — A PELE É APLICADA ANTES DO <body>.
+   Se isto rodasse depois, a tela abriria no tema padrão e piscaria para o
+   escolhido — o tipo de detalhe que faz um sistema parecer mal-acabado sem
+   que ninguém saiba explicar por quê.
+   Chave própria: trocar de cor não pode encostar no estado (`seios_btc_v2`). */
+var PELE_ATUAL = "padrao";
+(function(){
+  try{
+    var p = localStorage.getItem("seios_skin");
+    if(p && p !== "padrao"){
+      PELE_ATUAL = p;
+      document.documentElement.setAttribute("data-skin", p);
+    }
+  }catch(e){ /* navegador sem storage: fica o padrão, e está tudo bem */ }
+})();
+</script>
 </head>
 <body>
 <canvas id="matrixCanvas" style="position:fixed;inset:0;z-index:0;display:block;"></canvas>
@@ -514,6 +633,18 @@
   <div class="wrap controls-row">
     <button class="primary" id="btnRefresh" title="Busca todas as fontes e recalcula o estado de mercado">↻ Atualizar dados</button>
     <button class="ghost" id="btnDiag" title="Copia a leitura inteira em texto — para colar numa conversa">⧉ Diagnóstico</button>
+    <span class="skin-picker" id="skinPicker">
+      <label for="skinSelect" style="font-family:var(--font-mono);font-size:10px;letter-spacing:.1em;text-transform:uppercase;color:var(--text-faint);">pele</label>
+      <select id="skinSelect" title="Só aparência: não muda nenhum número, nenhuma coleta e nenhum peso">
+        <option value="padrao" data-skin-op="padrao">Padrão</option>
+        <option value="milimetrado" data-skin-op="milimetrado">Papel milimetrado</option>
+        <option value="ambar" data-skin-op="ambar">Âmbar de fósforo</option>
+        <option value="indigo" data-skin-op="indigo">Índigo de projeto</option>
+        <option value="terra" data-skin-op="terra">Terra de levantamento</option>
+        <option value="ciano" data-skin-op="ciano">Cianotipia</option>
+        <option value="batimetria" data-skin-op="batimetria">Carta batimétrica</option>
+      </select>
+    </span>
     <button class="ghost" id="btnExport" title="Salva TUDO em .json: estado, configurações, histórico e a série point-in-time">⇩ Salvar tudo (.json)</button>
     <button class="ghost" id="btnImport" title="Restaura um backup .json — substitui os dados atuais">⇧ Restaurar</button>
     <span id="serieContador" style="align-self:center;font-size:11px;color:var(--text-faint);letter-spacing:.06em;"></span>
@@ -851,6 +982,11 @@
   window.addEventListener("resize", setupColumns);
 
   function draw(){
+    /* v114 — esconder o canvas por CSS não impedia o requestAnimationFrame de
+       rodar: seguiria desenhando atrás de uma pele clara, gastando bateria do
+       iPad para nada. Fora do padrão, o laço PARA — e volta se o usuário
+       voltar ao padrão, sem recarregar. */
+    if(PELE_ATUAL !== "padrao"){ requestAnimationFrame(draw); return; }
     ctx.fillStyle = "rgba(0,0,0,0.075)";
     ctx.fillRect(0, 0, canvas.width, canvas.height);
     ctx.font = fontSize + "px monospace";
@@ -870,6 +1006,20 @@
     requestAnimationFrame(draw);
   }
   draw();
+})();
+
+/* v114 — a troca em si. Sem recarregar: o CSS inteiro pende do atributo. */
+(function(){
+  const sel = document.getElementById("skinSelect");
+  if(!sel) return;
+  sel.value = PELE_ATUAL;
+  sel.addEventListener("change", function(){
+    const p = sel.value;
+    PELE_ATUAL = p;
+    if(p === "padrao") document.documentElement.removeAttribute("data-skin");
+    else document.documentElement.setAttribute("data-skin", p);
+    try{ localStorage.setItem("seios_skin", p); }catch(e){}
+  });
 })();
 
 /* =====================================================================
@@ -1000,7 +1150,7 @@ const STORAGE_KEY = "seios_btc_v2";
 // fonte única da versão — usada no rodapé, no histórico e nos exports.
 // Muda toda vez que a fórmula de score/pesos muda, pra nunca misturar
 // decisões de regras diferentes como se fossem comparáveis.
-const BUILD_VERSION = "2026-08-18.113.1-copia-legivel";
+const BUILD_VERSION = "2026-08-18.114-peles";
 /* v78: versão do MODELO separada da versão do BUILD. Mudança visual não é
    mudança de semântica: só sobe quando peso, fórmula, corte ou trava mudam.
    Toda observação gravada carrega as duas, pra que seis meses depois dê pra

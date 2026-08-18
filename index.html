@@ -979,7 +979,7 @@ const STORAGE_KEY = "seios_btc_v2";
 // fonte única da versão — usada no rodapé, no histórico e nos exports.
 // Muda toda vez que a fórmula de score/pesos muda, pra nunca misturar
 // decisões de regras diferentes como se fossem comparáveis.
-const BUILD_VERSION = "2026-08-18.107-ruido-medido";
+const BUILD_VERSION = "2026-08-18.108-suave-laboratorio";
 /* v78: versão do MODELO separada da versão do BUILD. Mudança visual não é
    mudança de semântica: só sobe quando peso, fórmula, corte ou trava mudam.
    Toda observação gravada carrega as duas, pra que seis meses depois dê pra
@@ -6454,6 +6454,32 @@ async function runScoreBacktest(){
         registraIndicador("institucional.coinbasePremium", institucional, fwdInd);
         if(hrScore !== null) registraIndicador("onchain.hashrate", hrScore, fwdInd);
         if(addrScore !== null) registraIndicador("onchain.activeAddresses", addrScore, fwdInd);
+        /* v108 — A RÉGUA CANDIDATA, NO LABORATÓRIO.
+           A v107 mediu o ruído das duas réguas destes dois indicadores:
+
+             endereços ativos · ponto a ponto   p50 51,9 · p95 144,2 · máx 200,0 · 82% dos dias ≥15
+             endereços ativos · média 7d        p50  4,5 · p95  17,3 · máx  47,3 ·  7% dos dias ≥15
+             hash rate        · ponto a ponto   p50 52,6 · p95 175,6 · máx 200,0 · 86% dos dias ≥15
+             hash rate        · média 7d        p50 10,1 · p95  25,8 · máx  42,0 · 32% dos dias ≥15
+
+           Máximo de 200 é a saturação inteira: o indicador foi de +100 a −100
+           em um dia. O dia MEDIANO move meio corte de decisão. Isto não é
+           cauda, é o comportamento normal da medida.
+
+           E mesmo assim a régua NÃO muda aqui. Ruído menor não é sinal maior:
+           suavizar até o indicador ficar quieto é trivial, e a média de 7 dias
+           pode estar cortando junto os 1,9pp de separação que os endereços
+           ativos mostram na calibração. O precedente é o `funding_percentil ⚗`
+           (v96): a régua candidata roda sem voto, é medida lado a lado com a
+           que vota, e só troca se a SEPARAÇÃO sobreviver — o que só aconteceu
+           dez builds depois.
+
+           Mesma data, mesma escala, mesmo `fwdInd` do par que vota. Qualquer
+           divergência nisso faria a tabela comparar coisas diferentes. */
+        { const addrSuave = scoreSuavizadoAtDate(addrSeries, date, 5, 90, 7);
+          if(addrSuave !== null) registraIndicador("activeAddresses_suave ⚗", addrSuave, fwdInd);
+          const hrSuave = scoreSuavizadoAtDate(hashSeries, date, 6, 90, 7);
+          if(hrSuave !== null) registraIndicador("hashrate_suave ⚗", hrSuave, fwdInd); }
         { const mv = (onchainMaps.mvrv && onchainMaps.mvrv[date] !== undefined)
                      ? onchainMaps.mvrv[date] : cmMvrvByDate[date];
           if(mv !== undefined) registraIndicador("onchain.mvrv", mv, fwdInd); }
@@ -6649,6 +6675,21 @@ async function runScoreBacktest(){
         mesma taxa da linha <code>funding</code>, lida como posição na própria distribuição passada (percentil
         expandido, mínimo de 60 dias, sem olhar um único dia à frente) em vez de nível absoluto.
         Se ela separar e a absoluta não, a escala é o problema — não o indicador.<br><br>
+        <strong>v108 — as duas linhas novas.</strong> <code>activeAddresses_suave ⚗</code> e
+        <code>hashrate_suave ⚗</code> são os mesmos dois indicadores lidos com média de 7 dias
+        nas duas pontas, em vez de um ponto contra um ponto. A v107 mediu que a régua
+        que VOTA move 51,9 e 52,6 pontos de score no dia mediano, e satura os 200
+        pontos inteiros no pior dia — 82% e 86% dos dias cruzam o corte de ±15.
+        A candidata derruba isso para 17,3 e 25,8 no p95.
+        <br><br>
+        <strong>Mas ruído menor não é sinal maior</strong>, e é por isso que nada
+        mudou de valor nesta build. O critério para trocar é a coluna
+        <strong>SEPARAÇÃO</strong> desta tabela, não o ruído: hoje os endereços ativos
+        separam 1,9pp e o hash rate 1,2pp. Se a versão suave separar igual ou mais, a
+        troca se justifica e acontece na build seguinte. Se separar menos, aprendemos
+        que a suavização estava levando o sinal junto — e a resposta certa não é média
+        móvel. A resposta pode muito bem ser essa, e ela vale tanto quanto a outra.
+        <br><br>
         Cada indicador isolado, contra o mesmo retorno futuro. Um motor pode parecer "sem sinal"
         quando na verdade tem dois indicadores fortes se cancelando — e as duas situações pedem
         tratamento oposto. <strong>Isto não autoriza mudar peso:</strong> é o passado recente, num

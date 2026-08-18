@@ -742,6 +742,7 @@
     <div style="display:flex;gap:8px;flex-wrap:wrap;">
       <button id="btnRunBacktest">🧠 Rodar backtest de indicadores (RSI/MM50)</button>
       <button class="primary" id="btnRunScoreBacktest">📊 Backtest parcial de proxies (testa os cortes 40/15/-15/-55)</button>
+      <button class="ghost" id="btnCopiarBacktest" title="Copia este relatório inteiro em texto — para colar numa conversa">⧉ Copiar diagnóstico</button>
     </div>
     <div id="calibrationTimestamp" style="margin-top:10px;font-family:var(--font-mono);font-size:10.5px;color:var(--text-faint);"></div>
     <div class="wrap" id="calibrationLogWrap" style="display:none;padding:0;position:relative;">
@@ -999,7 +1000,7 @@ const STORAGE_KEY = "seios_btc_v2";
 // fonte única da versão — usada no rodapé, no histórico e nos exports.
 // Muda toda vez que a fórmula de score/pesos muda, pra nunca misturar
 // decisões de regras diferentes como se fossem comparáveis.
-const BUILD_VERSION = "2026-08-18.112-relatorios";
+const BUILD_VERSION = "2026-08-18.113-copiar-calibracao";
 /* v78: versão do MODELO separada da versão do BUILD. Mudança visual não é
    mudança de semântica: só sobe quando peso, fórmula, corte ou trava mudam.
    Toda observação gravada carrega as duas, pra que seis meses depois dê pra
@@ -5301,6 +5302,90 @@ function fatoresPorContribuicao(ms, motores){
    Ausência de informação não é permissão. */
 function mesmoModelo(a, b){
   return !!a && !!b && a === b;
+}
+
+/* =====================================================================
+   v113 — COPIAR O RELATÓRIO DE CALIBRAÇÃO COMO TEXTO
+   =====================================================================
+   Mesmo comando do "⧉ Diagnóstico" do topo, aplicado ao painel Backtest e
+   Calibração. A decisão que importa aqui: o texto sai do que está NA TELA,
+   percorrendo o DOM já renderizado — não de uma segunda montagem a partir
+   das variáveis.
+
+   Motivo: uma segunda montagem pode divergir do que o painel exibe, e aí a
+   conversa passa a discutir números que ninguém viu. Foi exatamente esse o
+   defeito que a v112 encontrou no pódio — o painel calculando por conta
+   própria uma grandeza que o modelo já tinha pronta.
+
+   `textoDeNo` é puro: recebe um nó e devolve texto. Sem isso não haveria
+   como testá-lo fora do navegador, e um serializador não testado é o tipo
+   de coisa que falha calada no dia em que a tabela muda de forma. */
+function textoDeNo(no){
+  if(!no) return "";
+  if(no.nodeType === 3) return String(no.nodeValue || "").replace(/\s+/g, " ");
+  if(no.nodeType !== 1) return "";                 // comentário, etc.
+  const tag = String(no.tagName || "").toUpperCase();
+  if(tag === "SCRIPT" || tag === "STYLE") return "";
+  if(tag === "BR") return "\n";
+
+  const filhos = no.childNodes ? Array.prototype.slice.call(no.childNodes) : [];
+
+  if(tag === "TR"){
+    /* célula vazia continua ocupando coluna: alinhamento é informação */
+    return filhos
+      .filter(function(f){ const t = String(f.tagName || "").toUpperCase();
+                           return t === "TD" || t === "TH"; })
+      .map(function(f){ return textoDeNo(f).replace(/\s+/g, " ").trim(); })
+      .join(" | ") + "\n";
+  }
+
+  const dentro = filhos.map(textoDeNo).join("");
+  const BLOCOS = ["DIV","P","SECTION","TABLE","THEAD","TBODY","H1","H2","H3","H4","LI","UL","OL"];
+  return BLOCOS.indexOf(tag) !== -1 ? (dentro.replace(/\n+$/,"") + "\n") : dentro;
+}
+
+/* junta as três regiões do painel na ordem em que aparecem na tela */
+function textoDoPainelBacktest(){
+  const pega = function(id){ const el = document.getElementById(id); return el ? textoDeNo(el) : ""; };
+  const corpo = [pega("calibrationTimestamp"), pega("backtestResults"), pega("scoreBacktestResults")]
+    .join("\n").split("\n").map(function(l){ return l.replace(/\s+$/,""); })
+    .filter(function(l, i, arr){ return !(l === "" && arr[i-1] === ""); })  // no máximo uma linha vazia
+    .join("\n").trim();
+
+  if(!corpo)
+    return "SEIOS · BACKTEST E CALIBRAÇÃO\nNada calibrado ainda nesta sessão — rode "
+         + "\"Backtest parcial de proxies\" e copie de novo.";
+
+  return ["SEIOS · BACKTEST E CALIBRAÇÃO",
+          "build " + BUILD_VERSION + " · modelo " + MODEL_VERSION,
+          "copiado em " + new Date().toLocaleString("pt-BR"),
+          "", corpo].join("\n");
+}
+
+async function copiarRelatorioBacktest(){
+  const txt = textoDoPainelBacktest();
+  const b = document.getElementById("btnCopiarBacktest");
+  try{
+    await navigator.clipboard.writeText(txt);
+    if(b){ const antes = b.textContent; b.textContent = "✓ copiado";
+      setTimeout(function(){ b.textContent = antes; }, 2000); }
+  }catch(e){
+    /* mesma saída de emergência do diagnóstico do topo: o iPad bloqueia a
+       área de transferência fora de gesto direto em alguns casos, e uma
+       cópia que falha calada é pior que nenhuma. */
+    const alvo = document.getElementById("scoreBacktestResults") || document.body;
+    let ta = document.getElementById("backtestCopiaFallback");
+    if(!ta){
+      ta = document.createElement("textarea");
+      ta.id = "backtestCopiaFallback";
+      ta.style.cssText = "width:100%;height:220px;margin-top:10px;background:#020;color:#8f8;" +
+        "border:1px solid #2f7;font-family:var(--font-mono);font-size:11px;padding:8px;";
+      alvo.appendChild(ta);
+    }
+    ta.value = txt;
+    ta.focus(); ta.select();
+    if(b) b.textContent = "selecione o texto abaixo e copie";
+  }
 }
 
 function computeMarketState(){
@@ -10641,6 +10726,10 @@ document.addEventListener("click", (e)=>{
   // exigir rolar seis mil pixels até o rodapé
   const btnTopo = document.getElementById("btnDiag");
   if(btnTopo) btnTopo.addEventListener("click", copiarDiagnostico);
+
+  /* v113 — o painel de calibração tem o seu próprio, com o conteúdo dele */
+  const btnCalib = document.getElementById("btnCopiarBacktest");
+  if(btnCalib) btnCalib.addEventListener("click", copiarRelatorioBacktest);
 
   if(document.readyState === "loading") document.addEventListener("DOMContentLoaded", montar);
   else montar();

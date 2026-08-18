@@ -1000,7 +1000,7 @@ const STORAGE_KEY = "seios_btc_v2";
 // fonte única da versão — usada no rodapé, no histórico e nos exports.
 // Muda toda vez que a fórmula de score/pesos muda, pra nunca misturar
 // decisões de regras diferentes como se fossem comparáveis.
-const BUILD_VERSION = "2026-08-18.113-copiar-calibracao";
+const BUILD_VERSION = "2026-08-18.113.1-copia-legivel";
 /* v78: versão do MODELO separada da versão do BUILD. Mudança visual não é
    mudança de semântica: só sobe quando peso, fórmula, corte ou trava mudam.
    Toda observação gravada carrega as duas, pra que seis meses depois dê pra
@@ -5331,17 +5331,36 @@ function textoDeNo(no){
   const filhos = no.childNodes ? Array.prototype.slice.call(no.childNodes) : [];
 
   if(tag === "TR"){
-    /* célula vazia continua ocupando coluna: alinhamento é informação */
-    return filhos
+    /* v113.1 — TRÊS DEFEITOS DE LEGIBILIDADE, MEDIDOS NA PRIMEIRA CÓPIA REAL.
+       1. `Derivativosparcial — só funding`: um <div> de nota dentro do <td>
+          colava no texto anterior, porque o achatamento da célula não
+          separava blocos. Agora a quebra vira espaço ANTES de colapsar.
+       2. As linhas da tabela de ruído terminavam em ` |` vazio e a
+          observação "não está no score" saía DEPOIS do último separador —
+          célula final ora vazia ora cheia, com o trim comendo a estrutura.
+          Colunas vazias no FIM da linha somem; no MEIO continuam.
+       3. `≈ igual à referência compra: retorno acima...` — mesmo caso do 1.
+       Nenhum número mudou: isto é só forma. */
+    const celulas = filhos
       .filter(function(f){ const t = String(f.tagName || "").toUpperCase();
                            return t === "TD" || t === "TH"; })
-      .map(function(f){ return textoDeNo(f).replace(/\s+/g, " ").trim(); })
-      .join(" | ") + "\n";
+      .map(function(f){
+        return textoDeNo(f)
+          .replace(/\n+/g, " ")        // bloco aninhado vira espaço, não emenda
+          .replace(/\s+/g, " ")
+          .trim();
+      });
+    while(celulas.length && celulas[celulas.length-1] === "") celulas.pop();
+    return celulas.join(" | ") + "\n";
   }
 
   const dentro = filhos.map(textoDeNo).join("");
   const BLOCOS = ["DIV","P","SECTION","TABLE","THEAD","TBODY","H1","H2","H3","H4","LI","UL","OL"];
-  return BLOCOS.indexOf(tag) !== -1 ? (dentro.replace(/\n+$/,"") + "\n") : dentro;
+  /* v113.1 — a quebra vem ANTES e depois. Só depois não bastava: um <div> de
+     nota logo após texto solto dentro da mesma célula saía emendado
+     ("Derivativosparcial — só funding"), porque não havia separador do lado
+     esquerdo. As linhas em branco a mais são colapsadas na montagem. */
+  return BLOCOS.indexOf(tag) !== -1 ? ("\n" + dentro.replace(/\n+$/,"") + "\n") : dentro;
 }
 
 /* junta as três regiões do painel na ordem em que aparecem na tela */

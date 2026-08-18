@@ -66,16 +66,41 @@ t("uma tabela vira linhas com colunas separadas", ()=>{
     el("TBODY", [ el("TR", [ el("TD",[txt("rsi")]), el("TD",[txt("separa 4.2pp")]) ]),
                   el("TR", [ el("TD",[txt("epu")]), el("TD",[txt("não distinguível")]) ]) ])
   ]);
-  const s = API.textoDeNo(tabela).trim().split("\n").map(function(l){ return l.trim(); });
+  /* v113.1 — a quebra de abertura dos blocos gera linhas vazias entre TR e
+     TBODY, que a montagem colapsa. O teste passa a olhar as linhas COM
+     conteúdo, que é o que o usuário vê depois de colar. */
+  const s = API.textoDeNo(tabela).split("\n")
+    .map(function(l){ return l.trim(); }).filter(function(l){ return l; });
   eq(s[0], "Indicador | Separação", "cabeçalho:");
   eq(s[1], "rsi | separa 4.2pp", "primeira linha:");
   eq(s[2], "epu | não distinguível", "segunda linha:");
 });
 
-t("célula vazia não some — a coluna tem que continuar alinhada", ()=>{
+t("célula vazia NO MEIO não some — a coluna tem que continuar alinhada", ()=>{
   const tabela = el("TABLE", [ el("TBODY", [
     el("TR", [ el("TD",[txt("curva")]), el("TD",[]), el("TD",[txt("—")]) ]) ]) ]);
-  eq(API.textoDeNo(tabela).trim(), "curva |  | —", "linha com vazio:");
+  eq(API.textoDeNo(tabela).trim(), "curva |  | —", "linha com vazio no meio:");
+});
+
+/* v113.1 — os três defeitos vistos na primeira cópia real */
+t("nota dentro da célula não COLA no texto vizinho", ()=>{
+  /* medido: "Derivativosparcial — só funding" e
+     "≈ igual à referência compra: retorno acima da média..." */
+  const tr = el("TR", [ el("TD", [ txt("Derivativos"), el("DIV",[txt("parcial — só funding")]) ]),
+                        el("TD", [ txt("15%") ]) ]);
+  eq(API.textoDeNo(tr).trim(), "Derivativos parcial — só funding | 15%", "célula com nota:");
+});
+
+t("coluna vazia NO FIM some — não deixa ` |` pendurado", ()=>{
+  /* medido: as linhas da tabela de ruído terminavam em " |" */
+  const tr = el("TR", [ el("TD",[txt("Hash rate")]), el("TD",[txt("52.6")]), el("TD",[]) ]);
+  eq(API.textoDeNo(tr).trim(), "Hash rate | 52.6", "linha com vazio no fim:");
+});
+
+t("observação da última coluna entra COMO coluna, não solta no fim", ()=>{
+  const tr = el("TR", [ el("TD",[txt("Alternativa")]), el("TD",[txt("17.3")]),
+                        el("TD",[txt("não está no score")]) ]);
+  eq(API.textoDeNo(tr).trim(), "Alternativa | 17.3 | não está no score", "última coluna:");
 });
 
 t("parágrafos viram linhas próprias, não um bloco só", ()=>{

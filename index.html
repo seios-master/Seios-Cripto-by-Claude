@@ -784,7 +784,27 @@
         <div class="panel-mark">§ Case Engine / Meta Learning (embrião)</div>
         <h2 class="panel-title">Quem está acertando, motor por motor — com seu uso real</h2>
       </div>
-      <div class="panel-desc">Mesma pergunta da Calibração (bullish vs. bearish), só que usando os dados que <em>você</em> acumulou usando o sistema, não 12 meses de histórico público.</div>
+      <div class="panel-desc">Mesma pergunta da Calibração (bullish vs. bearish), só que usando os dados que <em>você</em> acumulou usando o sistema, não 12 meses de histórico público.
+        <br><br>
+        <strong>v112 — duas mudanças, e as duas encolhem esta tabela.</strong>
+        <strong>Primeira:</strong> só entram decisões registradas sob o modelo atual
+        (<span id="caseEngineModelo"></span>). Composites de m5 e de m11 não são a mesma
+        grandeza — entre eles cinco indicadores deixaram de votar, a liquidez trocou de
+        régua e o FRED passou a descartar o dia em formação. Somar os dois na mesma média
+        era o defeito que a v102 corrigiu no delta de score. Registros anteriores à v112
+        não têm etiqueta de modelo e ficam de fora: supor sob qual régua nasceram seria
+        inventar.
+        <br><br>
+        <strong>Segunda:</strong> o rótulo <em>coerente / invertida</em> passa pela mesma
+        <strong>significância</strong> da tabela de calibração — corte em |t| ≥ 2, com a
+        correção de sobreposição das janelas. Antes eram duas médias comparadas com
+        mínimo de 5 casos por lado e nenhuma barra de erro.
+        <br><br>
+        <strong>Espere ver "amostra insuficiente" em quase tudo por muito tempo</strong>, e
+        isso é a tabela funcionando, não falhando: a v109 mostrou que 285 dias de histórico
+        público não bastavam para distinguir 4pp de zero. Um punhado de decisões suas
+        registradas à mão basta menos ainda. A tabela passa a dizer "não sei" onde antes
+        dizia "coerente" — e o "não sei" é a resposta correta.</div>
     </div>
     <div id="caseEngineWrap"></div>
   </section>
@@ -979,7 +999,7 @@ const STORAGE_KEY = "seios_btc_v2";
 // fonte única da versão — usada no rodapé, no histórico e nos exports.
 // Muda toda vez que a fórmula de score/pesos muda, pra nunca misturar
 // decisões de regras diferentes como se fossem comparáveis.
-const BUILD_VERSION = "2026-08-18.111-ultimo-modelo";
+const BUILD_VERSION = "2026-08-18.112-relatorios";
 /* v78: versão do MODELO separada da versão do BUILD. Mudança visual não é
    mudança de semântica: só sobe quando peso, fórmula, corte ou trava mudam.
    Toda observação gravada carrega as duas, pra que seis meses depois dê pra
@@ -1118,7 +1138,7 @@ function defaultState(){
       }}
     },
     events: [], // {id, title, date, impact(-100..100)}
-    market: { price:null, change24h:null, volatility:null, prevOpenInterest:null, prevOICheckedAt:null, lastFetch:null, lastAttemptAt:null, lastSuccessAt:null, lastFullSuccessAt:null, lastRunFailed:0, acaoVigente:null, priceHistory:[], previousComposites:null, previousIndicatorValues:null, lastDeltas:null, lastAnomalies:null, weeklyMAs:null, weeklyMAsComputedAt:null, weeklyMAsError:null },
+    market: { price:null, change24h:null, volatility:null, prevOpenInterest:null, prevOICheckedAt:null, lastFetch:null, lastAttemptAt:null, lastSuccessAt:null, lastFullSuccessAt:null, lastRunFailed:0, acaoVigente:null, priceHistory:[], previousComposites:null, previousModelo:null, previousIndicatorValues:null, lastDeltas:null, lastAnomalies:null, weeklyMAs:null, weeklyMAsComputedAt:null, weeklyMAsError:null },
     scenarios: [],
     premises: [],
     history: [],
@@ -3554,7 +3574,10 @@ async function refreshMarketData(){
   {
     const ms = computeMarketState();
     const deltas = [];
-    if(S.market.previousComposites){
+    /* v112 — o delta só vale dentro da MESMA régua. `previousComposites` vive
+       no estado e sobrevive ao bump: no primeiro uso depois da v111, parte do
+       "que mudou" era a régua nova, não o mercado. */
+    if(S.market.previousComposites && mesmoModelo(S.market.previousModelo, MODEL_VERSION)){
       Object.entries(S.motors).forEach(([mk,motor])=>{
         const now = ms.composites[mk], before = S.market.previousComposites[mk];
         if(now !== null && before !== null && now !== undefined && before !== undefined){
@@ -3566,6 +3589,7 @@ async function refreshMarketData(){
     }
     S.market.lastDeltas = deltas.slice(0,6);
     S.market.previousComposites = ms.composites;
+    S.market.previousModelo = MODEL_VERSION;
 
     // anomalia simples: indicador individual que saltou muito desde o "antes"
     // desta própria rodada (mesmo conceito, granularidade mais fina)
@@ -3666,7 +3690,12 @@ function autoLogHistory(){
     composites: ms.composites, // snapshot de cada motor nesse instante — é isso que falta pro Case Engine aprender quem acertou
     resultado: "",
     auto: true,
-    version: BUILD_VERSION
+    version: BUILD_VERSION,
+    /* v112 — sem esta etiqueta o Case Engine mistura m5 até m11 na mesma
+       média, que é o defeito que a v102 corrigiu no delta e a v94 na
+       contagem. Não conserta o passado: registros anteriores ficam sem
+       modelo para sempre e serão contados à parte. */
+    modelo: MODEL_VERSION
   });
 }
 
@@ -5233,6 +5262,45 @@ function agregarCanonico(vetor, opts){
            soma: soma, denom: denom, massaTotal: massaTotal, massaObservada: massaObservada,
            contribuicoes: contribuicoes, porMotor: porMotor, nItens: itens.length,
            amortecido: massaObservada < massaTotal / RENORM_MAX };
+}
+
+/* =====================================================================
+   v112 — OS RELATÓRIOS PARAM DE CONTRADIZER O MODELO
+   =====================================================================
+   Auditoria dos 14 painéis sobre a v111. Quatro defeitos, todos de
+   APRESENTAÇÃO: nenhuma fórmula, peso, direito de voto ou valor de
+   indicador muda aqui, e MODEL_VERSION continua m11.
+
+   O pódio "Maior peso nesta leitura" ordenava por `composite × peso
+   NOMINAL` — três linhas acima do rastro que diz "não é o nominal do
+   cadastro que decide o score". O painel fazia o que o próprio texto
+   dizia que não vale.
+
+   MEDIDO na leitura de 18/08 08:28: o pódio mostrou On-chain, GEOPOLÍTICO
+   e Ativos Globais. Pela contribuição efetiva, o Geopolítico contribuía
+   0,86 — peso efetivo de 1,7%, o MENOR do sistema — e ficava atrás do
+   Macro (2,04), que não aparecia. O alerta "⚠ Geopolítico está entre os
+   fatores de maior peso" disparava por causa disso.
+
+   O agregador canônico já entregava `ag.porMotor[mk].contribuicao` desde a
+   v92. O painel simplesmente não usava. */
+function fatoresPorContribuicao(ms, motores){
+  const por = (ms && ms.ag && ms.ag.porMotor) || {};
+  return Object.keys(motores)
+    .filter(function(k){ return ms.composites[k] !== null && ms.composites[k] !== undefined; })
+    .map(function(k){
+      return { key: k, label: motores[k].label, composite: ms.composites[k],
+               contribuicao: por[k] ? por[k].contribuicao : 0, filled: true };
+    })
+    .sort(function(a,b){ return Math.abs(b.contribuicao) - Math.abs(a.contribuicao); })
+    .slice(0, 3);
+}
+
+/* v112 — comparar leituras exige a MESMA régua. Registro sem etiqueta é
+   tratado como não comparável: é a regra da v102, aplicada aos painéis.
+   Ausência de informação não é permissão. */
+function mesmoModelo(a, b){
+  return !!a && !!b && a === b;
 }
 
 function computeMarketState(){
@@ -6945,9 +7013,17 @@ async function runScoreBacktest(){
             const bearAvg = bearArr.length ? avg(bearArr) : null;
             let leitura = "amostra insuficiente";
             let leituraColor = "var(--text-faint)";
-            if(bullArr.length >= 8 && bearArr.length >= 8){
-              if(bullAvg > bearAvg){ leitura = "✓ direção coerente"; leituraColor = "var(--teal)"; }
+            /* v112 — a v109 deu barra de erro à tabela por INDICADOR e não à
+               tabela por MOTOR, que continuou rotulando "coerente/invertida"
+               com duas médias cruas. Mesma régua para as duas. */
+            const estM = estatisticaSeparacao(bullArr, bearArr, forwardDays);
+            if(estM && estM.suficiente){
+              if(Math.abs(estM.tEfetivo) < 2){
+                leitura = "◦ não distinguível de zero"; leituraColor = "var(--text-faint)";
+              } else if(estM.sep > 0){ leitura = "✓ direção coerente"; leituraColor = "var(--teal)"; }
               else { leitura = "⚠ direção invertida"; leituraColor = "var(--brick)"; }
+            } else if(bullArr.length >= 8 && bearArr.length >= 8){
+              leitura = "amostra insuficiente (efetiva)"; leituraColor = "var(--text-faint)";
             }
             return `
               <tr>
@@ -7811,11 +7887,11 @@ function computeDecision(){
   }
 
   // fatores de maior peso (contribuição = composite × peso do motor)
-  const topFactors = Object.entries(S.motors)
-    .map(([key,motor])=>({ key, label:motor.label, composite: ms.composites[key], contribution: (ms.composites[key]||0)*motor.weight, filled: ms.composites[key]!==null }))
-    .filter(f=>f.filled)
-    .sort((a,b)=>Math.abs(b.contribution)-Math.abs(a.contribution))
-    .slice(0,3);
+  /* v112 — contribuição CANÔNICA (peso efetivo, teto de família e
+     amortecimento já aplicados), não `composite × peso nominal`. */
+  const topFactors = fatoresPorContribuicao(ms, S.motors)
+    .map(function(f){ return { key:f.key, label:f.label, composite:f.composite,
+                               contribution:f.contribuicao, filled:true }; });
 
   // contrafactual: "sem esse motor, o score iria pra onde" — mostra o quanto
   // cada motor preenchido realmente pesa na leitura final
@@ -7843,11 +7919,14 @@ function computeDecision(){
 
   // concentração: alerta se um único motor está carregando desproporcionalmente o resultado
   if(topFactors.length){
-    const totalAbs = topFactors.reduce((a,f)=>a+Math.abs(f.contribution),0)
-      + Object.entries(S.motors).reduce((a,[k,m])=>{
-          const c = ms.composites[k];
-          return (c!==null && !topFactors.find(f=>f.key===k)) ? a+Math.abs(c*m.weight) : a;
-        },0);
+    /* v112 — a base da concentração é a MESMA do pódio: contribuição
+       efetiva. Antes o numerador vinha do nominal e o percentual saía
+       errado — foi assim que apareceu "47% da força direcional". */
+    const porMotorCan = (ms.ag && ms.ag.porMotor) || {};
+    const totalAbs = Object.keys(S.motors).reduce(function(a,k){
+      const p = porMotorCan[k];
+      return p ? a + Math.abs(p.contribuicao) : a;
+    }, 0);
     const topShare = totalAbs ? Math.abs(topFactors[0].contribution)/totalAbs : 0;
     if(topShare > 0.45){
       reasoning.push(`⚠ Dependência concentrada: ${(topShare*100).toFixed(0)}% da força direcional vem só de ${topFactors[0].label} — os demais motores confirmam pouco.`);
@@ -8751,10 +8830,18 @@ function computeCaseEngine(){
     return d !== null && d >= CASE_ENGINE_JANELA_MIN && d <= CASE_ENGINE_JANELA_MAX;
   });
   const foraDaJanela = resolvidos.length - usable.length;
+  /* v112 — SÓ O MODELO ATUAL. Composites de m5 e de m11 não são a mesma
+     grandeza: entre eles cinco indicadores deixaram de votar, a liquidez
+     trocou de régua e o FRED passou a descartar o dia em formação. Misturar
+     os dois na mesma média é o defeito que a v102 corrigiu no delta.
+     Registro sem etiqueta `modelo` é anterior à v112 e fica de fora — supor
+     sob qual régua nasceu seria inventar. */
+  const usableModelo = usable.filter(function(x){ return mesmoModelo(x.modelo, MODEL_VERSION); });
+  const foraDoModelo = usable.length - usableModelo.length;
   const motorKeys = Object.keys(S.motors);
 
   const rows = motorKeys.map(key=>{
-    const pairs = usable
+    const pairs = usableModelo
       .map(h => ({ composite: h.composites[key], pct: parseResultadoPct(h.resultado) }))
       .filter(p => p.composite !== null && p.composite !== undefined);
 
@@ -8763,19 +8850,30 @@ function computeCaseEngine(){
     const avg = xs => xs.length ? xs.reduce((a,x)=>a+x.pct,0)/xs.length : null;
     const avgBull = avg(bullish), avgBear = avg(bearish);
 
+    /* v112 — A BARRA DE ERRO DA v109, TAMBÉM AQUI. Antes eram duas médias
+       comparadas sem incerteza nenhuma, com mínimo de 5 casos por lado — o
+       mesmo que a v109 removeu da tabela de calibração, que tinha 285 dias e
+       ainda assim não passava. O horizonte da correção é a janela de
+       resolução: decisões resolvidas em dias próximos compartilham quase
+       todo o caminho. */
+    const est = estatisticaSeparacao(bullish.map(p=>p.pct), bearish.map(p=>p.pct),
+                                     CASE_ENGINE_JANELA_MAX);
     let leitura = "amostra insuficiente";
-    if(bullish.length >= CASE_ENGINE_MIN_SAMPLE && bearish.length >= CASE_ENGINE_MIN_SAMPLE){
-      leitura = avgBull > avgBear ? "coerente" : "invertida";
+    if(est && est.suficiente){
+      leitura = (Math.abs(est.tEfetivo) < 2) ? "não distinguível de zero"
+              : (est.sep > 0 ? "coerente" : "invertida");
     }
 
     return {
       key, label: S.motors[key].label, weight: S.motors[key].weight,
       nBull: bullish.length, nBear: bearish.length,
-      avgBull, avgBear, leitura
+      avgBull, avgBear, leitura,
+      t: est ? est.t : null, tEfetivo: est ? est.tEfetivo : null
     };
   });
 
-  return { totalUsable: usable.length, totalHistory: getFullHistory().length, foraDaJanela, rows };
+  return { totalUsable: usableModelo.length, totalHistory: getFullHistory().length,
+           foraDaJanela, foraDoModelo, rows };
 }
 
 // Mesma disciplina de janela do Case Engine. A tabela dizia "retorno médio 30d
@@ -8792,6 +8890,9 @@ function computePersonalTrackRecord(){
     const dias = resultadoDiasDe(h);
     if(h.resultadoFonte === "aproximado"){ foraDaJanela++; return; }
     if(dias === null || dias < CASE_ENGINE_JANELA_MIN || dias > CASE_ENGINE_JANELA_MAX){ foraDaJanela++; return; }
+    /* v112 — idem Case Engine: ação registrada sob outra régua não entra na
+       mesma média de acerto. */
+    if(!mesmoModelo(h.modelo, MODEL_VERSION)){ foraDaJanela++; return; }
     const key = h.action || "—";
     (groups[key] = groups[key] || []).push(pct);
   });
@@ -8848,6 +8949,8 @@ function renderMemoryPanel(){
 }
 
 function renderCaseEnginePanel(){
+  { const el = document.getElementById("caseEngineModelo");
+    if(el) el.textContent = MODEL_VERSION; }
   const wrap = document.getElementById("caseEngineWrap");
   if(!wrap) return;
 
@@ -9478,7 +9581,8 @@ document.getElementById("btnLogDecision").addEventListener("click", (e)=>{
       leaderTitle: d.leader ? d.leader.title : null,
       composites: ms.composites,
       resultado: "",
-      version: BUILD_VERSION
+      version: BUILD_VERSION,
+      modelo: MODEL_VERSION
     });
     saveState();
     renderHistory();

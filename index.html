@@ -979,7 +979,7 @@ const STORAGE_KEY = "seios_btc_v2";
 // fonte única da versão — usada no rodapé, no histórico e nos exports.
 // Muda toda vez que a fórmula de score/pesos muda, pra nunca misturar
 // decisões de regras diferentes como se fossem comparáveis.
-const BUILD_VERSION = "2026-08-18.108-suave-laboratorio";
+const BUILD_VERSION = "2026-08-18.109-barra-de-erro";
 /* v78: versão do MODELO separada da versão do BUILD. Mudança visual não é
    mudança de semântica: só sobe quando peso, fórmula, corte ou trava mudam.
    Toda observação gravada carrega as duas, pra que seis meses depois dê pra
@@ -5891,6 +5891,66 @@ function medirRuidoDaMedida(series, escala, lookbackDays, k){
   return { atual: resumo(dA), suave: resumo(dS) };
 }
 
+/* =====================================================================
+   v109 — A SEPARAÇÃO PASSA A VIR COM BARRA DE ERRO
+   =====================================================================
+   A tabela de calibração exibia 20+ diferenças em pontos percentuais sem
+   nenhuma medida de incerteza, e este projeto vinha decidindo com base
+   nelas. A v108 expôs o custo: as duas réguas candidatas responderam em
+   direções OPOSTAS — `activeAddresses_suave` dobrou a separação (1,9 →
+   3,8pp) e `hashrate_suave` inverteu (1,2pp coerente → 1,6pp invertido).
+   Sem barra de erro não há como saber se isso é sinal ou sorteio.
+
+   O precedente é do próprio projeto: o ouro virou sensor na v68 porque
+   t ≈ 0,43, abaixo da significância. Aquele número existia; depois a
+   tabela cresceu e a incerteza sumiu dela.
+
+   DUAS estatísticas, e a diferença entre elas é o ponto:
+
+   · t ingênuo — erro padrão de Welch tratando cada dia como observação
+     independente. É o que a maioria das tabelas mostra, e ele INFLA.
+
+   · t efetivo — o retorno futuro de 30 dias medido em dias consecutivos
+     compartilha 29 dias de caminho. Dois dias seguidos não são duas
+     observações: são quase a mesma. A correção divide o tamanho de amostra
+     pelo horizonte, o que encolhe o t por ~√30 ≈ 5,5.
+
+   O efetivo é o que manda no rótulo. É conservador de propósito: preferir
+   dizer "não sei" onde a evidência não sustenta é a única postura que
+   sobrevive a 777 observações. */
+function estatisticaSeparacao(bull, bear, horizonteDias){
+  if(!bull || !bear || bull.length < 8 || bear.length < 8) return null;
+  const media = function(a){ return a.reduce(function(x,y){ return x+y; }, 0) / a.length; };
+  const varia = function(a, m){
+    if(a.length < 2) return 0;
+    return a.reduce(function(x,y){ return x + (y-m)*(y-m); }, 0) / (a.length - 1);
+  };
+  const mB = media(bull), mR = media(bear);
+  const vB = varia(bull, mB), vR = varia(bear, mR);
+  const sep = mB - mR;
+  const H = Math.max(1, horizonteDias || 1);
+  const efet = function(n){ return Math.max(2, n / H); };
+
+  const se    = Math.sqrt(vB/bull.length + vR/bear.length);
+  const seEf  = Math.sqrt(vB/efet(bull.length) + vR/efet(bear.length));
+  /* variância zero dos dois lados: a diferença é exata, mas não há como
+     estimar incerteza — devolve t = 0 em vez de infinito. Fingir certeza
+     absoluta seria a pior saída possível numa build que existe para
+     introduzir dúvida. */
+  /* v109.1 — O PISO DE 2 ESTAVA PRODUZINDO CONFIANÇA ONDE NÃO HÁ AMOSTRA.
+     Com 10 dias brutos e horizonte de 30, a amostra efetiva é ~0,33
+     observação. O piso de 2 deixava calcular um t de 3,18 e carimbar
+     "significante" — e um t com 2 graus de liberdade precisaria passar de
+     ~4,3, não de 2. Quem tem menos de 4 observações EFETIVAS de cada lado
+     não recebe veredito nenhum: recebe "amostra insuficiente". */
+  const suficiente = efet(bull.length) >= 4 && efet(bear.length) >= 4;
+  return { sep: sep, suficiente: suficiente,
+           se: se,     t:        se   > 0 ? sep/se   : 0,
+           seEf: seEf, tEfetivo: seEf > 0 ? sep/seEf : 0,
+           nBull: bull.length, nBear: bear.length,
+           nEfBull: efet(bull.length), nEfBear: efet(bear.length) };
+}
+
 function trendScoreAtDate(series, dateStr, scaleFactor, lookbackDays){
   lookbackDays = lookbackDays || 90;
   if(!series.length) return null;
@@ -6690,22 +6750,58 @@ async function runScoreBacktest(){
         que a suavização estava levando o sinal junto — e a resposta certa não é média
         móvel. A resposta pode muito bem ser essa, e ela vale tanto quanto a outra.
         <br><br>
+        <strong>v109 — Significância: por que quase tudo aqui pode ser sorteio.</strong>
+        A coluna nova traz duas estatísticas. O <strong>t ingênuo</strong> trata cada dia
+        como uma observação independente. O <strong>t efetivo</strong>, entre parênteses,
+        corrige o que o ingênuo esconde: o retorno de 30 dias medido em dois dias
+        seguidos compartilha 29 dias de caminho — não são duas observações, são quase
+        a mesma. A correção divide a amostra pelo horizonte e encolhe o t por
+        cerca de √30 ≈ 5,5. <strong>Quem decide o rótulo é o efetivo</strong>, com corte
+        em |t| ≥ 2.
+        <br><br>
+        A régua não é nova no projeto: o ouro virou sensor sem voto na v68 justamente
+        porque seu t ficou em <strong>0,43</strong>. Aquele número existia e decidiu. Depois
+        a tabela cresceu para 20+ linhas e a incerteza sumiu dela — e nós passamos a
+        comparar diferenças de 1,9pp contra 3,8pp como se fossem fatos.
+        <br><br>
+        <strong>Isto pode derrubar evidência que já citamos.</strong> Linhas que já usamos
+        para justificar decisão — inclusive a separação dos endereços ativos e do prêmio
+        Coinbase — podem aparecer agora como não distinguíveis de zero. Se aparecerem,
+        a conclusão certa não é procurar outra régua até alguma passar: é aceitar que
+        o passado recente, num regime só, não responde a pergunta, e que quem responde
+        são as 777 observações que estão sendo acumuladas.
+        <br><br>
         Cada indicador isolado, contra o mesmo retorno futuro. Um motor pode parecer "sem sinal"
         quando na verdade tem dois indicadores fortes se cancelando — e as duas situações pedem
         tratamento oposto. <strong>Isto não autoriza mudar peso:</strong> é o passado recente, num
         regime só, com janelas sobrepostas. Serve pra formular hipótese, não pra confirmar.
       </div>
       <table class="hist">
-        <thead><tr><th>Indicador</th><th>Motor</th><th>Bullish (≥15) — 30d</th><th>Bearish (≤−15) — 30d</th><th>Separação</th></tr></thead>
+        <thead><tr><th>Indicador</th><th>Motor</th><th>Bullish (≥15) — 30d</th><th>Bearish (≤−15) — 30d</th><th>Separação</th><th>Significância</th></tr></thead>
         <tbody>
           ${Object.keys(indBuckets).sort().map(function(id){
             const b = indBuckets[id];
             const bullAvg = b.bull.length ? avg(b.bull) : null;
             const bearAvg = b.bear.length ? avg(b.bear) : null;
-            let leitura = "amostra insuficiente", cor = "var(--text-faint)";
-            if(b.bull.length >= 8 && b.bear.length >= 8){
-              const sep = bullAvg - bearAvg;
-              if(sep > 1){ leitura = "✓ separa " + sep.toFixed(1) + "pp"; cor = "var(--teal)"; }
+            let leitura = "amostra insuficiente", cor = "var(--text-faint)", sig = "—";
+            const est = estatisticaSeparacao(b.bull, b.bear, forwardDays);
+            if(est){
+              const sep = est.sep;
+              sig = "t " + est.t.toFixed(2) +
+                    " <span style=\"font-size:10px;color:var(--text-faint);\">(ef " +
+                    est.tEfetivo.toFixed(2) + ")</span>";
+              /* v109 — QUEM DECIDE O RÓTULO É O t EFETIVO, não a diferença em pp.
+                 |t| ≥ 2 é o corte convencional. Abaixo dele, a linha mostra o
+                 número e diz que ele não se distingue de zero — que é o que a
+                 v68 fez com o ouro em t ≈ 0,43. */
+              if(!est.suficiente){
+                leitura = "amostra insuficiente (efetiva)";
+                cor = "var(--text-faint)";
+              } else if(Math.abs(est.tEfetivo) < 2){
+                leitura = "◦ " + (sep >= 0 ? "+" : "") + sep.toFixed(1) +
+                          "pp, não distinguível de zero";
+                cor = "var(--text-faint)";
+              } else if(sep > 1){ leitura = "✓ separa " + sep.toFixed(1) + "pp"; cor = "var(--teal)"; }
               else if(sep < -1){ leitura = "⚠ invertido " + Math.abs(sep).toFixed(1) + "pp"; cor = "var(--brick)"; }
               else { leitura = "≈ não separa"; cor = "var(--gold)"; }
             }
@@ -6716,6 +6812,7 @@ async function runScoreBacktest(){
               <td>${bullAvg === null ? "—" : bullAvg.toFixed(1)+"% <span style=\"font-size:10px;color:var(--text-faint);\">("+b.bull.length+"d)</span>"}</td>
               <td>${bearAvg === null ? "—" : bearAvg.toFixed(1)+"% <span style=\"font-size:10px;color:var(--text-faint);\">("+b.bear.length+"d)</span>"}</td>
               <td style="color:${cor};">${leitura}</td>
+              <td style="font-family:var(--font-mono);font-size:10.5px;color:var(--text-faint);">${sig}</td>
             </tr>`;
           }).join("")}
         </tbody>

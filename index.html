@@ -979,7 +979,7 @@ const STORAGE_KEY = "seios_btc_v2";
 // fonte única da versão — usada no rodapé, no histórico e nos exports.
 // Muda toda vez que a fórmula de score/pesos muda, pra nunca misturar
 // decisões de regras diferentes como se fossem comparáveis.
-const BUILD_VERSION = "2026-08-18.106.1-sensor-alias";
+const BUILD_VERSION = "2026-08-18.107-ruido-medido";
 /* v78: versão do MODELO separada da versão do BUILD. Mudança visual não é
    mudança de semântica: só sobe quando peso, fórmula, corte ou trava mudam.
    Toda observação gravada carrega as duas, pra que seis meses depois dê pra
@@ -5823,6 +5823,74 @@ async function fetchCoinMetricsHistoryRows(){
 
 // tendência genérica de uma série {date,value}[] contra ~N dias atrás —
 // mesma lógica de hashrateScoreAtDate, generalizada pra reaproveitar em endereços ativos
+/* =====================================================================
+   v107 — QUANTO DE SCORE UM ÚNICO DIA CONSEGUE MOVER
+   =====================================================================
+   O censo de 18/08 mediu que 24 dos 27 indicadores votantes usam N ≤ 2
+   pontos de dado e somam 78,6% do peso. O `activeAddresses` moveu 114,7
+   pontos de score em dez horas — 74% de todo o movimento do sistema
+   naquela janela — porque `(hoje − há 90 dias)/há 90 dias` carrega o ruído
+   dos DOIS dias inteiro, e `pct×5` satura em ±20%.
+
+   Isto aqui NÃO corrige. Mede, como a v104 mediu o M2 antes de a v105
+   trocar a régua. Se o número disser que 23pp num dia é rotina, a v108
+   troca a forma da medida com a evidência já publicada. Se disser que foi
+   cauda rara, a v108 não acontece — e isso também é resposta.
+   ===================================================================== */
+const RUIDO_LONGO = { addr: null, hash: null, erro: null };
+
+/* média dos últimos `k` pontos conhecidos ATÉ `dateStr`, inclusive.
+   Devolve null se não há ponto nenhum até a data — nunca inventa. */
+function mediaAte(series, dateStr, k){
+  if(!series || !series.length) return null;
+  let fim = -1;
+  for(let i = 0; i < series.length; i++){ if(series[i].date <= dateStr) fim = i; else break; }
+  if(fim < 0) return null;
+  const ini = Math.max(0, fim - k + 1);
+  let soma = 0, n = 0;
+  for(let i = ini; i <= fim; i++){
+    const v = Number(series[i].value);
+    if(Number.isFinite(v)){ soma += v; n++; }
+  }
+  return n ? soma / n : null;
+}
+
+/* a MESMA leitura de tendência, com média de `k` dias nas duas pontas em vez
+   de um ponto em cada. É a candidata que a v108 usaria — aqui ela só é medida. */
+function scoreSuavizadoAtDate(series, dateStr, scaleFactor, lookbackDays, k){
+  const agora = mediaAte(series, dateStr, k);
+  if(agora === null) return null;
+  const alvo = new Date(dateStr); alvo.setDate(alvo.getDate() - (lookbackDays || 90));
+  const passado = mediaAte(series, alvo.toISOString().slice(0,10), k);
+  if(passado === null || !passado) return null;
+  return clamp(((agora - passado) / passado) * 100 * scaleFactor, -100, 100);
+}
+
+/* percorre a série dia a dia e mede |score(hoje) − score(ontem)| sob as DUAS
+   réguas. Não escreve em lugar nenhum: devolve e pronto. */
+function medirRuidoDaMedida(series, escala, lookbackDays, k){
+  const resumo = function(deltas){
+    const s = deltas.slice().sort(function(a,b){ return a-b; });
+    const q = function(p){ return s.length ? s[Math.min(s.length-1, Math.floor(p*s.length))] : 0; };
+    const frac = function(lim){ return s.length ? s.filter(function(x){ return x >= lim; }).length / s.length : 0; };
+    return { n: s.length, p50: q(0.50), p90: q(0.90), p95: q(0.95),
+             max: s.length ? s[s.length-1] : 0,
+             fracMaior15: frac(15), fracMaior40: frac(40) };
+  };
+  const dA = [], dS = [];
+  let antA = null, antS = null;
+  for(let i = 0; i < series.length; i++){
+    const d = series[i].date;
+    const a = trendScoreAtDate(series.slice(0, i+1), d, escala, lookbackDays);
+    const s = scoreSuavizadoAtDate(series.slice(0, i+1), d, escala, lookbackDays, k);
+    if(a !== null && antA !== null) dA.push(Math.abs(a - antA));
+    if(s !== null && antS !== null) dS.push(Math.abs(s - antS));
+    if(a !== null) antA = a;
+    if(s !== null) antS = s;
+  }
+  return { atual: resumo(dA), suave: resumo(dS) };
+}
+
 function trendScoreAtDate(series, dateStr, scaleFactor, lookbackDays){
   lookbackDays = lookbackDays || 90;
   if(!series.length) return null;
@@ -5845,6 +5913,73 @@ async function fetchCoinbaseHistoricalCandles(){
   if(!res.ok) throw new Error("Coinbase histórico falhou");
   const data = await res.json(); // [[time, low, high, open, close, volume], ...]
   return data.map(c=>({ date: new Date(c[0]*1000).toISOString().slice(0,10), close:Number(c[4]) }));
+}
+
+/* v107 — a tabela do ruído. Só aparece com amostra; nunca inventa número. */
+function blocoRuidoDaMedida(){
+  if(RUIDO_LONGO.erro)
+    return `<div style="margin:18px 0;font-family:var(--font-mono);font-size:11.5px;color:var(--brick);">
+      Ruído da medida não medido nesta rodada: ${esc(RUIDO_LONGO.erro)}</div>`;
+  if(!RUIDO_LONGO.addr || RUIDO_LONGO.addr.atual.n < 60) return "";
+  const linha = function(nome, m, obs){
+    const c = function(x){ return x.toFixed(1); };
+    const p = function(x){ return (x*100).toFixed(0) + "%"; };
+    return `<tr><td style="padding:6px 10px;">${esc(nome)}</td>
+      <td style="padding:6px 10px;text-align:right;">${c(m.p50)}</td>
+      <td style="padding:6px 10px;text-align:right;">${c(m.p90)}</td>
+      <td style="padding:6px 10px;text-align:right;">${c(m.p95)}</td>
+      <td style="padding:6px 10px;text-align:right;">${c(m.max)}</td>
+      <td style="padding:6px 10px;text-align:right;">${p(m.fracMaior15)}</td>
+      <td style="padding:6px 10px;text-align:right;">${p(m.fracMaior40)}</td>
+      <td style="padding:6px 10px;color:var(--dim);">${esc(obs||"")}</td></tr>`;
+  };
+  const bloco = function(rot, m){
+    if(!m) return "";
+    return linha(rot + " · Régua atual (ponto a ponto)", m.atual, "")
+         + linha(rot + " · Alternativa (média 7d contra média 7d)", m.suave, "não está no score");
+  };
+  return `
+  <div style="margin:26px 0 10px;font-family:var(--font-mono);font-size:12px;letter-spacing:.06em;color:var(--dim);">
+    RUÍDO DA MEDIDA — QUANTOS PONTOS DE SCORE UM ÚNICO DIA MOVE, EM ${RUIDO_LONGO.addr.atual.n} DIAS
+  </div>
+  <div style="font-size:12.5px;line-height:1.65;margin-bottom:10px;">
+    Distribuição de |score de hoje − score de ontem| para os dois indicadores de 90 dias
+    que vêm da mesma fonte diária. A coluna da alternativa <strong>não está no score</strong>:
+    é a mesma leitura com média de 7 dias nas duas pontas, medida aqui para a troca poder
+    ser decidida com número.
+  </div>
+  <table style="width:100%;border-collapse:collapse;font-family:var(--font-mono);font-size:11.5px;">
+    <thead><tr style="color:var(--dim);text-align:left;">
+      <th style="padding:6px 10px;">Indicador · régua</th>
+      <th style="padding:6px 10px;text-align:right;">p50</th>
+      <th style="padding:6px 10px;text-align:right;">p90</th>
+      <th style="padding:6px 10px;text-align:right;">p95</th>
+      <th style="padding:6px 10px;text-align:right;">máx</th>
+      <th style="padding:6px 10px;text-align:right;">% dos dias ≥15</th>
+      <th style="padding:6px 10px;text-align:right;">% dos dias ≥40</th>
+      <th style="padding:6px 10px;"></th>
+    </tr></thead>
+    <tbody>
+      ${bloco("Endereços ativos", RUIDO_LONGO.addr)}
+      ${bloco("Hash rate", RUIDO_LONGO.hash)}
+    </tbody>
+  </table>
+  <div style="font-size:12.5px;line-height:1.65;margin-top:12px;">
+    <strong>O que isto mede:</strong> 15 é o corte a partir do qual um indicador é
+    classificado como bullish ou bearish. Um dia que sozinho move mais de 15 pontos
+    está trocando de lado por causa da medida, não do mercado.
+    <br><br>
+    <strong>O que isto NÃO afirma:</strong> não afirma que a alternativa prevê melhor —
+    a resposta pode muito bem ser não, e só as observações respondem. Também não
+    afirma que os endereços ativos não informam: a calibração histórica mostra que
+    eles separam 1,9pp. O que está sob suspeita é a forma de medir, não o indicador.
+    <br><br>
+    <strong>E não absolve ninguém:</strong> os outros indicadores de N≤2 do sistema
+    (juros, inflação, DXY, petróleo, euro, S&P, cobre, 10 anos) vivem em série lisa
+    ou de cadência lenta — FRED atualiza uma vez por dia útil, e a mensal uma vez por
+    mês. Ruído diário baixo neles é consequência da cadência da fonte, não prova de
+    que a forma da medida esteja certa. Eles seguem não testados.
+  </div>`;
 }
 
 /* VETOR CANÔNICO HISTÓRICO (v97) — o backtest passa a rodar O MODELO DO VIVO.
@@ -6123,6 +6258,16 @@ async function runScoreBacktest(){
       }
     });
     const addrSeries = cmRows.filter(r=>Number.isFinite(r.addr)).map(r=>({date:r.date, value:r.addr}));
+
+    /* v107 — MEDIÇÃO, e só. Roda sobre as séries que a calibração já baixou;
+       não pede rede nova, não alimenta `onchainVals`, não vira score.
+       Catch próprio pela regra da v104: medição fora do ar não pode derrubar
+       a calibração inteira. */
+    RUIDO_LONGO.addr = null; RUIDO_LONGO.hash = null; RUIDO_LONGO.erro = null;
+    try{
+      if(addrSeries.length >= 120) RUIDO_LONGO.addr = medirRuidoDaMedida(addrSeries, 5, 90, 7);
+      if(hashSeries.length >= 120) RUIDO_LONGO.hash = medirRuidoDaMedida(hashSeries, 6, 90, 7);
+    }catch(eRuido){ RUIDO_LONGO.erro = (eRuido && eRuido.message) || "falha ao medir o ruído"; }
 
     // prêmio Coinbase histórico: candle da Coinbase vs. preço de referência do mesmo dia
     const coinbaseByDate = {};
@@ -6640,6 +6785,7 @@ async function runScoreBacktest(){
         };
         return `
           <div style="font-family:var(--font-mono);font-size:10px;color:var(--text-faint);text-transform:uppercase;letter-spacing:.06em;margin:22px 0 10px;border-top:1px solid var(--line-soft);padding-top:16px;">
+            ${blocoRuidoDaMedida()}
             Distribuição do M2 — o normal de uma variável que nunca é zero, em ${vals.length} meses desde ${esc(M2_LONGO.desde || "?")}
           </div>
           <div style="font-family:var(--font-mono);font-size:10.5px;color:var(--text-faint);margin-bottom:10px;">

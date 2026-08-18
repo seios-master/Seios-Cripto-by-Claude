@@ -979,12 +979,12 @@ const STORAGE_KEY = "seios_btc_v2";
 // fonte única da versão — usada no rodapé, no histórico e nos exports.
 // Muda toda vez que a fórmula de score/pesos muda, pra nunca misturar
 // decisões de regras diferentes como se fossem comparáveis.
-const BUILD_VERSION = "2026-08-18.110-fred-fechado";
+const BUILD_VERSION = "2026-08-18.111-ultimo-modelo";
 /* v78: versão do MODELO separada da versão do BUILD. Mudança visual não é
    mudança de semântica: só sobe quando peso, fórmula, corte ou trava mudam.
    Toda observação gravada carrega as duas, pra que seis meses depois dê pra
    saber sob qual regra aquela leitura foi produzida. */
-const MODEL_VERSION = "m10-2026-08-18";
+const MODEL_VERSION = "m11-2026-08-18";
 
 // indicador padrão — auto = tenta buscar sozinho; manual = você preenche
 function ind(label, source, note, excludeFromScore){
@@ -1047,8 +1047,15 @@ function defaultState(){
         funding:   ind("Funding rate", "auto"),
         openInterest: ind("Open Interest × preço × funding (posicionamento)", "auto"),
         putCall:   ind("Put/Call ratio (Deribit)", "auto"),
-        longShort: ind("Long/Short ratio (posicionamento, Binance)", "auto"),
-        takerRatio: ind("Taker buy/sell ratio (agressão do book, Binance)", "auto"),
+        /* v111 — MICROESTRUTURA DE 1h VIRA SENSOR, como o book imbalance na v106.
+           Os dois vêm de janela de 1h da Binance e são lidos por um sistema que
+           coleta de 8 em 8 horas. MEDIDO nesta sessão, no mesmo dia:
+           takerRatio −22,96 → +1,81 → −24,54. Não é fórmula errada; é cadência
+           incompatível, e nenhuma reformulação conserta isso.
+           Continuam sendo coletados e gravados na série: se informarem alguma
+           coisa, as 777 observações vão dizer. */
+        longShort: ind("Long/Short ratio (posicionamento, Binance) · sensor, não pontua — janela de 1h", "auto", "", true),
+        takerRatio: ind("Taker buy/sell ratio (agressão do book, Binance) · sensor, não pontua — janela de 1h", "auto", "", true),
         liquidClusters: ind("Proximidade de clusters de liquidação", "manual")
       }},
       tecnico:       { label:"Técnico",                      weight:.04, indicators:{
@@ -1096,7 +1103,14 @@ function defaultState(){
            decide em alguns meses — e pode revelar que o sinal muda com o
            regime, que nenhum valor fixo capturaria. */
         ouro:    ind("Ouro — PAXG (momentum 90d) · sensor, não pontua", "auto", "", true),
-        euro:    ind("Euro/Dólar (momentum 90d)", "auto"),
+        /* v111 — DUPLA CONTAGEM DO DÓLAR. O `macro.dxy` já vota com o dólar
+           amplo (DTWEXBGS), e o euro é o maior componente desse índice. O
+           mesmo movimento cambial entrava duas vezes no score, por dois
+           motores diferentes — e o Macro pesa 28% nominais.
+           Isto é composição de índice, verificável sem calibração nenhuma:
+           não depende de nenhuma tabela que a v109 mostrou não ter poder.
+           O euro vira sensor; quem continua votando pelo dólar é o dxy. */
+        euro:    ind("Euro/Dólar (momentum 90d) · sensor, não pontua — já contado no dólar amplo", "auto", "", true),
         sp500:   ind("S&P 500 (momentum 90d)", "auto"),
         cobre:   ind("Cobre (momentum mensal, \"Dr. Copper\")", "auto"),
         vix:     ind("VIX — índice de medo do mercado tradicional", "auto"),
@@ -1769,6 +1783,28 @@ function textoCacheGdelt(){
   return " · " + partes.join(" · ");
 }
 
+/* v111 — O TOM TAMBÉM TEM BUCKET EM FORMAÇÃO.
+   `points[points.length-1]` é o último balde da linha do tempo de 3 dias, e
+   ele ainda está enchendo. É a v101 não aplicada ao tom: aquela build
+   corrigiu o VOLUME (`todos.slice(0,-1)`) e parou na lista que a auditoria
+   tinha escrito. O tom não estava na lista, e ninguém foi conferir se havia
+   mais — o mesmo modo de falha que deixou oito séries do FRED de fora até a
+   v110.
+
+   Fica registrado o que esta correção NÃO resolve: um balde de 15 minutos
+   continua sendo uma janela curta para um instrumento que lê de 8 em 8
+   horas. Se o tom se comportar como o book imbalance, o caminho é sensor —
+   mas isso é decisão para depois do congelamento, com a série na mão. */
+function tomDoUltimoFechado(pontos){
+  if(!pontos || pontos.length < 2)
+    throw new Error("GDELT tom: sem bucket fechado (só o parcial)");
+  const p = pontos[pontos.length - 2];
+  const v = (p && (p.value ?? p.Value ?? p.tone ?? p.Tone));
+  if(v === undefined || v === null || !Number.isFinite(Number(v)))
+    throw new Error("GDELT tom: formato inesperado no bucket fechado");
+  return Number(v);
+}
+
 async function fetchGdeltTone(){
   const url = `${GDELT_ROTA}?mode=timelinetone&timespan=3d&set=geo`;
   const res = await pedirGdelt(url);
@@ -1779,10 +1815,7 @@ async function fetchGdeltTone(){
   const series = data.timeline && data.timeline[0];
   const points = series && (series.data || series.Data);
   if(!points || !points.length) throw new Error("GDELT sem dado utilizável");
-  const last = points[points.length - 1];
-  const val = last.value ?? last.Value ?? last.tone ?? last.Tone;
-  if(val === undefined || Number.isNaN(Number(val))) throw new Error("GDELT formato inesperado");
-  return Number(val); // tom médio, tipicamente entre -10 e +10
+  return tomDoUltimoFechado(points); // tom médio do último bucket FECHADO
 }
 
 // aceleração de volume — diferente do tom: mede QUANTO se fala de crise
@@ -1991,14 +2024,26 @@ async function fetchBinanceTakerRatio(){
 }
 
 /* --- Coinbase — preço isolado, pra medir prêmio institucional americano. --- */
+/* v111 — PRÊMIO PRECISA DE UM INSTANTE COMUM.
+   Antes: ticker da Coinbase (agora) contra `S.market.price`, que vem do
+   CoinGecko e foi buscado em outro momento da rodada, com carimbo de tempo
+   próprio e desconhecido. Isso não mede prêmio: mede prêmio MAIS a defasagem
+   entre duas fontes. Num ativo que anda 1% em minutos, a defasagem pode ser
+   maior que o próprio prêmio — que vive na casa de 0,01%.
+   Agora: Coinbase e Binance, as duas pontas pedidas no mesmo instante com
+   `Promise.all`. O prêmio passa a ser a diferença entre dois livros de
+   ofertas, que é o que a palavra significa. */
 async function fetchCoinbasePremium(){
-  if(!S.market.price) throw new Error("preço de referência ainda não carregado");
-  const res = await smartFetch("https://api.exchange.coinbase.com/products/BTC-USD/ticker");
-  if(!res.ok) throw new Error("Coinbase falhou");
-  const data = await res.json();
-  const cbPrice = Number(data.price);
-  if(!cbPrice) throw new Error("Coinbase sem preço");
-  return ((cbPrice - S.market.price) / S.market.price) * 100; // % de prêmio/desconto
+  const [rCb, rBn] = await Promise.all([
+    smartFetch("https://api.exchange.coinbase.com/products/BTC-USD/ticker"),
+    smartFetch("https://api.binance.com/api/v3/ticker/price?symbol=BTCUSDT")
+  ]);
+  if(!rCb.ok) throw new Error("Coinbase falhou");
+  if(!rBn.ok) throw new Error("Binance falhou (referência do prêmio)");
+  const dCb = await rCb.json(), dBn = await rBn.json();
+  const cbPrice = Number(dCb.price), bnPrice = Number(dBn.price);
+  if(!cbPrice || !bnPrice) throw new Error("prêmio Coinbase: preço ausente numa das pontas");
+  return ((cbPrice - bnPrice) / bnPrice) * 100; // % de prêmio/desconto, mesmo instante
 }
 
 /* --- Binance orderbook — desequilíbrio de compra/venda, sem chave. --- */

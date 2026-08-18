@@ -26,6 +26,16 @@ const semPorta = paineis.filter(p => !comPorta.includes(p));
 const semPainel = botoes.filter(b => !paineis.includes(b));
 const dup = idsJs.filter(d => estat.includes(d));   // colisão vale para QUALQUER id, painel ou não
 
+/* v116 — ID REPETIDO NO PRÓPRIO HTML.
+   A v115 criou um `serieContador` no canto sem ver que já existia um na
+   fileira de botões. getElementById pega só o primeiro: o segundo nunca é
+   preenchido e nada acusa. Este checador varria só ids que começam com
+   "panel" — a colisão passou por baixo. Agora varre todos. */
+const idsHtml = [...H.matchAll(/\sid="([^"]+)"/g)].map(m => m[1]);
+const vistos = {}, repetidos = [];
+idsHtml.forEach(function(x){ if(vistos[x]) repetidos.push(x); vistos[x] = 1; });
+const idsRepetidos = [...new Set(repetidos)];
+
 console.log(`painéis: ${paineis.length}  (${estat.length} estáticos, ${viaHelper.length} via helper, ${dinam.length} por id direto)`);
 console.log(`botões estáticos: ${botoes.length}` + (botoesJs.length ? `  · ${botoesJs.length} via dataset.rel dinâmico` : ""));
 
@@ -33,6 +43,7 @@ let erro = 0;
 if(semPorta.length){ erro++; console.log("\n✗ PAINEL SEM BOTÃO (invisível ao usuário):"); semPorta.forEach(p=>console.log("    " + p)); }
 if(semPainel.length){ erro++; console.log("\n✗ BOTÃO SEM PAINEL (clique morto):"); semPainel.forEach(b=>console.log("    " + b)); }
 if(dup.length){ erro++; console.log("\n✗ ID DUPLICADO entre HTML estático e JS (getElementById pega só o primeiro):"); dup.forEach(d=>console.log("    " + d)); }
+if(idsRepetidos.length){ erro++; console.log("\n✗ ID REPETIDO NO HTML (getElementById pega só o primeiro):"); idsRepetidos.forEach(d=>console.log("    " + d)); }
 
 if(!erro) console.log("\n✓ todo painel tem porta, toda porta tem painel, nenhum id colide.");
 process.exit(erro ? 1 : 0);

@@ -1,12 +1,5 @@
 /* =====================================================================
    harness-v94.js — uma contagem de observações independentes
-   =====================================================================
-   Falha inteiro contra a v93: `contagemDaSerie` não existe lá. O que ele
-   prova é que os TRÊS lugares que mostram progresso leem da mesma função,
-   e que a função conta janela independente (`prox`), não leitura com
-   desfecho de 24 h — que é ~3× maior com a rotina de três leituras/dia.
-
-   Uso:  node harness-v94.js index.html
    ===================================================================== */
 
 const fs = require("fs");
@@ -53,7 +46,6 @@ try{
 
 const H8 = 8 * 3600e3;
 function serieDeLeituras(n, precos){
-  // três leituras por dia, de 8 em 8 horas — a rotina real do Jorge
   const base = Date.parse("2026-08-01T09:00:00Z");
   const out = [];
   for(let i = 0; i < n; i++){
@@ -82,23 +74,19 @@ t("N leituras produzem N−1 janelas independentes: a última ainda não fechou"
   eq(API.contagemDaSerie(s).leituras, 6, "leituras:");
 });
 
-t("nove leituras = 8 janelas independentes, e o dia não é a unidade — dia NÃO é observação", ()=>{
-  // nove leituras de 8 em 8h a partir das 09:00 UTC caem em quatro datas
-  // civis — o que já é parte do argumento: "dia" não é unidade de amostra.
+t("nove leituras = 8 janelas independentes, e o dia não é a unidade", ()=>{
   const s = serieDeLeituras(9);
   API.maturarRetornos(s, 200, Date.parse(s[8].ts) + 3600e3);
   const c = API.contagemDaSerie(s);
   eq(c.dias, 4, "datas civis tocadas:");
   eq(c.independentes, 8, "janelas:");
-  // o diagnóstico da v93 mostraria 4/777 = 0,5%; a verdade é 8/777 = 1,0%
   verdade(Math.abs(c.pctDoAlvo - (8/777)*100) < 1e-9, "percentual do alvo errado: " + c.pctDoAlvo);
 });
 
-t("desfecho de 24h é contado à parte, e é ~3× as janelas — por isso não vira amostra", ()=>{
+t("desfecho de 24h é contado à parte, e é ~3× as janelas", ()=>{
   const s = serieDeLeituras(12);
   const fim = Date.parse(s[11].ts);
   API.maturarRetornos(s, 200, fim + 3600e3);
-  // as leituras com 1 dia completo recebem d1 pela reconstrução da própria série
   const c = API.contagemDaSerie(s);
   verdade(c.comD1 > 0, "nenhum d1 apurado — o teste não separa nada");
   verdade(c.comD1 !== c.independentes || c.comD1 === 0,
@@ -128,12 +116,10 @@ t("leitura de modelo antigo fica FORA da contagem, e é reportada à parte", ()=
   const c = API.contagemDaSerie(s);
   eq(c.leituras, 4, "leituras sob o modelo atual:");
   eq(c.legado, 2, "leituras de modelo anterior:");
-  // 4 leituras sob o modelo atual, mas a última ainda não fechou janela: 3
   eq(c.independentes, 3, "janelas do modelo atual:");
 });
 
 t("a contagem NÃO depende de o chamador lembrar de filtrar", ()=>{
-  // o mesmo conjunto, já filtrado pelo chamador, dá o mesmo número
   const s = serieDeLeituras(6);
   API.maturarRetornos(s, 200, Date.parse(s[5].ts) + 3600e3);
   s[0].modelo = "m4-2026-08-15";
@@ -178,8 +164,13 @@ t("o diagnóstico não divide mais DIAS por 777", ()=>{
 
 t("o painel da série mede os marcos por janela independente", ()=>{
   const limpo = semComentarios(HTML);
-  const i = limpo.indexOf("const MARCOS");
-  if(i === -1) throw new Error("não achei os marcos");
+  /* v116 — âncora sem ambiguidade. Este teste procurava "const MARCOS" e
+     passou a encontrar `MARCOS_DECLARADOS`, criada antes no arquivo, cuja
+     vizinhança nada tem a ver com a contagem da série. Prefixo comum entre
+     dois nomes é âncora frágil: o teste acusa onde não há defeito e um dia
+     aprova onde há. */
+  const i = limpo.indexOf("const MARCOS = [");
+  if(i === -1) throw new Error("não achei os marcos do painel da série");
   const trecho = limpo.slice(i - 400, i + 900);
   if(/obs1d\s*>=\s*m\.n/.test(trecho)) throw new Error("os marcos ainda contam desfecho de 24h");
   if(!/contagemDaSerie\(/.test(trecho)) throw new Error("não usa a contagem única");
@@ -214,10 +205,6 @@ t("e o carimbo de falha diz que o indicador está fora da conta", ()=>{
 console.log("\nBLOCO E — nenhum nome de função declarado duas vezes");
 
 t("declarações de função no topo do script são únicas", ()=>{
-  /* Esta build quase nasceu com DUAS `contarObservacoes`: a minha, nova, e uma
-     de IndexedDB que já existia — sem nenhum chamador, o que a deixou invisível.
-     A segunda declaração vence por hoisting e a primeira some sem erro nenhum.
-     `node --check` não vê, o harness não via, e o checa-campos não via. */
   const limpo = semComentarios(HTML);
   const nomes = [...limpo.matchAll(/^function ([A-Za-z_$][\w$]*)\s*\(/gm)].map(m=>m[1]);
   const vistos = {}, dup = [];

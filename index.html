@@ -649,8 +649,10 @@ var PELE_ATUAL = "padrao";
   <div class="wrap controls-row">
     <button class="primary" id="btnRefresh" title="Busca todas as fontes e recalcula o estado de mercado">↻ Atualizar dados</button>
     <button class="ghost" id="btnDiag" title="Copia a leitura inteira em texto — para colar numa conversa">⧉ Diagnóstico</button>
+    <button class="ghost" id="btnExport" title="Salva TUDO em .json: estado, configurações, histórico e a série point-in-time">⇩ Salvar tudo (.json)</button>
+    <button class="ghost" id="btnImport" title="Restaura um backup .json — substitui os dados atuais">⇧ Restaurar</button>
     <span class="skin-picker" id="skinPicker">
-      <label for="skinSelect" style="font-family:var(--font-mono);font-size:10px;letter-spacing:.1em;text-transform:uppercase;color:var(--text-faint);">pele</label>
+      <label for="skinSelect" style="font-family:var(--font-mono);font-size:10px;letter-spacing:.1em;text-transform:uppercase;color:var(--text-faint);">skin</label>
       <select id="skinSelect" title="Só aparência: não muda nenhum número, nenhuma coleta e nenhum peso">
         <option value="padrao" data-skin-op="padrao">Padrão</option>
         <option value="milimetrado" data-skin-op="milimetrado">Papel milimetrado</option>
@@ -661,9 +663,6 @@ var PELE_ATUAL = "padrao";
         <option value="batimetria" data-skin-op="batimetria">Carta batimétrica</option>
       </select>
     </span>
-    <button class="ghost" id="btnExport" title="Salva TUDO em .json: estado, configurações, histórico e a série point-in-time">⇩ Salvar tudo (.json)</button>
-    <button class="ghost" id="btnImport" title="Restaura um backup .json — substitui os dados atuais">⇧ Restaurar</button>
-    <span id="serieContador" style="align-self:center;font-size:11px;color:var(--text-faint);letter-spacing:.06em;"></span>
     <span id="alertaCongelado" style="align-self:center;font-size:11px;letter-spacing:.06em;color:var(--amber,#e8a33d);"></span>
     <button class="ghost" id="btnExportCsv" style="display:none;">⇩ Histórico (.csv)</button>
     <input type="file" id="importFileInput" accept="application/json,.json" style="display:none;">
@@ -875,6 +874,7 @@ var PELE_ATUAL = "padrao";
       <button class="ghost" id="btnSerieCsv">⇩ Série (.csv)</button>
     </div>
     <div id="serieResumo" style="margin-top:14px;"></div>
+    <div id="marcosDeclarados"></div>
   </section>
 
   <!-- § BACKTEST ENGINE -->
@@ -1166,7 +1166,7 @@ const STORAGE_KEY = "seios_btc_v2";
 // fonte única da versão — usada no rodapé, no histórico e nos exports.
 // Muda toda vez que a fórmula de score/pesos muda, pra nunca misturar
 // decisões de regras diferentes como se fossem comparáveis.
-const BUILD_VERSION = "2026-08-18.115-cabecalho";
+const BUILD_VERSION = "2026-08-18.116-congelada";
 /* v78: versão do MODELO separada da versão do BUILD. Mudança visual não é
    mudança de semântica: só sobe quando peso, fórmula, corte ou trava mudam.
    Toda observação gravada carrega as duas, pra que seis meses depois dê pra
@@ -5592,6 +5592,99 @@ function textoDaContagem(leituras, janelas, legado){
   return partes.join(" · ");
 }
 
+/* =====================================================================
+   v116 — A RÉGUA DE LEITURA, DECLARADA ANTES DE EXISTIR DADO
+   =====================================================================
+   Escrito em 18/08/2026, com a série em 3 janelas de 777. O valor disto
+   está inteiramente no MOMENTO: uma regra declarada depois, com 300
+   observações na tela, não teria como ser distinguida de uma regra
+   escolhida olhando o resultado.
+
+   Quantas observações para detectar qual vantagem (poder de 80%):
+     85  → r ≈ 0,30   ~1 mês a três leituras por dia
+     194 → r ≈ 0,20   ~2 meses
+     347 → r ≈ 0,15   ~4 meses
+     783 → r ≈ 0,10   ~8,5 meses — é de onde veio o 777
+
+   OLHAR QUATRO VEZES INFLA O ACASO. Com quatro conferências a 5%, a chance
+   de alguma parecer boa sem haver nada é de cerca de 18%, não de 5%. Por
+   isso o corte de cada conferência é 1% bilateral — |t| ≥ 2,576 — fixado
+   agora. Afrouxar depois seria mudar a régua no meio do jogo, que é
+   exatamente o que a v109 mostrou acontecer quando a incerteza some da
+   tela.
+
+   O que se testa em cada marco: a correlação entre o score da leitura e o
+   retorno até a leitura SEGUINTE (ret8h) — janelas que não se sobrepõem,
+   por isso cada uma conta como observação independente. */
+const MARCOS_DECLARADOS = [
+  { n: 85,  r: 0.30, rotulo: "vantagem enorme" },
+  { n: 194, r: 0.20, rotulo: "vantagem grande" },
+  { n: 347, r: 0.15, rotulo: "vantagem boa" },
+  { n: 783, r: 0.10, rotulo: "vantagem fina — o alvo" }
+];
+const T_CORTE_MARCO = 2.576;   // 1% bilateral, por causa das quatro conferências
+
+function marcosDaSerie(janelas){
+  const j = Number.isFinite(Number(janelas)) ? Math.max(0, Number(janelas)) : 0;
+  return MARCOS_DECLARADOS.map(function(m){
+    return { n: m.n, r: m.r, rotulo: m.rotulo,
+             atingido: j >= m.n, faltam: Math.max(0, m.n - j) };
+  });
+}
+
+function blocoMarcos(janelas){
+  const ms = marcosDaSerie(janelas);
+  const j = Number.isFinite(Number(janelas)) ? Math.max(0, Number(janelas)) : 0;
+  const linhas = ms.map(function(m){
+    const estado = m.atingido
+      ? '<span style="color:var(--teal);">alcançado</span>'
+      : '<span style="color:var(--text-faint);">faltam ' + m.faltam + '</span>';
+    return '<tr><td style="padding:6px 10px;">' + m.n + ' janelas</td>' +
+           '<td style="padding:6px 10px;">r ≈ ' + m.r.toFixed(2) + '</td>' +
+           '<td style="padding:6px 10px;color:var(--text-dim);">' + esc(m.rotulo) + '</td>' +
+           '<td style="padding:6px 10px;text-align:right;">' + estado + '</td></tr>';
+  }).join("");
+  return `
+  <div style="margin-top:22px;border-top:1px solid var(--line-soft);padding-top:16px;">
+    <div style="font-family:var(--font-mono);font-size:10px;letter-spacing:.06em;
+                text-transform:uppercase;color:var(--text-faint);margin-bottom:10px;">
+      Marcos declarados — a régua de leitura, fixada antes do dado
+    </div>
+    <div style="font-size:12.5px;line-height:1.65;margin-bottom:12px;">
+      Declarados em <strong>18/08/2026</strong>, na build
+      <strong>2026-08-18.116-congelada</strong>, com a série em
+      <strong>${j} janela(s)</strong>. Uma regra escrita depois, com centenas de
+      observações já na tela, não teria como ser distinguida de uma regra
+      escolhida olhando o resultado — por isso ela é escrita agora, quando
+      ainda não há o que olhar.
+    </div>
+    <table style="width:100%;border-collapse:collapse;font-family:var(--font-mono);font-size:11.5px;">
+      <thead><tr style="color:var(--text-faint);text-align:left;">
+        <th style="padding:6px 10px;">Marco</th><th style="padding:6px 10px;">Detecta</th>
+        <th style="padding:6px 10px;">Tamanho</th><th style="padding:6px 10px;text-align:right;">Estado</th>
+      </tr></thead>
+      <tbody>${linhas}</tbody>
+    </table>
+    <div style="font-size:12.5px;line-height:1.65;margin-top:12px;">
+      <strong>O que se mede:</strong> a correlação entre o score de uma leitura e o
+      retorno até a leitura seguinte. As janelas de 8 horas não se sobrepõem — é isso
+      que faz cada uma valer como observação independente, ao contrário dos 285 dias do
+      backtest, que valem cerca de 9,5 no total.
+      <br><br>
+      <strong>Por que o corte é 1% e não 5%:</strong> conferir mais de uma vez infla o
+      acaso. Com quatro conferências a 5%, a chance de alguma parecer boa sem haver nada
+      é de cerca de 18%. O corte de cada uma é |t| ≥ 2,576. Afrouxar isso depois seria
+      mudar a régua no meio do jogo.
+      <br><br>
+      <strong>O que os marcos NÃO resolvem:</strong> nenhum deles prova que o sistema
+      funciona. Eles dizem, no máximo, que a vantagem daquele tamanho existe ou não
+      existe. <strong>"Não encontrado" é resultado</strong>, e é o desfecho mais provável
+      de todos — o backtest já mostrou que o sistema não bate uma estratégia de um
+      indicador só. A régua serve para que a resposta, qualquer que seja, valha.
+    </div>
+  </div>`;
+}
+
 function computeMarketState(){
   const composites = {};
   Object.entries(S.motors).forEach(([key])=>{ composites[key] = motorComposite(key); });
@@ -9779,6 +9872,14 @@ async function renderSerie(){
     return;
   }
   const r = resumirSerie(obs);
+  /* v116 — a régua declarada aparece junto do que está sendo acumulado:
+     é o único lugar em que os dois números fazem sentido lado a lado. */
+  try{
+    const snaps = await lerSnapshots();
+    const cont = contagemDaSerie(snaps);
+    const alvoM = document.getElementById("marcosDeclarados");
+    if(alvoM) alvoM.innerHTML = blocoMarcos(cont.independentes);
+  }catch(eM){ /* o painel da série não pode cair por causa do bloco de marcos */ }
   const buracos = diasSemColeta(r.dias);
   const semBruto = Object.entries(r.porIndicador).filter(function(p){ return p[1].comBruto === 0; });
   const mono = "font-family:var(--font-mono);font-size:11px;";

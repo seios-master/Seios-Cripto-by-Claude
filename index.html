@@ -713,7 +713,7 @@ var PELE_ATUAL = "padrao";
       <div style="padding-top:12px;">
         <div id="integrationsPanel" style="margin-bottom:16px;padding:12px 14px;border:1px solid var(--line-soft);background:var(--bg-alt);">
           <div style="font-family:var(--font-mono);font-size:10.5px;color:var(--teal);text-transform:uppercase;letter-spacing:.06em;margin-bottom:8px;">✓ FRED — conectado pelo servidor, sem chave sua</div>
-          <div style="font-size:10.5px;color:var(--text-faint);margin-bottom:14px;">O Macro (28% do peso), Ativos Globais e o Geopolítico leem o FRED através de <strong>/api/fred</strong>, uma rota deste mesmo domínio. A chave fica no servidor e não passa pelo seu navegador nem por intermediário nenhum. <strong>Você não precisa fazer nada aqui.</strong><br><span id="fredKeyStatus" style="font-family:var(--font-mono);"></span></div>
+          <div style="font-size:10.5px;color:var(--text-faint);margin-bottom:14px;">O Macro (15% do peso), Ativos Globais (21%) e o Geopolítico leem o FRED através de <strong>/api/fred</strong>, uma rota deste mesmo domínio. A chave fica no servidor e não passa pelo seu navegador nem por intermediário nenhum. <strong>Você não precisa fazer nada aqui.</strong><br><span id="fredKeyStatus" style="font-family:var(--font-mono);"></span></div>
 
           <div style="font-family:var(--font-mono);font-size:10.5px;color:var(--teal);text-transform:uppercase;letter-spacing:.06em;margin-bottom:8px;border-top:1px solid var(--line-soft);padding-top:12px;">🔑 Integração CoinGecko Pro (opcional, plano Basic $35/mês) — preço e histórico diário mais confiáveis, sem limite de chamadas. As médias de 200/100/50 semanas NÃO dependem disso: vêm da Binance, de graça.</div>
           <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:6px;">
@@ -943,9 +943,10 @@ var PELE_ATUAL = "padrao";
         <br><br>
         <strong>v112 — duas mudanças, e as duas encolhem esta tabela.</strong>
         <strong>Primeira:</strong> só entram decisões registradas sob o modelo atual
-        (<span id="caseEngineModelo"></span>). Composites de m5 e de m11 não são a mesma
-        grandeza — entre eles cinco indicadores deixaram de votar, a liquidez trocou de
-        régua e o FRED passou a descartar o dia em formação. Somar os dois na mesma média
+        (<span id="caseEngineModelo"></span>). Composites de modelos diferentes não são a mesma
+        grandeza — entre m5 e m12 seis indicadores deixaram de votar, a liquidez trocou de
+        régua, o FRED passou a descartar o dia em formação e os pesos do Macro e de Ativos
+        Globais foram trocados entre si. Somar os dois na mesma média
         era o defeito que a v102 corrigiu no delta de score. Registros anteriores à v112
         não têm etiqueta de modelo e ficam de fora: supor sob qual régua nasceram seria
         inventar.
@@ -1173,7 +1174,7 @@ const STORAGE_KEY = "seios_btc_v2";
 // fonte única da versão — usada no rodapé, no histórico e nos exports.
 // Muda toda vez que a fórmula de score/pesos muda, pra nunca misturar
 // decisões de regras diferentes como se fossem comparáveis.
-const BUILD_VERSION = "2026-08-19.117-m12";
+const BUILD_VERSION = "2026-08-19.118-textos-m12";
 /* v78: versão do MODELO separada da versão do BUILD. Mudança visual não é
    mudança de semântica: só sobe quando peso, fórmula, corte ou trava mudam.
    Toda observação gravada carrega as duas, pra que seis meses depois dê pra
@@ -5729,7 +5730,7 @@ function computeMarketState(){
   const completeness = vetor.massaTotal > 0 ? vetor.massaObservada / vetor.massaTotal : 0;
 
   // divergência: quanto os motores preenchidos discordam entre si (desvio-padrão)
-  // divergência PONDERADA: Técnico (4%) discordar não é o mesmo que Macro (28%)
+  // divergência PONDERADA: Técnico (4%) discordar não é o mesmo que Ativos Globais (21%)
   // discordar. Antes cada motor pesava igual aqui, num sistema que é ponderado
   // em todo o resto — o número superestimava briga de motor pequeno.
   let divergence = 0;

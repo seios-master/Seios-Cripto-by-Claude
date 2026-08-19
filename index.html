@@ -1174,7 +1174,7 @@ const STORAGE_KEY = "seios_btc_v2";
 // fonte única da versão — usada no rodapé, no histórico e nos exports.
 // Muda toda vez que a fórmula de score/pesos muda, pra nunca misturar
 // decisões de regras diferentes como se fossem comparáveis.
-const BUILD_VERSION = "2026-08-19.118-textos-m12";
+const BUILD_VERSION = "2026-08-19.119-calib-sensor";
 /* v78: versão do MODELO separada da versão do BUILD. Mudança visual não é
    mudança de semântica: só sobe quando peso, fórmula, corte ou trava mudam.
    Toda observação gravada carrega as duas, pra que seis meses depois dê pra
@@ -5720,6 +5720,34 @@ function blocoMarcos(janelas){
   </div>`;
 }
 
+/* v119 — A CALIBRAÇÃO PARAVA DE SER VERDADE QUANDO UM INDICADOR ERA REBAIXADO.
+   A tabela "Calibração por INDICADOR" listava `ativosGlobais.euro` e
+   `tecnico.momentum` sem marca nenhuma — e os dois são SENSORES, que não votam.
+   O texto acima da tabela diz "a linha marcada com ⚗ não vota no score"; por
+   contraste, o leitor conclui que as linhas SEM marca votam. O painel afirmava
+   algo falso sobre duas de suas linhas.
+   Não foi o m12 que criou isto: o euro é sensor desde a v111, e a auditoria de
+   relatórios da v112 não pegou porque olhou o pódio e as tabelas por motor.
+
+   Três estados, três marcas:
+     ⚗  laboratório — NUNCA votou, existe só para comparar com quem vota
+     ◉  sensor      — votava e foi REBAIXADO; continua sendo coletado
+     (nada) — vota no score
+
+   A marca é lida do ESTADO (`excludeFromScore`), não de uma lista escrita à
+   mão: uma lista ficaria desatualizada em silêncio, que é o mesmo defeito em
+   outra forma. */
+function marcaDoIndicadorCalib(id){
+  if(typeof id !== "string") return "";
+  if(id.indexOf("⚗") !== -1) return "⚗";
+  const p = id.split(".");
+  if(p.length !== 2) return "";
+  const motor = S && S.motors && S.motors[p[0]];
+  const ind = motor && motor.indicators && motor.indicators[p[1]];
+  if(!ind) return "";
+  return ind.excludeFromScore ? "◉" : "";
+}
+
 function computeMarketState(){
   const composites = {};
   Object.entries(S.motors).forEach(([key])=>{ composites[key] = motorComposite(key); });
@@ -7317,6 +7345,18 @@ async function runScoreBacktest(){
         Calibração por INDICADOR — o motor é o problema ou é alguém dentro dele?
       </div>
       <div style="font-family:var(--font-mono);font-size:10.5px;color:var(--text-faint);margin-bottom:10px;">
+        <strong>Três estados nesta tabela, e a diferença importa:</strong>
+        <strong>⚗ laboratório</strong> — nunca votou, existe só para ser comparada com a
+        versão que vota. <strong style="color:var(--gold);">◉ sensor</strong> — votava e foi
+        <strong>rebaixado</strong>; continua sendo coletado e gravado na série, mas não entra
+        no score. <strong>Sem marca</strong> — vota. Hoje aparecem aqui dois sensores:
+        <code>euro</code> (rebaixado na v111, dupla contagem do dólar) e <code>momentum</code>
+        (rebaixado no m12, direção não verificada).
+        <br><br>
+        <strong>Quatro sensores NÃO aparecem nesta tabela</strong> — ouro, book imbalance,
+        long/short e taker buy/sell — porque não têm fonte histórica reconstruível. A ausência
+        deles aqui não é omissão: é falta de dado para o passado.
+        <br><br>
         A linha marcada com <strong>⚗</strong> é variável de <strong>laboratório</strong>: não vota no score,
         não tem peso, e existe só para ser comparada com a versão que vota. <code>funding_percentil</code> é a
         mesma taxa da linha <code>funding</code>, lida como posição na própria distribuição passada (percentil
@@ -7393,8 +7433,11 @@ async function runScoreBacktest(){
               else { leitura = "≈ não separa"; cor = "var(--gold)"; }
             }
             const partes = id.split(".");
+            const marca = marcaDoIndicadorCalib(id);
             return `<tr>
-              <td style="font-family:var(--font-mono);font-size:11px;">${esc(partes[1])}</td>
+              <td style="font-family:var(--font-mono);font-size:11px;">${esc(partes[1])}${
+                marca === "◉" ? ' <span style="color:var(--gold);" title="sensor: foi rebaixado, não vota no score">◉</span>' : ""
+              }</td>
               <td style="font-size:10.5px;color:var(--text-faint);">${esc(partes[0])}</td>
               <td>${bullAvg === null ? "—" : bullAvg.toFixed(1)+"% <span style=\"font-size:10px;color:var(--text-faint);\">("+b.bull.length+"d)</span>"}</td>
               <td>${bearAvg === null ? "—" : bearAvg.toFixed(1)+"% <span style=\"font-size:10px;color:var(--text-faint);\">("+b.bear.length+"d)</span>"}</td>

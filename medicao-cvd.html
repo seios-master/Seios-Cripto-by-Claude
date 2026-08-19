@@ -1,0 +1,240 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<title>SEIOS — onde o CVD realmente vive</title>
+<style>
+  :root{
+    --bg:#0E1A2B; --bg-alt:#132234; --panel:#132437; --line:#2F5478; --line-soft:#1E3A55;
+    --text:#E8F1F8; --text-dim:#9FBBD4; --text-faint:#6D8CA8;
+    --teal:#5FE3B0; --brick:#FF8A80; --gold:#FFD37E;
+    --mono:ui-monospace,"SF Mono",Menlo,monospace;
+  }
+  *{box-sizing:border-box;}
+  body{margin:0;background:var(--bg);color:var(--text);font-family:var(--mono);
+       font-size:13px;line-height:1.6;padding:0 0 60px;}
+  .wrap{max-width:1050px;margin:0 auto;padding:0 18px;}
+  header{border-bottom:1px solid var(--line);padding:22px 0;background:var(--bg-alt);}
+  h1{font-size:21px;margin:6px 0;}
+  .sub{color:var(--text-dim);font-size:12px;}
+  .aviso{border:1px solid var(--gold);background:#FFD37E14;padding:14px 16px;margin:18px 0;
+         color:var(--text-dim);font-size:12.5px;}
+  .aviso b{color:var(--gold);}
+  button{font-family:var(--mono);font-size:13px;padding:12px 18px;margin:16px 0;
+         background:var(--teal);color:#08131f;border:1px solid var(--teal);cursor:pointer;}
+  button.ghost{background:transparent;color:var(--text-dim);border-color:var(--line);}
+  button:disabled{opacity:.5;cursor:default;}
+  #log{border:1px solid var(--line-soft);background:var(--panel);padding:12px;min-height:50px;
+       font-size:11.5px;color:var(--text-dim);white-space:pre-wrap;max-height:220px;overflow-y:auto;}
+  table{width:100%;border-collapse:collapse;font-size:11.5px;margin:12px 0;}
+  th{text-align:left;color:var(--text-faint);font-weight:400;padding:7px 8px;
+     border-bottom:1px solid var(--line);text-transform:uppercase;font-size:10px;}
+  td{padding:6px 8px;border-bottom:1px solid var(--line-soft);}
+  td.n{text-align:right;}
+  .sim{color:var(--teal);} .nao{color:var(--text-faint);} .alerta{color:var(--brick);}
+  .ouro{color:var(--gold);}
+  h2{font-size:15px;margin:26px 0 6px;}
+  p.explica{color:var(--text-dim);font-size:12.5px;margin:6px 0 12px;}
+  #saida{display:none;}
+  #veredito{border:1px solid var(--line);padding:18px;margin:18px 0;font-size:13.5px;}
+  textarea{width:100%;height:260px;background:var(--panel);color:var(--text-dim);
+           border:1px solid var(--line-soft);font-family:var(--mono);font-size:11px;padding:10px;}
+</style>
+</head>
+<body>
+<header><div class="wrap">
+  <div class="sub">SEIOS · medição isolada — não é o sistema, não grava nada</div>
+  <h1>Onde o CVD de 24h realmente vive</h1>
+  <div class="sub">a mesma pergunta que fizemos ao funding e ao M2 · velas de 1h da Binance</div>
+</div></header>
+
+<div class="wrap">
+
+  <div class="aviso">
+    <b>O problema que isto resolve.</b> Na primeira leitura real, o CVD de 24h marcou
+    <b>+8,3%</b> — dentro da faixa neutra de ±15 que o sistema usa. Mas essa faixa foi
+    herdada dos outros indicadores, não medida para este. <b>Sem saber onde o CVD vive,
+    +8,3 é literal e não é interpretável:</b> pode ser um dia forte ou um dia morno.
+    <br><br>
+    <b>O precedente.</b> O funding tem o mesmo problema e está documentado: em 167 dias,
+    <b>0% dos dias</b> produziram |score| ≥ 15, porque a escala nunca sai do centro. A linha
+    dele aparece como "amostra insuficiente" na calibração por esse motivo — não por falta
+    de histórico. Se o CVD tiver o mesmo comportamento, é melhor saber agora.
+    <br><br>
+    <b>O que isto NÃO faz:</b> não muda nada no sistema, não testa previsão, e não autoriza
+    trocar corte. É medição de escala — a mesma coisa que a v107 fez com o ruído dos
+    endereços ativos.
+  </div>
+
+  <button id="btn">▶ Medir — 365 dias de velas horárias</button>
+  <div id="log">pronto.</div>
+
+  <div id="saida">
+    <div id="veredito"></div>
+
+    <h2>1 · Onde o número vive</h2>
+    <p class="explica">Distribuição do CVD de 24h (janela deslizante, uma leitura por hora)
+      ao longo do período. A coluna da direita é o que importa: com que frequência ele
+      cruzaria o corte que o sistema usa hoje.</p>
+    <div id="dist"></div>
+
+    <h2>2 · O corte de ±15 serve para este indicador?</h2>
+    <div id="cortes"></div>
+
+    <h2>3 · Comparação com o dia medido ao vivo</h2>
+    <p class="explica">Em 19/08, num dia de +6% no preço, o CVD marcou +8,3%. Onde isso cai
+      na distribuição histórica?</p>
+    <div id="hoje"></div>
+
+    <h2>Copiar para o Claude</h2>
+    <button class="ghost" id="btnCopiar">⧉ Copiar resultado</button>
+    <textarea id="texto" readonly></textarea>
+  </div>
+</div>
+
+<script>
+const log=function(m){ const el=document.getElementById("log");
+  el.textContent+=(el.textContent?"\n":"")+m; el.scrollTop=el.scrollHeight; };
+const dorme=function(ms){ return new Promise(function(s){ setTimeout(s,ms); }); };
+function f(x,d){ return (x===null||x===undefined||!Number.isFinite(x))?"—":x.toFixed(d); }
+
+/* mesma aritmética do sistema (v124), copiada sem alteração:
+   líquido = Σ(2×comprado_a_mercado − volume) · proporção = líquido ÷ volume × 100 */
+function cvdDeVelas(velas){
+  if(!Array.isArray(velas) || !velas.length)
+    return { proporcao:null, liquido:0, volume:0, velas:0 };
+  let liquido=0, volume=0, n=0;
+  velas.forEach(function(k){
+    const qv=Number(k && k[7]), tbq=Number(k && k[10]);
+    if(!Number.isFinite(qv) || !Number.isFinite(tbq) || qv<0) return;
+    liquido += (2*tbq - qv); volume += qv; n++;
+  });
+  if(!n || volume<=0) return { proporcao:null, liquido:liquido, volume:volume, velas:n };
+  return { proporcao:(liquido/volume)*100, liquido:liquido, volume:volume, velas:n };
+}
+function percentil(ord, p){ return ord[Math.min(ord.length-1, Math.max(0, Math.floor(p*(ord.length-1))))]; }
+
+async function velasHorarias(horas){
+  const todas=[]; let fim=Date.now();
+  const req=Math.ceil(horas/1000);
+  for(let i=0;i<req;i++){
+    const r=await fetch("https://api.binance.com/api/v3/klines?symbol=BTCUSDT&interval=1h&limit=1000&endTime="+fim);
+    if(!r.ok) throw new Error("Binance "+r.status);
+    const d=await r.json(); if(!d.length) break;
+    todas.unshift.apply(todas,d); fim=d[0][0]-1;
+    log("  velas: "+todas.length);
+    if(d.length<1000) break;
+    await dorme(320);
+  }
+  todas.pop();   /* hora em formação fora */
+  return todas;
+}
+
+document.getElementById("btn").addEventListener("click", async function(){
+  const b=this; b.disabled=true; document.getElementById("log").textContent="";
+  try{
+    log("puxando velas horárias…");
+    const velas=await velasHorarias(8760);
+    log("recebidas "+velas.length+" horas fechadas.");
+
+    /* janela deslizante de 24h, uma leitura por hora — é o que o sistema veria
+       se tivesse coletado a cada hora daquele ano */
+    const leituras=[];
+    for(let i=24;i<=velas.length;i++){
+      const c=cvdDeVelas(velas.slice(i-24, i));
+      if(c.proporcao!==null) leituras.push({ t: velas[i-1][0], p: c.proporcao, liq: c.liquido });
+    }
+    log("janelas de 24h avaliadas: "+leituras.length);
+
+    const vals=leituras.map(function(x){ return x.p; });
+    const abs=vals.map(Math.abs).sort(function(a,b){ return a-b; });
+    const ord=vals.slice().sort(function(a,b){ return a-b; });
+    const dias=(leituras[leituras.length-1].t - leituras[0].t)/86400000;
+
+    const pct=function(c){ return (abs.filter(function(v){ return v>=c; }).length/abs.length*100); };
+    const acimaDe=function(c){ return (vals.filter(function(v){ return v>=c; }).length/vals.length*100); };
+
+    document.getElementById("dist").innerHTML='<table><thead><tr>'+
+      '<th>Faixa</th><th class="n">CVD 24h (% do volume)</th><th class="n">Em dólares</th>'+
+      '</tr></thead><tbody>'+
+      [["mínimo",0],["p05",.05],["p25",.25],["mediana (p50)",.5],["p75",.75],["p95",.95],["máximo",1]]
+      .map(function(par){
+        const v=percentil(ord,par[1]);
+        const alvo=leituras.reduce(function(m,x){ return Math.abs(x.p-v)<Math.abs(m.p-v)?x:m; }, leituras[0]);
+        return '<tr><td>'+par[0]+'</td><td class="n '+(v>0?"sim":"alerta")+'">'+f(v,1)+'%</td>'+
+               '<td class="n nao">'+(alvo.liq>=0?"+":"")+Math.round(alvo.liq/1e6)+'M</td></tr>';
+      }).join("")+'</tbody></table>'+
+      '<p class="explica">'+leituras.length+' janelas de 24h em '+dias.toFixed(0)+' dias.</p>';
+
+    const c15=pct(15), c40=pct(40), c100=pct(100);
+    const passa15 = c15 >= 10;
+    document.getElementById("cortes").innerHTML='<table><thead><tr>'+
+      '<th>Corte</th><th class="n">% das janelas que cruzam</th><th>O que significa</th>'+
+      '</tr></thead><tbody>'+
+      '<tr><td>|CVD| ≥ 15 (alta/baixa na camada)</td><td class="n '+(passa15?"sim":"alerta")+'">'+
+        f(c15,1)+'%</td><td>'+(passa15?"o corte separa — o indicador sai do neutro com frequência útil"
+        :"<span class=\'alerta\'>o corte quase nunca é cruzado — mesmo problema do funding</span>")+'</td></tr>'+
+      '<tr><td>|CVD| ≥ 40</td><td class="n">'+f(c40,1)+'%</td><td>extremos</td></tr>'+
+      '<tr><td>|CVD| ≥ 100 (satura)</td><td class="n">'+f(c100,1)+'%</td><td>'+
+        (c100>1?"<span class=\'alerta\'>satura demais — a escala perde resolução no topo</span>":"não satura")+
+        '</td></tr>'+
+      '</tbody></table>'+
+      '<p class="explica">Referência do funding, medido em 167 dias: <strong>0% das janelas</strong> '+
+      'cruzavam ±15. Foi por isso que a linha dele aparece como "amostra insuficiente" na '+
+      'calibração — não por falta de histórico, mas porque a escala não sai do centro.</p>';
+
+    const HOJE=8.29;
+    const abaixo=(vals.filter(function(v){ return v<=HOJE; }).length/vals.length*100);
+    document.getElementById("hoje").innerHTML='<table><tbody>'+
+      '<tr><td>CVD medido em 19/08 17:06</td><td class="n ouro">+8,3%</td></tr>'+
+      '<tr><td>Percentil desse valor no histórico</td><td class="n ouro">'+f(abaixo,0)+'</td></tr>'+
+      '<tr><td>Leitura</td><td class="n">'+
+        (abaixo>75?"dia de compra líquida forte":(abaixo>55?"acima do normal":
+         (abaixo>45?"dentro do normal":"abaixo do normal")))+'</td></tr>'+
+      '</tbody></table>'+
+      '<p class="explica">Isto responde a pergunta que a leitura ao vivo deixou em aberto: '+
+      '+8,3% num dia de +6% no preço é muito, pouco ou normal para o BTC.</p>';
+
+    document.getElementById("veredito").innerHTML = passa15
+      ? '<span class="sim"><strong>O corte de ±15 serve para o CVD.</strong></span><br><br>'+
+        'Ele cruza em '+f(c15,1)+'% das janelas — o indicador sai do neutro com frequência '+
+        'suficiente para informar a camada AGORA. Nada a mudar.'
+      : '<span class="alerta"><strong>O corte de ±15 quase nunca é cruzado ('+f(c15,1)+'%).</strong></span>'+
+        '<br><br>É o mesmo problema do funding: a escala não sai do centro, e o indicador '+
+        'aparecerá como neutro quase sempre. Isto NÃO autoriza trocar o corte agora — trocar '+
+        'régua com base na distribuição é decisão de modelo, e o m12 está congelado. É um fato '+
+        'medido, para constar.';
+
+    const txt=[];
+    txt.push("SEIOS · DISTRIBUIÇÃO DO CVD 24h");
+    txt.push("medido em "+new Date().toLocaleString("pt-BR"));
+    txt.push(leituras.length+" janelas de 24h em "+dias.toFixed(0)+" dias");
+    txt.push("");
+    txt.push("DISTRIBUIÇÃO (% do volume):");
+    [["min",0],["p05",.05],["p25",.25],["p50",.5],["p75",.75],["p95",.95],["max",1]].forEach(function(par){
+      txt.push("  "+par[0].padEnd(5)+f(percentil(ord,par[1]),1)+"%");
+    });
+    txt.push("");
+    txt.push("CRUZAMENTOS: |CVD|>=15 em "+f(c15,1)+"% · >=40 em "+f(c40,1)+"% · satura em "+f(c100,1)+"%");
+    txt.push("(referência: funding cruza ±15 em 0% de 167 dias)");
+    txt.push("");
+    txt.push("O DIA MEDIDO AO VIVO: +8,3% → percentil "+f(abaixo,0));
+    txt.push("");
+    txt.push("VEREDITO: "+(passa15?"o corte de ±15 serve":"o corte de ±15 quase nunca é cruzado"));
+    document.getElementById("texto").value=txt.join("\n");
+
+    document.getElementById("saida").style.display="block";
+    log("pronto.");
+  }catch(e){ log("FALHOU: "+e.message); }
+  b.disabled=false;
+});
+
+document.getElementById("btnCopiar").addEventListener("click", async function(){
+  const t=document.getElementById("texto");
+  try{ await navigator.clipboard.writeText(t.value); this.textContent="✓ copiado"; }
+  catch(e){ t.focus(); t.select(); this.textContent="selecione o texto e copie"; }
+});
+</script>
+</body>
+</html>

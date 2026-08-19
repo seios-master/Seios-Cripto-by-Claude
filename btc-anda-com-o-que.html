@@ -1,0 +1,330 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<title>SEIOS — o que anda com o BTC</title>
+<style>
+  :root{
+    --bg:#000; --bg-alt:#050B07; --panel:#040A06; --line:#1F5B34; --line-soft:#123321;
+    --text:#33FF6E; --text-dim:#7FCC9A; --text-faint:#478A60;
+    --brick:#FF4444; --gold:#FFC53D; --teal:#33FF6E;
+    --mono:ui-monospace,"SF Mono",Menlo,monospace;
+  }
+  *{box-sizing:border-box;}
+  body{margin:0;background:var(--bg);color:var(--text);font-family:var(--mono);
+       font-size:13px;line-height:1.6;padding:0 0 60px;}
+  .wrap{max-width:1180px;margin:0 auto;padding:0 18px;}
+  header{border-bottom:1px solid var(--line);padding:22px 0;background:var(--bg-alt);}
+  h1{font-size:21px;margin:6px 0;}
+  .sub{color:var(--text-dim);font-size:12px;}
+  .aviso{border:1px solid var(--gold);background:#FFC53D14;padding:14px 16px;margin:18px 0;
+         color:var(--text-dim);font-size:12.5px;}
+  .aviso b{color:var(--gold);}
+  button{font-family:var(--mono);font-size:13px;padding:12px 18px;margin:16px 0;
+         background:var(--teal);color:#000;border:1px solid var(--teal);cursor:pointer;}
+  button.ghost{background:transparent;color:var(--text-dim);border-color:var(--line);}
+  button:disabled{opacity:.5;cursor:default;}
+  #log{border:1px solid var(--line-soft);background:var(--panel);padding:12px;min-height:50px;
+       font-size:11.5px;color:var(--text-dim);white-space:pre-wrap;max-height:280px;overflow-y:auto;}
+  table{width:100%;border-collapse:collapse;font-size:11px;margin:8px 0 16px;}
+  th{text-align:left;color:var(--text-faint);font-weight:400;padding:6px 7px;
+     border-bottom:1px solid var(--line);text-transform:uppercase;font-size:9.5px;}
+  td{padding:5px 7px;border-bottom:1px solid var(--line-soft);}
+  td.n{text-align:right;}
+  .junto{color:var(--teal);} .oposto{color:var(--brick);} .indif{color:var(--text-faint);}
+  .ouro{color:var(--gold);}
+  h2{font-size:15px;margin:28px 0 6px;}
+  h3{font-size:13.5px;margin:22px 0 2px;}
+  p.explica{color:var(--text-dim);font-size:12.5px;margin:6px 0 12px;}
+  .leitura{font-size:12.5px;padding:8px 12px;border-left:3px solid var(--line);margin:6px 0 14px;}
+  #saida{display:none;}
+  textarea{width:100%;height:380px;background:var(--panel);color:var(--text-dim);
+           border:1px solid var(--line-soft);font-family:var(--mono);font-size:11px;padding:10px;}
+</style>
+</head>
+<body>
+<header><div class="wrap">
+  <div class="sub">SEIOS · laboratório isolado — não é o sistema, não grava nada</div>
+  <h1>O que anda a favor, contra, ou é indiferente ao BTC</h1>
+  <div class="sub">variação contra variação · dia, semana, mês e trimestre · 2017 a 2026, e por era</div>
+</div></header>
+
+<div class="wrap">
+
+  <div class="aviso">
+    <b>O que esta página mede:</b> quando a variável se move, o BTC se move junto, ao
+    contrário, ou não se importa — <u>no mesmo período</u>. Variação contra variação, nunca
+    nível contra variação.<br><br>
+    <b>O que ela NÃO mede:</b> previsão. Saber que o BTC cai quando o dólar sobe não ajuda a
+    decidir nada, porque as duas coisas acontecem ao mesmo tempo. E correlação não é causa: as
+    duas podem estar respondendo a uma terceira coisa — geralmente o apetite por risco.<br><br>
+    <b>Por que quatro escalas:</b> uma relação pode não existir no dia e existir no mês. Macro
+    se move devagar; ruído diário esconde. Se aparecer só numa escala e sumir nas outras, é
+    fraca.<br><br>
+    <b>Escala de leitura:</b> |r| abaixo de 0,10 é indiferente · 0,10 a 0,25 é fraca ·
+    0,25 a 0,50 é moderada · acima de 0,50 é forte.
+  </div>
+
+  <button id="btn">▶ Medir tudo</button>
+  <div id="log">pronto.</div>
+
+  <div id="saida">
+    <h2>1 · Ranking — o que mais anda com o BTC</h2>
+    <p class="explica">Ordenado pela força na escala mensal, que é onde as relações
+      macro aparecem melhor. Verde anda junto, vermelho anda ao contrário.</p>
+    <div id="ranking"></div>
+    <h2>2 · Variável por variável</h2>
+    <div id="detalhe"></div>
+    <h2>Copiar para o Claude</h2>
+    <button class="ghost" id="btnCopiar">⧉ Copiar resultado</button>
+    <textarea id="texto" readonly></textarea>
+  </div>
+</div>
+
+<script>
+const log=function(m){ const el=document.getElementById("log");
+  el.textContent+=(el.textContent?"\n":"")+m; el.scrollTop=el.scrollHeight; };
+const dorme=function(ms){ return new Promise(function(s){ setTimeout(s,ms); }); };
+const DIA=86400000;
+function ymd(t){ return new Date(t).toISOString().slice(0,10); }
+function media(a){ return a.length?a.reduce(function(x,y){return x+y;},0)/a.length:null; }
+function correlacao(x,y){
+  const mx=media(x),my=media(y); let n=0,dx=0,dy=0;
+  for(let i=0;i<x.length;i++){ const a=x[i]-mx,b=y[i]-my; n+=a*b; dx+=a*a; dy+=b*b; }
+  return (dx===0||dy===0)?0:n/Math.sqrt(dx*dy);
+}
+function tDeR(r,n){ return (n<3||Math.abs(r)>=1)?0:r*Math.sqrt((n-2)/(1-r*r)); }
+function f(x,d){ return (x===null||x===undefined||!Number.isFinite(x))?"—":x.toFixed(d); }
+function rotulo(r){
+  if(r===null||!Number.isFinite(r)) return {txt:"—",cls:"indif"};
+  const a=Math.abs(r);
+  if(a<0.10) return {txt:"indiferente",cls:"indif"};
+  const forca=a<0.25?"fraca":(a<0.50?"moderada":"forte");
+  return r>0 ? {txt:"a favor ("+forca+")",cls:"junto"} : {txt:"contra ("+forca+")",cls:"oposto"};
+}
+
+/* ============ coleta ============ */
+async function klines(par){
+  const t=[]; let fim=Date.now();
+  for(let i=0;i<12;i++){
+    const r=await fetch("https://api.binance.com/api/v3/klines?symbol="+par+"&interval=1d&limit=1000&endTime="+fim);
+    if(!r.ok) throw new Error(par+" "+r.status);
+    const d=await r.json(); if(!d.length) break;
+    t.unshift.apply(t,d); fim=d[0][0]-1;
+    if(d.length<1000) break; await dorme(280);
+  }
+  t.pop(); log("  "+par+": "+t.length+" dias"); return t;
+}
+async function fred(s){
+  try{
+    const r=await fetch("/api/fred?series_id="+s+"&sort_order=asc&limit=100000");
+    if(!r.ok) throw new Error(r.status);
+    const d=await r.json(); const m={};
+    (d.observations||[]).forEach(function(o){ if(o.value!==".") m[o.date]=Number(o.value); });
+    log("  "+s+": "+Object.keys(m).length); return m;
+  }catch(e){ log("  ✗ "+s); return null; }
+}
+async function cm(metrica){
+  try{
+    let url="https://community-api.coinmetrics.io/v4/timeseries/asset-metrics?assets=btc&metrics="+
+            metrica+"&frequency=1d&page_size=10000&start_time=2017-01-01";
+    const out={}; let v=0;
+    while(url&&v<8){
+      const r=await fetch(url); if(!r.ok) throw new Error("HTTP "+r.status);
+      const d=await r.json(); if(d.error) throw new Error("erro da API");
+      (d.data||[]).forEach(function(o){ const x=Number(o[metrica]);
+        if(Number.isFinite(x)) out[String(o.time).slice(0,10)]=x; });
+      url=d.next_page_url||null; v++; await dorme(250);
+    }
+    log("  CM "+metrica+": "+Object.keys(out).length);
+    return Object.keys(out).length?out:null;
+  }catch(e){ log("  ✗ CM "+metrica+" ("+e.message+")"); return null; }
+}
+async function simples(url, extrai, nome){
+  try{
+    const r=await fetch(url); if(!r.ok) throw new Error(r.status);
+    const m=extrai(await r.json());
+    log("  "+nome+": "+Object.keys(m).length); return Object.keys(m).length?m:null;
+  }catch(e){ log("  ✗ "+nome); return null; }
+}
+function ultimoAte(m,data){
+  if(!m) return null;
+  if(m[data]!==undefined) return m[data];
+  let d=new Date(data+"T00:00:00Z").getTime();
+  for(let i=0;i<12;i++){ d-=DIA; const k=ymd(d); if(m[k]!==undefined) return m[k]; }
+  return null;
+}
+
+const ESCALAS=[{n:"1 dia",d:1},{n:"1 semana",d:7},{n:"1 mês",d:30},{n:"1 trimestre",d:90}];
+const ERAS=[{n:"2017–2020",i:"2017-01-01",f:"2020-12-31"},
+            {n:"2021–2022",i:"2021-01-01",f:"2022-12-31"},
+            {n:"2023",     i:"2023-01-01",f:"2023-12-31"},
+            {n:"2024–2026",i:"2024-01-01",f:"2099-12-31"}];
+
+document.getElementById("btn").addEventListener("click", async function(){
+  const b=this; b.disabled=true; document.getElementById("log").textContent="";
+  try{
+    log("BTC…"); const kl=await klines("BTCUSDT");
+    log("ouro (PAXG)…"); let paxg=null;
+    try{ const p=await klines("PAXGUSDT"); paxg={}; p.forEach(function(k){ paxg[ymd(k[0])]=Number(k[4]); }); }
+    catch(e){ log("  ✗ PAXG"); }
+    log("FRED…");
+    const S=["DTWEXBGS","DFF","CPIAUCSL","M2SL","T10Y2Y","DGS10","DFII10","VIXCLS",
+             "DCOILWTICO","SP500","DEXUSEU","PCOPPUSDM","USEPUINDXD","WALCL","RRPONTSYD","WTREGEN"];
+    const F={}; for(let i=0;i<S.length;i++){ F[S[i]]=await fred(S[i]); await dorme(150); }
+    log("outras fontes…");
+    const mkt=await cm("CapMrktCurUSD"), real=await cm("CapRealUSD"), adr=await cm("AdrActCnt");
+    const FG=await simples("https://api.alternative.me/fng/?limit=0&format=json",
+      function(d){ const m={}; (d.data||[]).forEach(function(o){ m[ymd(Number(o.timestamp)*1000)]=Number(o.value); }); return m; },
+      "Fear & Greed");
+    const ST=await simples("https://stablecoins.llama.fi/stablecoincharts/all",
+      function(d){ const m={}; d.forEach(function(o){ const v=o.totalCirculatingUSD;
+        const t=v&&((v.peggedUSD||0)+(v.peggedEUR||0)+(v.peggedVAR||0)); if(t) m[ymd(Number(o.date)*1000)]=t; }); return m; },
+      "stablecoins");
+    let HR=null;
+    for(const c of ["all","3y"]){
+      HR=await simples("https://mempool.space/api/v1/mining/hashrate/"+c,
+        function(d){ const m={}; (d.hashrates||[]).forEach(function(o){ m[ymd(o.timestamp*1000)]=Number(o.avgHashrate); }); return m; },
+        "hash rate ("+c+")");
+      if(HR) break;
+    }
+
+    /* ---- série diária de NÍVEIS: o BTC e cada variável, lado a lado ---- */
+    const dias=kl.map(function(k){ return { data:ymd(k[0]), btc:Number(k[4]) }; })
+                 .filter(function(d){ return Number.isFinite(d.btc)&&d.btc>0; });
+
+    const NIVEIS=[
+      {c:"dolar",  n:"Dólar amplo (DXY)",        src:function(d){ return ultimoAte(F.DTWEXBGS,d); }},
+      {c:"sp",     n:"S&P 500",                  src:function(d){ return ultimoAte(F.SP500,d); }},
+      {c:"ouro",   n:"Ouro (PAXG) ⚗",            src:function(d){ return paxg?ultimoAte(paxg,d):null; }},
+      {c:"petro",  n:"Petróleo WTI",             src:function(d){ return ultimoAte(F.DCOILWTICO,d); }},
+      {c:"cobre",  n:"Cobre",                    src:function(d){ return ultimoAte(F.PCOPPUSDM,d); }},
+      {c:"euro",   n:"Euro/dólar ⚗",             src:function(d){ return ultimoAte(F.DEXUSEU,d); }},
+      {c:"vix",    n:"VIX",                      src:function(d){ return ultimoAte(F.VIXCLS,d); }},
+      {c:"dgs10",  n:"Treasury 10 anos",         src:function(d){ return ultimoAte(F.DGS10,d); }},
+      {c:"real",   n:"Juro real 10 anos ⚗",      src:function(d){ return ultimoAte(F.DFII10,d); }},
+      {c:"juros",  n:"Fed Funds",                src:function(d){ return ultimoAte(F.DFF,d); }},
+      {c:"curva",  n:"Curva 10a−2a",             src:function(d){ return ultimoAte(F.T10Y2Y,d); }},
+      {c:"cpi",    n:"Índice de preços (CPI)",   src:function(d){ return ultimoAte(F.CPIAUCSL,d); }},
+      {c:"m2",     n:"M2",                       src:function(d){ return ultimoAte(F.M2SL,d); }},
+      {c:"walcl",  n:"Balanço do Fed ⚗",         src:function(d){ return ultimoAte(F.WALCL,d); }},
+      {c:"liq",    n:"Liquidez líquida do Fed ⚗",src:function(d){
+          const w=ultimoAte(F.WALCL,d), t=ultimoAte(F.WTREGEN,d), r=ultimoAte(F.RRPONTSYD,d);
+          return (w!==null&&t!==null&&r!==null)?(w-t*1000-r*1000):null; }},
+      {c:"epu",    n:"Incerteza política (EPU)", src:function(d){ return ultimoAte(F.USEPUINDXD,d); }},
+      {c:"stable", n:"Oferta de stablecoins ⚗",  src:function(d){ return ST?ultimoAte(ST,d):null; }},
+      {c:"fg",     n:"Fear & Greed",             src:function(d){ return FG?ultimoAte(FG,d):null; }},
+      {c:"hash",   n:"Hash rate",                src:function(d){ return HR?ultimoAte(HR,d):null; }},
+      {c:"adr",    n:"Endereços ativos",         src:function(d){ return adr?ultimoAte(adr,d):null; }},
+      {c:"mvrv",   n:"MVRV",                     src:function(d){
+          const a=mkt?ultimoAte(mkt,d):null, b=real?ultimoAte(real,d):null;
+          return (a&&b)?a/b:null; }}
+    ];
+    dias.forEach(function(d){ NIVEIS.forEach(function(V){ d[V.c]=V.src(d.data); }); });
+    log("dias: "+dias.length+" ("+dias[0].data+" a "+dias[dias.length-1].data+")");
+
+    /* variação percentual de N dias, dos DOIS lados */
+    function paresVar(base, campo, n){
+      const out=[];
+      for(let i=n;i<base.length;i++){
+        const a=base[i][campo], b=base[i-n][campo];
+        const pa=base[i].btc, pb=base[i-n].btc;
+        if(!Number.isFinite(a)||!Number.isFinite(b)||!b) continue;
+        if(!Number.isFinite(pa)||!Number.isFinite(pb)||!pb) continue;
+        out.push({ x:(a/b-1)*100, y:(pa/pb-1)*100 });
+      }
+      return out;
+    }
+    function corr(base, campo, n){
+      const p=paresVar(base,campo,n);
+      if(p.length<60) return null;
+      const r=correlacao(p.map(function(q){return q.x;}), p.map(function(q){return q.y;}));
+      return { r:r, n:p.length, t:tDeR(r,Math.max(3,Math.floor(p.length/n))) };
+    }
+
+    const linhas=[], detalhes=[], txt=[];
+    NIVEIS.forEach(function(V){
+      const porEscala=ESCALAS.map(function(E){ return corr(dias,V.c,E.d); });
+      if(!porEscala.some(function(x){ return x; })) return;
+      const mensal=porEscala[2];
+      linhas.push({ V:V, esc:porEscala, mensal:mensal?mensal.r:null });
+
+      /* dias em que a variável subiu vs. caiu — a leitura direta */
+      const sub=[], des=[];
+      paresVar(dias,V.c,30).forEach(function(p){ (p.x>0?sub:des).push(p.y); });
+
+      const porEra=ERAS.map(function(E){
+        return corr(dias.filter(function(d){ return d.data>=E.i&&d.data<=E.f; }), V.c, 30);
+      });
+
+      const rr=rotulo(mensal?mensal.r:null);
+      let h='<h3>'+V.n+'</h3>';
+      h+='<div class="leitura '+rr.cls+'">No prazo de um mês: <strong>'+rr.txt+'</strong>'+
+         (mensal?' · r = '+f(mensal.r,3):'')+'</div>';
+      h+='<table><thead><tr><th>Escala</th><th class="n">r</th><th class="n">Observações</th>'+
+         '<th>Leitura</th></tr></thead><tbody>';
+      ESCALAS.forEach(function(E,i){
+        const c=porEscala[i]; const l=rotulo(c?c.r:null);
+        h+='<tr><td>'+E.n+'</td><td class="n '+l.cls+'">'+(c?f(c.r,3):"—")+'</td>'+
+           '<td class="n">'+(c?c.n:"—")+'</td><td class="'+l.cls+'">'+l.txt+'</td></tr>';
+      });
+      h+='</tbody></table>';
+      h+='<table><thead><tr><th>Quando a variável…</th><th class="n">Períodos de 30d</th>'+
+         '<th class="n">BTC no mesmo período</th><th class="n">BTC subiu em</th></tr></thead><tbody>'+
+         '<tr><td>subiu</td><td class="n">'+sub.length+'</td><td class="n '+((media(sub)||0)>0?"junto":"oposto")+'">'+
+         f(media(sub),2)+'%</td><td class="n">'+f(sub.length?sub.filter(function(x){return x>0;}).length/sub.length*100:null,0)+'%</td></tr>'+
+         '<tr><td>caiu</td><td class="n">'+des.length+'</td><td class="n '+((media(des)||0)>0?"junto":"oposto")+'">'+
+         f(media(des),2)+'%</td><td class="n">'+f(des.length?des.filter(function(x){return x>0;}).length/des.length*100:null,0)+'%</td></tr>'+
+         '</tbody></table>';
+      h+='<table><thead><tr><th>Por era (escala mensal)</th>';
+      ERAS.forEach(function(E){ h+='<th class="n">'+E.n+'</th>'; });
+      h+='</tr></thead><tbody><tr><td>r</td>';
+      porEra.forEach(function(c){ const l=rotulo(c?c.r:null);
+        h+='<td class="n '+l.cls+'">'+(c?f(c.r,3):"—")+'</td>'; });
+      h+='</tr></tbody></table>';
+      detalhes.push(h);
+
+      txt.push("  "+V.n+": mês r="+(mensal?f(mensal.r,3):"—")+" ("+rr.txt+")"+
+        " | dia "+(porEscala[0]?f(porEscala[0].r,3):"—")+
+        " · semana "+(porEscala[1]?f(porEscala[1].r,3):"—")+
+        " · trim "+(porEscala[3]?f(porEscala[3].r,3):"—")+
+        " | variável sobe → BTC "+f(media(sub),2)+"% · variável cai → BTC "+f(media(des),2)+"%"+
+        " | eras "+porEra.map(function(c){ return c?f(c.r,2):"—"; }).join("/"));
+    });
+
+    linhas.sort(function(a,b){ return Math.abs(b.mensal||0)-Math.abs(a.mensal||0); });
+    let hr='<table><thead><tr><th>Variável</th><th class="n">1 dia</th><th class="n">1 semana</th>'+
+      '<th class="n">1 mês</th><th class="n">1 trimestre</th><th>Leitura (mensal)</th></tr></thead><tbody>';
+    linhas.forEach(function(L){
+      const l=rotulo(L.mensal);
+      hr+='<tr><td>'+L.V.n+'</td>';
+      L.esc.forEach(function(c,i){
+        const cls=i===2?rotulo(c?c.r:null).cls:"";
+        hr+='<td class="n '+cls+'">'+(c?f(c.r,3):"—")+'</td>';
+      });
+      hr+='<td class="'+l.cls+'">'+l.txt+'</td></tr>';
+    });
+    document.getElementById("ranking").innerHTML=hr+"</tbody></table>";
+    document.getElementById("detalhe").innerHTML=detalhes.join("");
+
+    const cab=["SEIOS · O QUE ANDA COM O BTC — variação contra variação",
+      "medido em "+new Date().toLocaleString("pt-BR"),
+      "período "+dias[0].data+" a "+dias[dias.length-1].data+" · "+dias.length+" dias",
+      "escala: |r|<0,10 indiferente · 0,10–0,25 fraca · 0,25–0,50 moderada · >0,50 forte",
+      "", "=== POR VARIÁVEL (ordenado no ranking da tela) ==="];
+    document.getElementById("texto").value=cab.concat(txt).join("\n");
+    document.getElementById("saida").style.display="block";
+    log("pronto.");
+  }catch(e){ log("FALHOU: "+e.message); }
+  b.disabled=false;
+});
+
+document.getElementById("btnCopiar").addEventListener("click", async function(){
+  const t=document.getElementById("texto");
+  try{ await navigator.clipboard.writeText(t.value); this.textContent="✓ copiado"; }
+  catch(e){ t.focus(); t.select(); this.textContent="selecione o texto e copie"; }
+});
+</script>
+</body>
+</html>

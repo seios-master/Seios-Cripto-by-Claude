@@ -1,0 +1,262 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<title>SEIOS — medição 2: agressão no horizonte natural</title>
+<style>
+  :root{
+    --bg:#000; --bg-alt:#050B07; --panel:#040A06; --line:#1F5B34; --line-soft:#123321;
+    --text:#33FF6E; --text-dim:#7FCC9A; --text-faint:#478A60;
+    --brick:#FF4444; --gold:#FFC53D; --teal:#33FF6E;
+    --mono:ui-monospace,"SF Mono",Menlo,monospace;
+  }
+  *{box-sizing:border-box;}
+  body{margin:0;background:var(--bg);color:var(--text);font-family:var(--mono);
+       font-size:13px;line-height:1.6;padding:0 0 60px;}
+  .wrap{max-width:1000px;margin:0 auto;padding:0 18px;}
+  header{border-bottom:1px solid var(--line);padding:22px 0;background:var(--bg-alt);}
+  h1{font-size:21px;margin:6px 0;letter-spacing:.03em;}
+  .sub{color:var(--text-dim);font-size:12px;}
+  .regra{border:1px solid var(--teal);background:#33FF6E10;padding:16px 18px;margin:18px 0;
+         font-size:12.5px;color:var(--text-dim);}
+  .regra b{color:var(--teal);}
+  .aviso{border:1px solid var(--gold);background:#FFC53D14;padding:14px 16px;margin:18px 0;
+         color:var(--text-dim);font-size:12.5px;}
+  .aviso b{color:var(--gold);}
+  button{font-family:var(--mono);font-size:13px;padding:12px 18px;margin:16px 0;
+         background:var(--teal);color:#000;border:1px solid var(--teal);cursor:pointer;}
+  button.ghost{background:transparent;color:var(--text-dim);border-color:var(--line);}
+  button:disabled{opacity:.5;cursor:default;}
+  #log{border:1px solid var(--line-soft);background:var(--panel);padding:12px;min-height:50px;
+       font-size:11.5px;color:var(--text-dim);white-space:pre-wrap;max-height:200px;overflow-y:auto;}
+  table{width:100%;border-collapse:collapse;font-size:11.5px;margin:14px 0;}
+  th{text-align:left;color:var(--text-faint);font-weight:400;padding:7px 8px;
+     border-bottom:1px solid var(--line);text-transform:uppercase;font-size:10px;letter-spacing:.06em;}
+  td{padding:7px 8px;border-bottom:1px solid var(--line-soft);}
+  td.n{text-align:right;}
+  .sim{color:var(--teal);} .nao{color:var(--text-faint);} .alerta{color:var(--brick);}
+  h2{font-size:15px;margin:26px 0 6px;}
+  p.explica{color:var(--text-dim);font-size:12.5px;margin:6px 0 12px;}
+  #saida{display:none;}
+  #veredito{border:1px solid var(--line);padding:18px;margin:18px 0;font-size:14px;}
+  textarea{width:100%;height:210px;background:var(--panel);color:var(--text-dim);
+           border:1px solid var(--line-soft);font-family:var(--mono);font-size:11px;padding:10px;}
+</style>
+</head>
+<body>
+<header><div class="wrap">
+  <div class="sub">SEIOS · medição isolada nº 2 — não é o sistema, não grava nada</div>
+  <h1>A agressão diz algo no horizonte dela?</h1>
+  <div class="sub">a medição nº 1 testou tudo contra 1 hora · esta testa cada medida contra o próprio horizonte</div>
+</div></header>
+
+<div class="wrap">
+
+  <div class="regra">
+    <b>REGRA DECLARADA ANTES DE MEDIR — 19/08/2026</b><br><br>
+    <b>Dois testes, e só dois:</b> agressão média de 8h contra o retorno das 8h seguintes, e
+    agressão média de 24h contra o retorno das 24h seguintes. Janelas que não se sobrepõem.
+    <br><br>
+    <b>Passa se, e somente se:</b> |t| ≥ 2,576 no estudo <u>e</u> o mesmo sinal com |t| ≥ 2,576
+    na reserva. As duas condições. Sinal que troca de direção entre as metades é ruído.
+    <br><br>
+    <b>Qualquer outro desfecho encerra o assunto.</b> Sem terceira tentativa, sem "vamos testar
+    4h também", sem procurar outro corte até algum passar. Já foram seis testes na medição nº 1;
+    cada variante nova aumenta a chance de alguma passar por acaso.
+    <br><br>
+    <b>O poder caiu, e isto é declarado de antemão:</b> em 375 dias cabem ~1.124 janelas de 8h e
+    ~375 de 24h, contra 8.998 de 1h. O menor efeito detectável sobe de r ≈ 0,035 para
+    <b>r ≈ 0,077</b> (8h) e <b>r ≈ 0,133</b> (24h). Este teste só enxerga efeito duas a quatro
+    vezes maior que o já descartado.
+  </div>
+
+  <div class="aviso">
+    <b>O que já sabemos:</b> na medição nº 1, seis testes contra o retorno de 1h deram r entre
+    −0,013 e +0,007, com sinais trocando entre estudo e reserva. Está descartado qualquer efeito
+    acima de r ≈ 0,035 naquele horizonte.
+    <br><br>
+    <b>O que continua fora de alcance:</b> profundidade do livro, spread e liquidações não são
+    reconstruíveis — nenhum histórico público guarda foto de livro de ofertas.
+  </div>
+
+  <button id="btn">▶ Medir — 8h e 24h, janelas não sobrepostas</button>
+  <div id="log">pronto.</div>
+
+  <div id="saida">
+    <div id="veredito"></div>
+    <h2>Resultado</h2>
+    <p class="explica">Cada linha usa apenas dados anteriores ao início da janela de retorno.
+      Nenhuma janela compartilha hora com a seguinte.</p>
+    <div id="tabela"></div>
+    <h2>Contexto — o mesmo teste no horizonte de 1h</h2>
+    <p class="explica">Repetido aqui para que as três leituras fiquem lado a lado, com os
+      tamanhos de amostra visíveis.</p>
+    <div id="contexto"></div>
+    <h2>Copiar para o Claude</h2>
+    <button class="ghost" id="btnCopiar">⧉ Copiar resultado</button>
+    <textarea id="texto" readonly></textarea>
+  </div>
+</div>
+
+<script>
+const log = function(m){ const el=document.getElementById("log");
+  el.textContent += (el.textContent ? "\n" : "") + m; el.scrollTop = el.scrollHeight; };
+
+function media(a){ return a.reduce(function(x,y){return x+y;},0)/a.length; }
+function correlacao(x,y){
+  const mx=media(x), my=media(y);
+  let num=0,dx=0,dy=0;
+  for(let i=0;i<x.length;i++){ const a=x[i]-mx, b=y[i]-my; num+=a*b; dx+=a*a; dy+=b*b; }
+  return (dx===0||dy===0) ? 0 : num/Math.sqrt(dx*dy);
+}
+function tDeR(r,n){ return (n<3||Math.abs(r)>=1) ? 0 : r*Math.sqrt((n-2)/(1-r*r)); }
+/* menor r detectável com |t| = 2,576 e N observações */
+function rMinimo(n){ const t=2.576; return t/Math.sqrt(n-2+t*t); }
+
+async function puxarVelas(horas){
+  const todas=[]; let fim=Date.now();
+  const req=Math.ceil(horas/1000);
+  for(let i=0;i<req;i++){
+    const url="https://api.binance.com/api/v3/klines?symbol=BTCUSDT&interval=1h&limit=1000&endTime="+fim;
+    log("  bloco "+(i+1)+" de "+req+"…");
+    const r=await fetch(url);
+    if(!r.ok) throw new Error("Binance recusou ("+r.status+")");
+    const d=await r.json();
+    if(!d.length) break;
+    todas.unshift.apply(todas, d);
+    fim=d[0][0]-1;
+    await new Promise(function(s){ setTimeout(s,350); });
+  }
+  todas.pop();   /* a vela mais recente ainda está em formação — regra da v110 */
+  return todas;
+}
+
+function horas(velas){
+  return velas.map(function(k){
+    const qv=Number(k[7]), tbq=Number(k[10]), close=Number(k[4]);
+    return { t:k[0], close:close, desq: qv>0 ? (2*tbq/qv - 1) : null };
+  }).filter(function(h){ return h.desq!==null && Number.isFinite(h.close) && h.close>0; });
+}
+
+/* blocos de H horas, sem sobreposição:
+   agressão média do bloco  →  retorno do bloco SEGUINTE */
+function blocos(hs, H){
+  const out=[];
+  for(let i=0; i+2*H <= hs.length; i+=H){
+    const atual=hs.slice(i, i+H);
+    const iniProx=hs[i+H].close, fimProx=hs[i+2*H-1].close;
+    out.push({
+      x: media(atual.map(function(h){ return h.desq; })),
+      y: (fimProx/iniProx - 1)*100
+    });
+  }
+  return out;
+}
+
+function avaliar(pares){
+  if(pares.length < 40) return null;
+  const r = correlacao(pares.map(function(p){return p.x;}), pares.map(function(p){return p.y;}));
+  return { n: pares.length, r: r, t: tDeR(r, pares.length), rMin: rMinimo(pares.length) };
+}
+function f(x,d){ return (x===null||x===undefined||!Number.isFinite(x)) ? "—" : x.toFixed(d); }
+
+const TESTES = [
+  { H:8,  nome:"Agressão de 8h → retorno das 8h seguintes",  chave:"h8"  },
+  { H:24, nome:"Agressão de 24h → retorno das 24h seguintes", chave:"h24" }
+];
+
+document.getElementById("btn").addEventListener("click", async function(){
+  const b=this; b.disabled=true; document.getElementById("log").textContent="";
+  try{
+    log("puxando velas horárias…");
+    const velas=await puxarVelas(8760);
+    const hs=horas(velas);
+    log("recebidas "+hs.length+" horas fechadas.");
+
+    const resultados={}, ctx={};
+    let linhasHtml='<table><thead><tr><th>Teste</th><th>Fase</th><th class="n">N</th>' +
+      '<th class="n">r</th><th class="n">t</th><th class="n">r mínimo detectável</th><th>Veredito</th></tr></thead><tbody>';
+
+    TESTES.forEach(function(T){
+      const todos=blocos(hs, T.H);
+      const corte=Math.floor(todos.length*0.6);
+      const est=avaliar(todos.slice(0,corte));
+      const res=avaliar(todos.slice(corte));
+      resultados[T.chave]={ estudo:est, reserva:res, nome:T.nome };
+      [["estudo",est],["reserva",res]].forEach(function(par){
+        const a=par[1];
+        if(!a){ linhasHtml+='<tr><td>'+T.nome+'</td><td>'+par[0]+'</td><td colspan="5" class="nao">amostra insuficiente</td></tr>'; return; }
+        const passa=Math.abs(a.t)>=2.576;
+        linhasHtml+='<tr><td>'+T.nome+'</td><td>'+par[0]+'</td>'+
+          '<td class="n">'+a.n+'</td><td class="n">'+f(a.r,4)+'</td><td class="n">'+f(a.t,2)+'</td>'+
+          '<td class="n">'+f(a.rMin,3)+'</td>'+
+          '<td class="'+(passa?"sim":"nao")+'">'+(passa?"distinguível de zero":"não distinguível")+'</td></tr>';
+      });
+    });
+    document.getElementById("tabela").innerHTML=linhasHtml+"</tbody></table>";
+
+    /* contexto: o horizonte de 1h, com blocos de 1 hora */
+    const um=blocos(hs,1); const c1=avaliar(um.slice(0,Math.floor(um.length*0.6)));
+    ctx.h1=c1;
+    document.getElementById("contexto").innerHTML='<table><tbody>'+
+      '<tr><td>1h (medição nº 1, já descartado)</td><td class="n">N='+(c1?c1.n:"—")+
+      '</td><td class="n">r mín '+(c1?f(c1.rMin,3):"—")+'</td></tr>'+
+      '<tr><td>8h</td><td class="n">N='+(resultados.h8.estudo?resultados.h8.estudo.n:"—")+
+      '</td><td class="n">r mín '+(resultados.h8.estudo?f(resultados.h8.estudo.rMin,3):"—")+'</td></tr>'+
+      '<tr><td>24h</td><td class="n">N='+(resultados.h24.estudo?resultados.h24.estudo.n:"—")+
+      '</td><td class="n">r mín '+(resultados.h24.estudo?f(resultados.h24.estudo.rMin,3):"—")+'</td></tr>'+
+      '</tbody></table>';
+
+    /* veredito pela regra declarada, sem interpretação */
+    const aprovados=[];
+    TESTES.forEach(function(T){
+      const R=resultados[T.chave];
+      if(R.estudo && R.reserva &&
+         Math.abs(R.estudo.t)>=2.576 && Math.abs(R.reserva.t)>=2.576 &&
+         Math.sign(R.estudo.r)===Math.sign(R.reserva.r)) aprovados.push(T.nome);
+    });
+    document.getElementById("veredito").innerHTML = aprovados.length
+      ? '<span class="sim"><strong>PASSOU pela regra declarada:</strong> ' + aprovados.join(" · ") +
+        '</span><br><br>Isto não autoriza entrar no score. Autoriza virar sensor e ser ' +
+        'observado em dado que ainda não existe.'
+      : '<span class="alerta"><strong>NENHUM teste passou pela regra declarada.</strong></span>' +
+        '<br><br>Pela regra escrita antes de medir, a microestrutura reconstruível está encerrada. ' +
+        'Não há terceira tentativa.';
+
+    const txt=[];
+    txt.push("SEIOS · MEDIÇÃO Nº 2 — agressão no horizonte natural");
+    txt.push("medido em "+new Date().toLocaleString("pt-BR")+" · "+hs.length+" horas fechadas");
+    txt.push("regra declarada antes: |t| >= 2,576 no estudo E na reserva, mesmo sinal");
+    txt.push("");
+    TESTES.forEach(function(T){
+      const R=resultados[T.chave];
+      ["estudo","reserva"].forEach(function(fase){
+        const a=R[fase];
+        txt.push("  "+T.nome+" ["+fase+"]: "+(a
+          ? "N="+a.n+" · r="+f(a.r,4)+" · t="+f(a.t,2)+" · r mín detectável="+f(a.rMin,3)+
+            " · "+(Math.abs(a.t)>=2.576 ? "distinguível" : "NÃO distinguível")
+          : "amostra insuficiente"));
+      });
+    });
+    txt.push("");
+    txt.push("VEREDITO: "+(aprovados.length ? "passou — "+aprovados.join(", ") : "nenhum passou — assunto encerrado"));
+    document.getElementById("texto").value=txt.join("\n");
+
+    document.getElementById("saida").style.display="block";
+    log("pronto.");
+  }catch(e){
+    log("FALHOU: "+e.message);
+    log("se foi limite de taxa, espere um minuto e tente de novo.");
+  }
+  b.disabled=false;
+});
+
+document.getElementById("btnCopiar").addEventListener("click", async function(){
+  const t=document.getElementById("texto");
+  try{ await navigator.clipboard.writeText(t.value); this.textContent="✓ copiado"; }
+  catch(e){ t.focus(); t.select(); this.textContent="selecione o texto e copie"; }
+});
+</script>
+</body>
+</html>

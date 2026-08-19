@@ -1179,7 +1179,7 @@ const STORAGE_KEY = "seios_btc_v2";
 // fonte única da versão — usada no rodapé, no histórico e nos exports.
 // Muda toda vez que a fórmula de score/pesos muda, pra nunca misturar
 // decisões de regras diferentes como se fossem comparáveis.
-const BUILD_VERSION = "2026-08-19.122.2-vela-de-hoje";
+const BUILD_VERSION = "2026-08-19.123-serie-camadas";
 /* v78: versão do MODELO separada da versão do BUILD. Mudança visual não é
    mudança de semântica: só sobe quando peso, fórmula, corte ou trava mudam.
    Toda observação gravada carrega as duas, pra que seis meses depois dê pra
@@ -4751,6 +4751,11 @@ function montarSnapshot(results){
       longo: hs && hs.longo ? hs.longo.score : null
     },
     composites: composites,
+    /* v123 — as três camadas vão junto. Envolvido em try porque o snapshot
+       alimenta a série das 777: um erro na leitura em camadas, que é
+       exibição, não pode impedir a gravação do score. */
+    camadas: (function(){ try{ return resumoDasCamadas(leituraPorCadencia()); }
+                          catch(eC){ return {}; } })(),
     pesosEfetivos: efetivos,
     indicadores: indicadores,
     falhas: results && results.fail ? results.fail.slice() : [],
@@ -6096,6 +6101,36 @@ function lerCamada(camadaId, valores){
            alta:alta, baixa:baixa, neutro:neutro,
            pctAlta:pct(alta), pctBaixa:pct(baixa), pctNeutro:pct(neutro),
            forca:forca, rotulo:rotulo, itens:lista };
+}
+
+/* v123 — AS CAMADAS GANHAM SÉRIE PRÓPRIA.
+   Até aqui a leitura em três camadas não ficava salva em lugar nenhum: o
+   snapshot guardava score, composites e pesos, mas não os rótulos. Daqui a
+   um mês seria impossível perguntar "quantas vezes o AGORA disse ALTA e o
+   preço subiu depois?" — a pergunta não teria dado para ser respondida.
+   Sem isto, a leitura em camadas é uma tela bonita e nada mais.
+
+   O que É gravado: rótulo, proporções, força, medidos e total.
+   O que NÃO é: os valores de cada indicador. Eles já vivem nas observações
+   point-in-time, e duplicar criaria duas verdades para o mesmo fato — que um
+   dia divergem, e aí ninguém sabe qual vale. */
+function resumoDasCamadas(leituras){
+  const out = {};
+  if(!Array.isArray(leituras)) return out;
+  leituras.forEach(function(r){
+    if(!r || !r.id) return;
+    out[r.id] = {
+      rotulo: r.rotulo,
+      janela: r.janela || "",
+      pctAlta: Number.isFinite(r.pctAlta) ? Math.round(r.pctAlta*10)/10 : null,
+      pctBaixa: Number.isFinite(r.pctBaixa) ? Math.round(r.pctBaixa*10)/10 : null,
+      pctNeutro: Number.isFinite(r.pctNeutro) ? Math.round(r.pctNeutro*10)/10 : null,
+      forca: Number.isFinite(r.forca) ? Math.round(r.forca*10)/10 : null,
+      medidos: r.medidos,
+      total: r.total
+    };
+  });
+  return out;
 }
 
 function leituraPorCadencia(){
@@ -9638,7 +9673,7 @@ function renderDecision(){
   chips.innerHTML = d.topFactors.length
     ? d.topFactors.map(f=>{
         const pct = f.composite===null ? null : clamp((f.composite+100)/2, 0, 100);
-        const tooltip = `${f.label} — peso ${(S.motors[f.key].weight*100).toFixed(0)}% · composite ${f.composite.toFixed(0)} · contribuição ponderada ${f.contribution!==undefined?f.contribution.toFixed(1):((f.composite*S.motors[f.key].weight)).toFixed(1)} pontos pro score geral`;
+        const tooltip = `${f.label} — peso ${(S.motors[f.key].weight*100).toFixed(0)}% · composite ${f.composite.toFixed(0)} · contribuição ponderada ${f.contribution!==undefined?f.contribution.toFixed(1):"—"} pontos pro score geral`;
         return dialWidget(f.label, pct, motorScoreColor(f.composite), null, 72, 7, 14, f.composite===null?null:Math.round(f.composite), tooltip);
       }).join("")
     : `<span class="factor-chip" style="color:var(--text-faint);">sem dados suficientes ainda</span>`;

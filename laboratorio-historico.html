@@ -1,0 +1,428 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<title>SEIOS — Laboratório Histórico</title>
+<style>
+  :root{
+    --bg:#000; --bg-alt:#050B07; --panel:#040A06; --line:#1F5B34; --line-soft:#123321;
+    --text:#33FF6E; --text-dim:#7FCC9A; --text-faint:#478A60;
+    --brick:#FF4444; --gold:#FFC53D; --teal:#33FF6E;
+    --mono:ui-monospace,"SF Mono",Menlo,monospace;
+  }
+  *{box-sizing:border-box;}
+  body{margin:0;background:var(--bg);color:var(--text);font-family:var(--mono);
+       font-size:13px;line-height:1.6;padding:0 0 60px;}
+  .wrap{max-width:1100px;margin:0 auto;padding:0 18px;}
+  header{border-bottom:1px solid var(--line);padding:22px 0;background:var(--bg-alt);}
+  h1{font-size:21px;margin:6px 0;letter-spacing:.03em;}
+  .sub{color:var(--text-dim);font-size:12px;}
+  .regra{border:1px solid var(--teal);background:#33FF6E10;padding:16px 18px;margin:18px 0;
+         font-size:12.5px;color:var(--text-dim);}
+  .regra b{color:var(--teal);}
+  .aviso{border:1px solid var(--gold);background:#FFC53D14;padding:14px 16px;margin:18px 0;
+         color:var(--text-dim);font-size:12.5px;}
+  .aviso b{color:var(--gold);}
+  button{font-family:var(--mono);font-size:13px;padding:12px 18px;margin:16px 0;
+         background:var(--teal);color:#000;border:1px solid var(--teal);cursor:pointer;}
+  button.ghost{background:transparent;color:var(--text-dim);border-color:var(--line);}
+  button:disabled{opacity:.5;cursor:default;}
+  #log{border:1px solid var(--line-soft);background:var(--panel);padding:12px;min-height:50px;
+       font-size:11.5px;color:var(--text-dim);white-space:pre-wrap;max-height:260px;overflow-y:auto;}
+  table{width:100%;border-collapse:collapse;font-size:11px;margin:12px 0;}
+  th{text-align:left;color:var(--text-faint);font-weight:400;padding:6px 7px;
+     border-bottom:1px solid var(--line);text-transform:uppercase;font-size:9.5px;letter-spacing:.05em;}
+  td{padding:6px 7px;border-bottom:1px solid var(--line-soft);}
+  td.n{text-align:right;}
+  .sim{color:var(--teal);} .nao{color:var(--text-faint);} .alerta{color:var(--brick);}
+  .ouro{color:var(--gold);}
+  h2{font-size:15px;margin:26px 0 6px;}
+  p.explica{color:var(--text-dim);font-size:12.5px;margin:6px 0 12px;}
+  #saida{display:none;}
+  #veredito{border:1px solid var(--line);padding:18px;margin:18px 0;font-size:13.5px;}
+  textarea{width:100%;height:300px;background:var(--panel);color:var(--text-dim);
+           border:1px solid var(--line-soft);font-family:var(--mono);font-size:11px;padding:10px;}
+</style>
+</head>
+<body>
+<header><div class="wrap">
+  <div class="sub">SEIOS · laboratório isolado — não é o sistema, não grava nada, não muda nada</div>
+  <h1>O que o passado longo já pode responder</h1>
+  <div class="sub">até ~3.200 dias · horizonte diário · cada dia é uma observação, não 1/30 de uma</div>
+</div></header>
+
+<div class="wrap">
+
+  <div class="regra">
+    <b>REGRA DECLARADA ANTES DE MEDIR — 19/08/2026</b><br><br>
+    <b>Amostra partida no tempo, não ao acaso:</b> tudo até <b>31/12/2023</b> é ESTUDO;
+    de <b>2024 em diante</b> é RESERVA. A reserva é literalmente o futuro do estudo — e é
+    também a era do ETF à vista, o comprador que não existia antes.<br><br>
+    <b>Passa se, e somente se:</b> |t| ≥ 2,576 no estudo <u>e</u> na reserva, com o
+    <u>mesmo sinal</u>. Uma variável que separa no passado e inverte no presente não é sinal:
+    é regime que mudou.<br><br>
+    <b>Horizontes:</b> 1, 3 e 7 dias. Para 3 e 7, janelas que não se sobrepõem.<br><br>
+    <b>O que um "passa" autoriza:</b> virar <u>hipótese declarada</u>, a ser confirmada nas 777
+    observações ao vivo — dado que a hipótese nunca viu. <b>Não</b> autoriza mudar peso, nem
+    entrar no score. A mesma amostra que revela um efeito não pode medir o tamanho dele.<br><br>
+    <b>O que um "não passa" autoriza:</b> descartar. Isto é a parte forte do passado, e vale
+    desde já.
+  </div>
+
+  <div class="aviso">
+    <b>A composição do comprador mudou — e por isso os resultados vêm por era.</b>
+    2017–2020 varejo · 2021–2022 primeira onda institucional e o colapso · 2023 pré-ETF ·
+    2024–2026 era do ETF à vista. Se algo só funciona antes de 2024, é achado sobre um mercado
+    que não existe mais.<br><br>
+    <b>Cuidado com a era do ETF sozinha:</b> ela tem ~600 dias, o que só detecta r ≈ 0,10.
+    Restringir tudo a ela devolve o problema de poder que estamos tentando resolver.<br><br>
+    <b>Revisão de série:</b> este laboratório usa os valores REVISADOS de hoje para o FRED,
+    não os da divulgação original. Há look-ahead residual nas séries revisáveis (CPI, M2).
+    O sistema ao vivo trata isso; aqui não.
+  </div>
+
+  <button id="btn">▶ Rodar o laboratório</button>
+  <div id="log">pronto.</div>
+
+  <div id="saida">
+    <div id="veredito"></div>
+    <h2>1 · Orçamento</h2>
+    <div id="orcamento"></div>
+    <h2>2 · Cada variável, contra o retorno futuro</h2>
+    <p class="explica">Ordenado por |t| na reserva. Variáveis marcadas ⚗ nunca votaram no
+      sistema — são os sensores nunca testados.</p>
+    <div id="tabela"></div>
+    <h2>3 · Por era — o comprador mudou?</h2>
+    <p class="explica">Só as variáveis com cobertura nas quatro eras. Sinal que troca de
+      direção entre eras é regime, não previsão.</p>
+    <div id="eras"></div>
+    <h2>Copiar para o Claude</h2>
+    <button class="ghost" id="btnCopiar">⧉ Copiar resultado</button>
+    <textarea id="texto" readonly></textarea>
+  </div>
+</div>
+
+<script>
+const log=function(m){ const el=document.getElementById("log");
+  el.textContent += (el.textContent?"\n":"")+m; el.scrollTop=el.scrollHeight; };
+const dorme=function(ms){ return new Promise(function(s){ setTimeout(s,ms); }); };
+
+/* ================= estatística ================= */
+function media(a){ return a.reduce(function(x,y){return x+y;},0)/a.length; }
+function correlacao(x,y){
+  const mx=media(x), my=media(y); let n=0,dx=0,dy=0;
+  for(let i=0;i<x.length;i++){ const a=x[i]-mx,b=y[i]-my; n+=a*b; dx+=a*a; dy+=b*b; }
+  return (dx===0||dy===0)?0:n/Math.sqrt(dx*dy);
+}
+function tDeR(r,n){ return (n<3||Math.abs(r)>=1)?0:r*Math.sqrt((n-2)/(1-r*r)); }
+function rMinimo(n){ const t=2.576; return n<4?NaN:t/Math.sqrt(n-2+t*t); }
+function avaliar(pares){
+  const bons=pares.filter(function(p){ return Number.isFinite(p.x)&&Number.isFinite(p.y); });
+  if(bons.length<40) return null;
+  const r=correlacao(bons.map(function(p){return p.x;}), bons.map(function(p){return p.y;}));
+  return { n:bons.length, r:r, t:tDeR(r,bons.length), rMin:rMinimo(bons.length) };
+}
+
+/* ================= coleta ================= */
+const DIA=86400000;
+function ymd(ts){ return new Date(ts).toISOString().slice(0,10); }
+
+async function velasDiarias(){
+  const todas=[]; let fim=Date.now();
+  for(let i=0;i<12;i++){
+    const url="https://api.binance.com/api/v3/klines?symbol=BTCUSDT&interval=1d&limit=1000&endTime="+fim;
+    const r=await fetch(url); if(!r.ok) throw new Error("Binance "+r.status);
+    const d=await r.json(); if(!d.length) break;
+    todas.unshift.apply(todas,d);
+    fim=d[0][0]-1;
+    log("  velas: "+todas.length);
+    if(d.length<1000) break;
+    await dorme(300);
+  }
+  todas.pop();  /* dia em formação fora — regra da v110 */
+  return todas;
+}
+
+async function fred(serie){
+  try{
+    const r=await fetch("/api/fred?series_id="+serie+"&sort_order=asc&limit=100000");
+    if(!r.ok) throw new Error(serie+" "+r.status);
+    const d=await r.json();
+    const m={};
+    (d.observations||[]).forEach(function(o){
+      if(o.value!==".") m[o.date]=Number(o.value);
+    });
+    log("  FRED "+serie+": "+Object.keys(m).length+" pontos");
+    return m;
+  }catch(e){ log("  FRED "+serie+" indisponível ("+e.message+")"); return null; }
+}
+
+async function fearGreed(){
+  try{
+    const r=await fetch("https://api.alternative.me/fng/?limit=0&format=json");
+    if(!r.ok) throw new Error("F&G "+r.status);
+    const d=await r.json(); const m={};
+    (d.data||[]).forEach(function(o){ m[ymd(Number(o.timestamp)*1000)]=Number(o.value); });
+    log("  Fear & Greed: "+Object.keys(m).length+" dias");
+    return m;
+  }catch(e){ log("  Fear & Greed indisponível"); return null; }
+}
+
+async function stablecoins(){
+  try{
+    const r=await fetch("https://stablecoins.llama.fi/stablecoincharts/all");
+    if(!r.ok) throw new Error("llama "+r.status);
+    const d=await r.json(); const m={};
+    d.forEach(function(o){
+      const v=o.totalCirculatingUSD;
+      const tot=v && (v.peggedUSD||0)+(v.peggedEUR||0)+(v.peggedVAR||0);
+      if(tot) m[ymd(Number(o.date)*1000)]=tot;
+    });
+    log("  stablecoins: "+Object.keys(m).length+" dias");
+    return m;
+  }catch(e){ log("  stablecoins indisponível"); return null; }
+}
+
+/* último valor conhecido até a data — sem olhar para a frente */
+function ultimoAte(mapa, data){
+  if(!mapa) return null;
+  if(mapa[data]!==undefined) return mapa[data];
+  let d=new Date(data+"T00:00:00Z").getTime();
+  for(let i=0;i<10;i++){ d-=DIA; const k=ymd(d); if(mapa[k]!==undefined) return mapa[k]; }
+  return null;
+}
+function variacao(mapa, data, dias){
+  const hoje=ultimoAte(mapa,data);
+  const antes=ultimoAte(mapa, ymd(new Date(data+"T00:00:00Z").getTime()-dias*DIA));
+  return (hoje===null||antes===null||!antes)?null:((hoje/antes-1)*100);
+}
+
+/* ================= variáveis ================= */
+const ERAS=[
+  { nome:"2017–2020 varejo",        ini:"2017-01-01", fim:"2020-12-31" },
+  { nome:"2021–2022 institucional", ini:"2021-01-01", fim:"2022-12-31" },
+  { nome:"2023 pré-ETF",            ini:"2023-01-01", fim:"2023-12-31" },
+  { nome:"2024–2026 era ETF",       ini:"2024-01-01", fim:"2099-12-31" }
+];
+const CORTE_RESERVA="2024-01-01";
+
+function montar(velas, fontes){
+  const dias=velas.map(function(k){
+    return { data:ymd(k[0]), t:k[0], close:Number(k[4]), vol:Number(k[7]) };
+  }).filter(function(d){ return Number.isFinite(d.close)&&d.close>0; });
+
+  /* retornos futuros — nada olha para a frente na variável */
+  for(let i=0;i<dias.length;i++){
+    if(i+1<dias.length) dias[i].r1=(dias[i+1].close/dias[i].close-1)*100;
+    if(i+3<dias.length) dias[i].r3=(dias[i+3].close/dias[i].close-1)*100;
+    if(i+7<dias.length) dias[i].r7=(dias[i+7].close/dias[i].close-1)*100;
+  }
+  /* técnicos, calculados só com o passado */
+  for(let i=0;i<dias.length;i++){
+    if(i>=14){
+      let g=0,p=0;
+      for(let k=i-13;k<=i;k++){ const d=dias[k].close-dias[k-1].close; if(d>0)g+=d; else p-=d; }
+      dias[i].rsi = p===0 ? 100 : 100-100/(1+(g/14)/(p/14));
+    }
+    if(i>=50){
+      let s=0; for(let k=i-49;k<=i;k++) s+=dias[k].close;
+      dias[i].mm50=(dias[i].close/(s/50)-1)*100;
+    }
+    if(i>=30) dias[i].tend=(dias[i].close/dias[i-30].close-1)*100;
+    if(i>=1)  dias[i].mom=(dias[i].close/dias[i-1].close-1)*100;
+    if(i>=30){
+      let s=0; for(let k=i-29;k<=i;k++) s+=dias[k].vol;
+      dias[i].volSpike=(dias[i].vol/(s/30)-1)*100;
+    }
+  }
+  /* fontes externas, sempre pelo último valor conhecido ATÉ o dia */
+  dias.forEach(function(d){
+    d.fg      = fontes.fg ? ultimoAte(fontes.fg, d.data) : null;
+    d.juros   = ultimoAte(fontes.DFF, d.data);
+    d.dxy     = variacao(fontes.DTWEXBGS, d.data, 90);
+    d.curva   = ultimoAte(fontes.T10Y2Y, d.data);
+    d.cpi     = variacao(fontes.CPIAUCSL, d.data, 365);
+    d.m2      = variacao(fontes.M2SL, d.data, 365);
+    d.petro   = variacao(fontes.DCOILWTICO, d.data, 90);
+    d.euro    = variacao(fontes.DEXUSEU, d.data, 90);
+    d.sp500   = variacao(fontes.SP500, d.data, 90);
+    d.cobre   = variacao(fontes.PCOPPUSDM, d.data, 90);
+    d.vix     = ultimoAte(fontes.VIXCLS, d.data);
+    d.dgs10   = variacao(fontes.DGS10, d.data, 90);
+    d.epu     = variacao(fontes.USEPUINDXD, d.data, 90);
+    d.juroReal= ultimoAte(fontes.DFII10, d.data);
+    d.juroRealD=variacao(fontes.DFII10, d.data, 90);
+    d.walcl   = variacao(fontes.WALCL, d.data, 30);
+    d.stable  = fontes.stable ? variacao(fontes.stable, d.data, 30) : null;
+    d.stable7 = fontes.stable ? variacao(fontes.stable, d.data, 7)  : null;
+  });
+  return dias;
+}
+
+const VARIAVEIS=[
+  { c:"rsi",      n:"RSI 14d",                    vota:true },
+  { c:"mm50",     n:"Preço vs. média de 50d",     vota:true },
+  { c:"tend",     n:"Tendência 30d",              vota:true },
+  { c:"mom",      n:"Momentum 24h",               vota:true },
+  { c:"volSpike", n:"Pico de volume vs. 30d",     vota:true },
+  { c:"fg",       n:"Fear & Greed",               vota:true },
+  { c:"juros",    n:"Fed Funds (nível)",          vota:true },
+  { c:"cpi",      n:"CPI ano a ano",              vota:true },
+  { c:"m2",       n:"M2 ano a ano",               vota:true },
+  { c:"dxy",      n:"Dólar amplo 90d",            vota:true },
+  { c:"curva",    n:"Curva 10a−2a",               vota:true },
+  { c:"petro",    n:"Petróleo 90d",               vota:true },
+  { c:"sp500",    n:"S&P 500 90d",                vota:true },
+  { c:"cobre",    n:"Cobre 90d",                  vota:true },
+  { c:"vix",      n:"VIX (nível)",                vota:true },
+  { c:"dgs10",    n:"Treasury 10a 90d",           vota:true },
+  { c:"epu",      n:"EPU 90d",                    vota:true },
+  { c:"euro",     n:"Euro/dólar 90d ⚗",           vota:false },
+  { c:"juroReal", n:"Juro real 10a (nível) ⚗",    vota:false },
+  { c:"juroRealD",n:"Juro real 10a 90d ⚗",        vota:false },
+  { c:"walcl",    n:"Balanço do Fed 30d ⚗",       vota:false },
+  { c:"stable",   n:"Stablecoins 30d ⚗",          vota:false },
+  { c:"stable7",  n:"Stablecoins 7d ⚗",           vota:false }
+];
+const HORIZONTES=[ {c:"r1",n:"1d",passo:1}, {c:"r3",n:"3d",passo:3}, {c:"r7",n:"7d",passo:7} ];
+
+function pares(dias, campo, hz, ini, fim){
+  const out=[];
+  for(let i=0;i<dias.length;i+=hz.passo){
+    const d=dias[i];
+    if(d.data<ini||d.data>fim) continue;
+    if(!Number.isFinite(d[campo])||!Number.isFinite(d[hz.c])) continue;
+    out.push({ x:d[campo], y:d[hz.c] });
+  }
+  return out;
+}
+function f(x,d){ return (x===null||x===undefined||!Number.isFinite(x))?"—":x.toFixed(d); }
+
+document.getElementById("btn").addEventListener("click", async function(){
+  const b=this; b.disabled=true; document.getElementById("log").textContent="";
+  try{
+    log("velas diárias da Binance…");
+    const velas=await velasDiarias();
+    log("FRED (pelo proxy do próprio domínio)…");
+    const fontes={};
+    const series=["DFF","CPIAUCSL","M2SL","DTWEXBGS","T10Y2Y","DCOILWTICO","DEXUSEU",
+                  "SP500","PCOPPUSDM","VIXCLS","DGS10","USEPUINDXD","DFII10","WALCL"];
+    for(let i=0;i<series.length;i++){ fontes[series[i]]=await fred(series[i]); await dorme(250); }
+    fontes.fg=await fearGreed();
+    fontes.stable=await stablecoins();
+
+    log("montando…");
+    const dias=montar(velas,fontes);
+    log("dias montados: "+dias.length+" ("+dias[0].data+" a "+dias[dias.length-1].data+")");
+
+    /* orçamento */
+    const nEstudo=dias.filter(function(d){ return d.data<CORTE_RESERVA; }).length;
+    const nReserva=dias.length-nEstudo;
+    document.getElementById("orcamento").innerHTML='<table><tbody>'+
+      '<tr><td>Período</td><td class="n">'+dias[0].data+" → "+dias[dias.length-1].data+'</td></tr>'+
+      '<tr><td>Dias no estudo (até 2023)</td><td class="n sim">'+nEstudo+'</td></tr>'+
+      '<tr><td>Dias na reserva (2024+)</td><td class="n sim">'+nReserva+'</td></tr>'+
+      '<tr><td>r mínimo detectável — estudo, 1d</td><td class="n">'+f(rMinimo(nEstudo),3)+'</td></tr>'+
+      '<tr><td>r mínimo detectável — reserva, 1d</td><td class="n">'+f(rMinimo(nReserva),3)+'</td></tr>'+
+      '<tr><td>Comparação: 777 janelas ao vivo detectariam</td><td class="n ouro">0,100</td></tr>'+
+      '</tbody></table>';
+
+    /* tabela principal */
+    const achados=[];
+    const linhas=[];
+    VARIAVEIS.forEach(function(V){
+      HORIZONTES.forEach(function(HZ){
+        const est=avaliar(pares(dias,V.c,HZ,"2000-01-01",CORTE_RESERVA));
+        const res=avaliar(pares(dias,V.c,HZ,CORTE_RESERVA,"2099-12-31"));
+        if(!est&&!res) return;
+        const passa = est&&res&&Math.abs(est.t)>=2.576&&Math.abs(res.t)>=2.576&&
+                      Math.sign(est.r)===Math.sign(res.r);
+        if(passa) achados.push({ v:V, hz:HZ, est:est, res:res });
+        linhas.push({ V:V, HZ:HZ, est:est, res:res, passa:passa,
+                      ord: res?Math.abs(res.t):0 });
+      });
+    });
+    linhas.sort(function(a,b){ return b.ord-a.ord; });
+    let h='<table><thead><tr><th>Variável</th><th>Horiz.</th>'+
+      '<th class="n">N est.</th><th class="n">r est.</th><th class="n">t est.</th>'+
+      '<th class="n">N res.</th><th class="n">r res.</th><th class="n">t res.</th>'+
+      '<th>Veredito</th></tr></thead><tbody>';
+    linhas.forEach(function(L){
+      h+='<tr><td'+(L.V.vota?'':' class="ouro"')+'>'+L.V.n+'</td><td>'+L.HZ.n+'</td>'+
+         '<td class="n">'+(L.est?L.est.n:"—")+'</td><td class="n">'+(L.est?f(L.est.r,3):"—")+'</td>'+
+         '<td class="n">'+(L.est?f(L.est.t,2):"—")+'</td>'+
+         '<td class="n">'+(L.res?L.res.n:"—")+'</td><td class="n">'+(L.res?f(L.res.r,3):"—")+'</td>'+
+         '<td class="n">'+(L.res?f(L.res.t,2):"—")+'</td>'+
+         '<td class="'+(L.passa?"sim":"nao")+'">'+(L.passa?"PASSA":"não")+'</td></tr>';
+    });
+    document.getElementById("tabela").innerHTML=h+"</tbody></table>";
+
+    /* por era */
+    let he='<table><thead><tr><th>Variável</th>';
+    ERAS.forEach(function(E){ he+='<th class="n">'+E.nome+'</th>'; });
+    he+='</tr></thead><tbody>';
+    VARIAVEIS.forEach(function(V){
+      const cels=ERAS.map(function(E){ return avaliar(pares(dias,V.c,HORIZONTES[0],E.ini,E.fim)); });
+      if(cels.filter(function(c){return c;}).length<3) return;
+      he+='<tr><td'+(V.vota?'':' class="ouro"')+'>'+V.n+'</td>';
+      cels.forEach(function(c){
+        he+='<td class="n">'+(c?(f(c.r,3)+" <span class=\'nao\'>("+c.n+")</span>"):"—")+'</td>';
+      });
+      he+='</tr>';
+    });
+    document.getElementById("eras").innerHTML=he+"</tbody></table>";
+
+    document.getElementById("veredito").innerHTML = achados.length
+      ? '<span class="sim"><strong>'+achados.length+' teste(s) passaram pela regra declarada.</strong></span>'+
+        '<br><br>Isto os torna <strong>hipóteses</strong>, a serem confirmadas nas observações ao '+
+        'vivo. Não autoriza mudar peso nem entrar no score — a mesma amostra que revela um efeito '+
+        'não pode medir o tamanho dele.'
+      : '<span class="alerta"><strong>Nenhum teste passou pela regra declarada.</strong></span>'+
+        '<br><br>Com o poder que esta amostra tem, isso descarta efeitos acima do r mínimo de cada '+
+        'linha. É a parte forte do passado, e vale desde já.';
+
+    /* texto */
+    const txt=[];
+    txt.push("SEIOS · LABORATÓRIO HISTÓRICO");
+    txt.push("medido em "+new Date().toLocaleString("pt-BR"));
+    txt.push("período "+dias[0].data+" a "+dias[dias.length-1].data+
+             " · estudo "+nEstudo+" dias · reserva "+nReserva+" dias");
+    txt.push("regra: |t|>=2,576 no estudo E na reserva, mesmo sinal");
+    txt.push("");
+    txt.push("=== ORDENADO POR |t| NA RESERVA ===");
+    linhas.slice(0,30).forEach(function(L){
+      txt.push("  "+L.V.n+" ["+L.HZ.n+"]: est N="+(L.est?L.est.n:"—")+" r="+(L.est?f(L.est.r,3):"—")+
+        " t="+(L.est?f(L.est.t,2):"—")+" | res N="+(L.res?L.res.n:"—")+
+        " r="+(L.res?f(L.res.r,3):"—")+" t="+(L.res?f(L.res.t,2):"—")+
+        " | "+(L.passa?"PASSA":"não"));
+    });
+    txt.push("");
+    txt.push("=== POR ERA (horizonte 1d, r e N) ===");
+    VARIAVEIS.forEach(function(V){
+      const cels=ERAS.map(function(E){ return avaliar(pares(dias,V.c,HORIZONTES[0],E.ini,E.fim)); });
+      if(cels.filter(function(c){return c;}).length<3) return;
+      txt.push("  "+V.n+": "+cels.map(function(c,i){
+        return ERAS[i].nome.split(" ")[0]+"="+(c?f(c.r,3)+"("+c.n+")":"—");
+      }).join(" · "));
+    });
+    txt.push("");
+    txt.push("VEREDITO: "+(achados.length? achados.length+" passaram" : "nenhum passou"));
+    document.getElementById("texto").value=txt.join("\n");
+
+    document.getElementById("saida").style.display="block";
+    log("pronto.");
+  }catch(e){
+    log("FALHOU: "+e.message);
+  }
+  b.disabled=false;
+});
+
+document.getElementById("btnCopiar").addEventListener("click", async function(){
+  const t=document.getElementById("texto");
+  try{ await navigator.clipboard.writeText(t.value); this.textContent="✓ copiado"; }
+  catch(e){ t.focus(); t.select(); this.textContent="selecione o texto e copie"; }
+});
+</script>
+</body>
+</html>

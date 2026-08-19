@@ -1179,7 +1179,7 @@ const STORAGE_KEY = "seios_btc_v2";
 // fonte única da versão — usada no rodapé, no histórico e nos exports.
 // Muda toda vez que a fórmula de score/pesos muda, pra nunca misturar
 // decisões de regras diferentes como se fossem comparáveis.
-const BUILD_VERSION = "2026-08-19.122.1-janela";
+const BUILD_VERSION = "2026-08-19.122.2-vela-de-hoje";
 /* v78: versão do MODELO separada da versão do BUILD. Mudança visual não é
    mudança de semântica: só sobe quando peso, fórmula, corte ou trava mudam.
    Toda observação gravada carrega as duas, pra que seis meses depois dê pra
@@ -4487,11 +4487,22 @@ async function coletarVelasCamadas(){
     ]);
     if(!r1.ok || !r2.ok) throw new Error("Binance recusou");
     const h1 = await r1.json(), d1 = await r2.json();
-    h1.pop(); d1.pop();   /* vela em formação fora — regra da v110 */
+    /* v122.2 — A REGRA DA v110 NÃO SE APLICA AO GRÁFICO DIÁRIO.
+       Descartar o período em formação existe para indicadores que VOTAM: um
+       valor provisório contaminaria o score. Aqui é contexto visual, e a
+       "vela em formação" da série diária é O DIA DE HOJE.
+       MEDIDO em 19/08 14:51: com o pop(), d7 e d30 terminavam em 64.725 —
+       o fechamento de ontem — enquanto o BTC estava em 68.138. O gráfico do
+       TERRENO aparecia VERMELHO (−0,8%) num dia de +5%, porque não enxergava
+       hoje. Omitir o presente num gráfico de preço não é prudência: é
+       esconder o que está acontecendo.
+       Na série de 1h o descarte CONTINUA: a hora corrente está incompleta e
+       falta pouco para fechar, então a última vela é ruído de minutos. */
+    h1.pop();
     S.market.velasCamadas = {
       h1:  h1.map(function(k){ return Number(k[4]); }),
       d7:  d1.slice(-7).map(function(k){ return Number(k[4]); }),
-      d30: d1.map(function(k){ return Number(k[4]); }),
+      d30: d1.slice(-30).map(function(k){ return Number(k[4]); }),
       em: Date.now()
     };
   }catch(e){ /* silencioso: exibição não pode derrubar coleta */ }

@@ -141,6 +141,18 @@ t("cada camada declara a própria janela E ela chega em quem lê", ()=>{
   if(!/janela:\s*"30d"/.test(limpo)) throw new Error("TERRENO sem janela declarada");
 });
 
+t("A VELA DE HOJE ENTRA no gráfico diário, e sai no de 1h", ()=>{
+  /* v122.2 — medido em 19/08 14:51: com pop() na diária, d7 e d30 terminavam
+     no fechamento de ontem (64.725) com o BTC em 68.138, e o gráfico do
+     TERRENO ficava vermelho num dia de +5%. A regra da v110 vale para quem
+     VOTA; aqui é contexto visual, e omitir hoje esconde o presente. */
+  const f = semComentarios(declDe("coletarVelasCamadas"));
+  if(/d1\.pop\(\)/.test(f))
+    throw new Error("a vela de hoje continua sendo descartada do gráfico diário");
+  if(!/h1\.pop\(\)/.test(f))
+    throw new Error("a hora em formação deixou de ser descartada — ela é ruído de minutos");
+});
+
 t("a coleta das velas não derruba a rodada se falhar", ()=>{
   const f = semComentarios(declDe("coletarVelasCamadas"));
   if(!/catch/.test(f)) throw new Error("sem catch: a Binance fora do ar quebraria a coleta inteira");

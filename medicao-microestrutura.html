@@ -1,0 +1,305 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<title>SEIOS — medição de microestrutura</title>
+<style>
+  :root{
+    --bg:#000; --bg-alt:#050B07; --panel:#040A06; --line:#1F5B34; --line-soft:#123321;
+    --text:#33FF6E; --text-dim:#7FCC9A; --text-faint:#478A60;
+    --brick:#FF4444; --gold:#FFC53D; --teal:#33FF6E;
+    --mono:ui-monospace,"SF Mono",Menlo,monospace;
+  }
+  *{box-sizing:border-box;}
+  body{margin:0;background:var(--bg);color:var(--text);font-family:var(--mono);
+       font-size:13px;line-height:1.6;padding:0 0 60px;}
+  .wrap{max-width:1000px;margin:0 auto;padding:0 18px;}
+  header{border-bottom:1px solid var(--line);padding:22px 0;background:var(--bg-alt);}
+  h1{font-size:22px;margin:6px 0;letter-spacing:.04em;}
+  .sub{color:var(--text-dim);font-size:12px;}
+  .aviso{border:1px solid var(--gold);background:#FFC53D14;padding:14px 16px;margin:18px 0;
+         color:var(--text-dim);font-size:12.5px;}
+  .aviso b{color:var(--gold);}
+  button{font-family:var(--mono);font-size:13px;padding:12px 18px;margin:16px 0;
+         background:var(--teal);color:#000;border:1px solid var(--teal);cursor:pointer;}
+  button.ghost{background:transparent;color:var(--text-dim);border-color:var(--line);}
+  button:disabled{opacity:.5;cursor:default;}
+  #log{border:1px solid var(--line-soft);background:var(--panel);padding:12px;
+       min-height:60px;font-size:11.5px;color:var(--text-dim);white-space:pre-wrap;
+       max-height:220px;overflow-y:auto;}
+  table{width:100%;border-collapse:collapse;font-size:11.5px;margin:14px 0;}
+  th{text-align:left;color:var(--text-faint);font-weight:400;padding:7px 8px;
+     border-bottom:1px solid var(--line);text-transform:uppercase;font-size:10px;letter-spacing:.06em;}
+  td{padding:7px 8px;border-bottom:1px solid var(--line-soft);}
+  td.n{text-align:right;}
+  .sim{color:var(--teal);} .nao{color:var(--text-faint);} .alerta{color:var(--brick);}
+  h2{font-size:15px;margin:26px 0 6px;color:var(--text);}
+  p.explica{color:var(--text-dim);font-size:12.5px;margin:6px 0 12px;}
+  #saida{display:none;}
+  textarea{width:100%;height:200px;background:var(--panel);color:var(--text-dim);
+           border:1px solid var(--line-soft);font-family:var(--mono);font-size:11px;padding:10px;}
+</style>
+</head>
+<body>
+<header><div class="wrap">
+  <div class="sub">SEIOS · medição isolada — não é o sistema, não grava nada</div>
+  <h1>A agressão horária carrega sinal?</h1>
+  <div class="sub">velas de 1h da Binance · até 1 ano · o navegador busca, nada vai para servidor nenhum</div>
+</div></header>
+
+<div class="wrap">
+
+  <div class="aviso">
+    <b>O que esta página responde:</b> quantas observações independentes a medida horária
+    produziria, e se a agressão compradora de uma hora separa o retorno da hora seguinte.
+    <br><br>
+    <b>O que ela NÃO responde:</b> se isso vira lucro. Não há custo de corretagem, spread nem
+    escorregamento aqui. Em BTC esses custos comem alguns pontos-base por operação — uma
+    vantagem estatisticamente real pode ser economicamente nula. E é um só regime de mercado,
+    o do último ano.
+    <br><br>
+    <b>A metade final é reservada.</b> A medida é avaliada na primeira parte da amostra e
+    conferida na segunda, que não participou de escolha nenhuma. Se separar na primeira e
+    não na segunda, a resposta honesta é que não separa.
+  </div>
+
+  <button id="btn">▶ Medir — puxa ~8.760 velas horárias (9 requisições)</button>
+  <div id="log">pronto para começar.</div>
+
+  <div id="saida">
+    <h2>1 · Orçamento de observações</h2>
+    <p class="explica">O ponto principal: a cadência horária é reconstruível para trás, então
+      esta medição não precisa esperar. Compare com as 3 leituras/dia do score.</p>
+    <div id="orcamento"></div>
+
+    <h2>2 · As medidas testadas</h2>
+    <p class="explica">Todas usam apenas dados da hora <em>t</em> para prever o retorno da hora
+      <em>t+1</em>. Nenhuma olha para a frente. Janelas de 1h não se sobrepõem — cada uma é
+      observação independente, ao contrário dos 30 dias do backtest do sistema.</p>
+    <div id="medidas"></div>
+
+    <h2>3 · Reserva — a metade que não participou</h2>
+    <p class="explica">Mesma medida, aplicada à parte final da amostra. É o teste que a
+      calibração histórica do sistema nunca pôde fazer, por falta de tamanho.</p>
+    <div id="reserva"></div>
+
+    <h2>4 · Vale a pena depois do custo?</h2>
+    <div id="custo"></div>
+
+    <h2>Copiar para o Claude</h2>
+    <button class="ghost" id="btnCopiar">⧉ Copiar resultado</button>
+    <textarea id="texto" readonly></textarea>
+  </div>
+</div>
+
+<script>
+const log = (m) => { const el=document.getElementById("log");
+  el.textContent += (el.textContent ? "\n" : "") + m; el.scrollTop = el.scrollHeight; };
+
+/* ---------- estatística ---------- */
+function media(a){ return a.reduce((x,y)=>x+y,0)/a.length; }
+function dp(a){ const m=media(a); return Math.sqrt(a.reduce((s,x)=>s+(x-m)*(x-m),0)/(a.length-1)); }
+function correlacao(x,y){
+  const mx=media(x), my=media(y);
+  let num=0, dx=0, dy=0;
+  for(let i=0;i<x.length;i++){ const a=x[i]-mx, b=y[i]-my; num+=a*b; dx+=a*a; dy+=b*b; }
+  return (dx===0||dy===0) ? 0 : num/Math.sqrt(dx*dy);
+}
+/* t de uma correlação com N observações independentes */
+function tDeR(r, n){ return (n<3||Math.abs(r)>=1) ? 0 : r*Math.sqrt((n-2)/(1-r*r)); }
+
+/* separação entre o quinto superior e o quinto inferior da medida */
+function separacao(pares){
+  const ord = pares.slice().sort((a,b)=>a.x-b.x);
+  const k = Math.floor(ord.length/5);
+  if(k < 30) return null;
+  const baixo = ord.slice(0,k).map(p=>p.y);
+  const alto  = ord.slice(-k).map(p=>p.y);
+  const dif = media(alto) - media(baixo);
+  const se = Math.sqrt(dp(alto)**2/k + dp(baixo)**2/k);
+  return { alto: media(alto), baixo: media(baixo), dif: dif, t: se ? dif/se : 0, n: k };
+}
+
+/* ---------- coleta ---------- */
+async function puxarVelas(horas){
+  const todas = [];
+  let fim = Date.now();
+  const req = Math.ceil(horas/1000);
+  for(let i=0;i<req;i++){
+    const url = "https://api.binance.com/api/v3/klines?symbol=BTCUSDT&interval=1h&limit=1000&endTime="+fim;
+    log("  buscando bloco " + (i+1) + " de " + req + "…");
+    const r = await fetch(url);
+    if(!r.ok) throw new Error("Binance recusou (" + r.status + ") no bloco " + (i+1));
+    const d = await r.json();
+    if(!d.length) break;
+    todas.unshift(...d);
+    fim = d[0][0] - 1;
+    await new Promise(s=>setTimeout(s, 350));
+  }
+  /* a vela mais recente ainda está em formação — mesma regra da v110 */
+  todas.pop();
+  return todas;
+}
+
+/* ---------- montagem das medidas ---------- */
+function montar(velas){
+  const linhas = velas.map(function(k){
+    const qv = Number(k[7]);            // volume em dólares
+    const tbq = Number(k[10]);          // parte comprada por agressor
+    const close = Number(k[4]);
+    return {
+      t: k[0], close: close, qv: qv,
+      /* desequilíbrio de agressão em [-1, +1], já normalizado por notional */
+      desq: qv > 0 ? (2*tbq/qv - 1) : null,
+      trades: Number(k[8])
+    };
+  }).filter(l => l.desq !== null && Number.isFinite(l.close) && l.close > 0);
+
+  /* retorno da hora SEGUINTE — nada olha para a frente na medida */
+  for(let i=0;i<linhas.length-1;i++){
+    linhas[i].ret1h = (linhas[i+1].close / linhas[i].close - 1) * 100;
+  }
+  /* média de 8h da agressão, para comparar com o relógio do sistema */
+  for(let i=7;i<linhas.length;i++){
+    let s=0; for(let k=i-7;k<=i;k++) s += linhas[k].desq;
+    linhas[i].desq8h = s/8;
+  }
+  /* desvio da própria normalidade recente (24h) — "mudou de regime de agressão" */
+  for(let i=24;i<linhas.length;i++){
+    const jan = linhas.slice(i-24, i).map(l=>l.desq);
+    const m = media(jan), s = dp(jan);
+    linhas[i].desqZ = s ? (linhas[i].desq - m)/s : 0;
+  }
+  return linhas.filter(l => Number.isFinite(l.ret1h));
+}
+
+function avaliar(linhas, campo){
+  const pares = linhas.filter(l => Number.isFinite(l[campo]))
+                      .map(l => ({ x: l[campo], y: l.ret1h }));
+  if(pares.length < 200) return null;
+  const r = correlacao(pares.map(p=>p.x), pares.map(p=>p.y));
+  return { n: pares.length, r: r, t: tDeR(r, pares.length), sep: separacao(pares) };
+}
+
+function fmt(x, d){ return (x===null||x===undefined||!Number.isFinite(x)) ? "—" : x.toFixed(d===undefined?3:d); }
+
+const MEDIDAS = [
+  ["desq",   "Agressão da hora (desequilíbrio comprador)"],
+  ["desq8h", "Agressão média de 8h — a cadência do sistema"],
+  ["desqZ",  "Agressão vs. sua própria normalidade de 24h"]
+];
+
+function tabela(linhas, titulo){
+  let h = '<table><thead><tr><th>Medida</th><th class="n">N</th><th class="n">r</th>' +
+          '<th class="n">t</th><th class="n">Quinto alto − baixo</th><th>Veredito</th></tr></thead><tbody>';
+  const res = {};
+  MEDIDAS.forEach(function(m){
+    const a = avaliar(linhas, m[0]);
+    res[m[0]] = a;
+    if(!a){ h += '<tr><td>'+m[1]+'</td><td colspan="5" class="nao">amostra insuficiente</td></tr>'; return; }
+    const passa = Math.abs(a.t) >= 2.576;   // 1%, mesmo corte dos marcos
+    h += '<tr><td>' + m[1] + '</td>' +
+         '<td class="n">' + a.n + '</td>' +
+         '<td class="n">' + fmt(a.r, 4) + '</td>' +
+         '<td class="n">' + fmt(a.t, 2) + '</td>' +
+         '<td class="n">' + (a.sep ? fmt(a.sep.dif, 4) + '%' : "—") + '</td>' +
+         '<td class="' + (passa ? "sim" : "nao") + '">' +
+         (passa ? "distinguível de zero" : "não distinguível de zero") + '</td></tr>';
+  });
+  return { html: h + "</tbody></table>", res: res };
+}
+
+document.getElementById("btn").addEventListener("click", async function(){
+  const b = this; b.disabled = true;
+  document.getElementById("log").textContent = "";
+  try{
+    log("puxando velas horárias da Binance…");
+    const velas = await puxarVelas(8760);
+    log("recebidas " + velas.length + " velas fechadas (a em formação foi descartada).");
+
+    const linhas = montar(velas);
+    log("montadas " + linhas.length + " observações com retorno da hora seguinte.");
+
+    const corte = Math.floor(linhas.length * 0.6);
+    const estudo = linhas.slice(0, corte);
+    const reserva = linhas.slice(corte);
+    log("estudo: " + estudo.length + " · reserva: " + reserva.length);
+
+    /* 1 — orçamento */
+    const dias = (linhas[linhas.length-1].t - linhas[0].t) / 86400000;
+    document.getElementById("orcamento").innerHTML =
+      '<table><tbody>' +
+      '<tr><td>Período coberto</td><td class="n">' + dias.toFixed(0) + ' dias</td></tr>' +
+      '<tr><td>Observações independentes de 1h</td><td class="n sim">' + linhas.length + '</td></tr>' +
+      '<tr><td>O que o score acumula no mesmo período (3/dia)</td><td class="n">' + Math.floor(dias*3) + '</td></tr>' +
+      '<tr><td>Razão</td><td class="n sim">' + (linhas.length/Math.max(1,dias*3)).toFixed(1) + '×</td></tr>' +
+      '<tr><td>Já disponível hoje, sem esperar</td><td class="n sim">sim — reconstruído das velas</td></tr>' +
+      '</tbody></table>';
+
+    /* 2 e 3 */
+    const tE = tabela(estudo, "estudo");
+    document.getElementById("medidas").innerHTML = tE.html;
+    const tR = tabela(reserva, "reserva");
+    document.getElementById("reserva").innerHTML = tR.html;
+
+    /* 4 — custo */
+    let melhor = null;
+    MEDIDAS.forEach(function(m){
+      const a = tE.res[m[0]];
+      if(a && a.sep && (!melhor || Math.abs(a.sep.dif) > Math.abs(melhor.dif))) melhor = { nome:m[1], dif:a.sep.dif };
+    });
+    const CUSTO = 0.02;  // ~2 bps ida e volta, otimista para BTC à vista
+    document.getElementById("custo").innerHTML = melhor
+      ? '<p class="explica">A maior diferença encontrada entre o quinto mais comprador e o mais ' +
+        'vendedor foi <strong>' + fmt(melhor.dif,4) + '%</strong> por hora (' + melhor.nome + '). ' +
+        'Um custo otimista de ida e volta em BTC é da ordem de <strong>' + CUSTO + '%</strong>. ' +
+        (Math.abs(melhor.dif) > CUSTO
+          ? '<span class="sim">A diferença é maior que o custo — o que a torna digna de investigação, não de uso.</span>'
+          : '<span class="alerta">A diferença é MENOR que o custo. Mesmo se for real, não sobra nada depois de operar.</span>') +
+        '</p>'
+      : '<p class="explica">Sem separação mensurável para comparar com custo.</p>';
+
+    /* texto para colar */
+    const linhasTxt = [];
+    linhasTxt.push("SEIOS · MEDIÇÃO DE MICROESTRUTURA — velas 1h Binance");
+    linhasTxt.push("medido em " + new Date().toLocaleString("pt-BR"));
+    linhasTxt.push("");
+    linhasTxt.push("ORÇAMENTO: " + linhas.length + " observações de 1h em " + dias.toFixed(0) +
+                   " dias · o score acumularia " + Math.floor(dias*3) + " · razão " +
+                   (linhas.length/Math.max(1,dias*3)).toFixed(1) + "×");
+    linhasTxt.push("corte estudo/reserva: " + estudo.length + " / " + reserva.length);
+    ["ESTUDO","RESERVA"].forEach(function(fase, idx){
+      const res = idx === 0 ? tE.res : tR.res;
+      linhasTxt.push("");
+      linhasTxt.push(fase + ":");
+      MEDIDAS.forEach(function(m){
+        const a = res[m[0]];
+        linhasTxt.push("  " + m[1] + ": " + (a
+          ? "N=" + a.n + " · r=" + fmt(a.r,4) + " · t=" + fmt(a.t,2) +
+            (a.sep ? " · quinto alto−baixo=" + fmt(a.sep.dif,4) + "%" : "") +
+            " · " + (Math.abs(a.t) >= 2.576 ? "distinguível de zero" : "NÃO distinguível de zero")
+          : "amostra insuficiente"));
+      });
+    });
+    linhasTxt.push("");
+    linhasTxt.push("Sem custo de corretagem, spread ou escorregamento. Um regime só.");
+    document.getElementById("texto").value = linhasTxt.join("\n");
+
+    document.getElementById("saida").style.display = "block";
+    log("pronto.");
+  }catch(e){
+    log("FALHOU: " + e.message);
+    log("se foi limite de taxa, espere um minuto e tente de novo.");
+  }
+  b.disabled = false;
+});
+
+document.getElementById("btnCopiar").addEventListener("click", async function(){
+  const t = document.getElementById("texto");
+  try{ await navigator.clipboard.writeText(t.value); this.textContent = "✓ copiado"; }
+  catch(e){ t.focus(); t.select(); this.textContent = "selecione o texto e copie"; }
+});
+</script>
+</body>
+</html>

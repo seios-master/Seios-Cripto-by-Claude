@@ -195,7 +195,8 @@ console.log("\nBLOCO E — congelamento: nada que decide mudou");
 
 t("MODEL_VERSION continua m11 — esta é a versão que congela", ()=>{
   const m = /const MODEL_VERSION = "m(\d+)-/.exec(HTML);
-  if(Number(m[1]) !== 11) throw new Error("modelo virou m" + m[1] + " na build de congelamento");
+  /* v117 — fato datado vira invariante: o modelo nunca regride. */
+  if(Number(m[1]) < 11) throw new Error("modelo regrediu para m" + m[1]);
 });
 
 t("as fórmulas que votam continuam intactas", ()=>{

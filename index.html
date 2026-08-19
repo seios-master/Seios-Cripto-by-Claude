@@ -839,7 +839,14 @@ var PELE_ATUAL = "padrao";
         <div class="panel-mark">§ Decision Engine</div>
         <h2 class="panel-title">Leitura e recomendação</h2>
       </div>
-      <div class="panel-desc">Determinística e auditável — cada fator abaixo é rastreável até a fonte. <strong>A ação é uma hipótese de leitura, não uma ordem:</strong> o backtest ainda não é validado fora da amostra e a convicção não é probabilidade calibrada.</div>
+      <div class="panel-desc">Determinística e auditável — cada fator abaixo é rastreável até a fonte. <strong>A ação é uma hipótese de leitura, não uma ordem:</strong> o backtest ainda não é validado fora da amostra e a convicção não é probabilidade calibrada.
+            <br><br>
+            <strong>O patamar "Reforçar" (≥ +40) é inatingível por construção.</strong> Medido em
+            3.289 dias com 81% da massa reconstruída, o maior score em módulo que este modelo
+            já produziu foi <strong>27,7</strong> — o corte de ±40 nunca foi alcançado, e a
+            aritmética do agregador não o produz. "Entrar parcialmente / Reduzir" (±15) ocorre
+            em cerca de 8,3% dos dias. A escada não foi alterada: calibrar cortes com o mesmo
+            dado que os avaliou seria encaixe no passado. O nível fica declarado, não removido.</div>
     </div>
     <div class="decision-block">
       <div class="decision-verdict">
@@ -1166,12 +1173,12 @@ const STORAGE_KEY = "seios_btc_v2";
 // fonte única da versão — usada no rodapé, no histórico e nos exports.
 // Muda toda vez que a fórmula de score/pesos muda, pra nunca misturar
 // decisões de regras diferentes como se fossem comparáveis.
-const BUILD_VERSION = "2026-08-18.116-congelada";
+const BUILD_VERSION = "2026-08-19.117-m12";
 /* v78: versão do MODELO separada da versão do BUILD. Mudança visual não é
    mudança de semântica: só sobe quando peso, fórmula, corte ou trava mudam.
    Toda observação gravada carrega as duas, pra que seis meses depois dê pra
    saber sob qual regra aquela leitura foi produzida. */
-const MODEL_VERSION = "m11-2026-08-18";
+const MODEL_VERSION = "m12-2026-08-19";
 
 // indicador padrão — auto = tenta buscar sozinho; manual = você preenche
 function ind(label, source, note, excludeFromScore){
@@ -1208,7 +1215,15 @@ function defaultState(){
     proxyUsadoComChave: false,
     arquivamentoFalhou: false,
     motors: {
-      macro:         { label:"Macro",                       weight:.28, indicators:{
+      /* m12 — MACRO 28% → 15%. O peso de 28% não veio de calibração: veio da
+         premissa de que o BTC responde a liquidez e condições monetárias.
+         Medido em 3.289 dias e quatro eras: M2 +0,067 · Fed Funds −0,057 ·
+         curva −0,008 · CPI −0,027 · dólar −0,141 · liquidez líquida do Fed
+         −0,029. A premissa não se sustenta, e o peso a representava.
+         RESSALVA: esta mudança é informada por dado — eu não a proporia se o
+         S&P tivesse dado 0,05. Não é o caso limpo do euro (v111). Fica escrito
+         para quem julgar depois. */
+      macro:         { label:"Macro",                       weight:.15, indicators:{
         juros:     ind("Juros — Fed Funds Rate (FRED, se conectado)", "auto"),
         inflacao:  ind("Inflação — CPI YoY, tendência (FRED, se conectado)", "auto"),
         liquidez:  ind("Oferta monetária dos EUA — M2 YoY (FRED, se conectado)", "auto"),
@@ -1247,7 +1262,17 @@ function defaultState(){
       }},
       tecnico:       { label:"Técnico",                      weight:.04, indicators:{
         tendencia: ind("Tendência 30d", "auto"),
-        momentum:  ind("Momentum 24h", "auto"),
+        /* m12 — DIREÇÃO DESCONHECIDA NÃO VOTA.
+           O momentum de 24h é a única variável com sinal consistente contra o
+           retorno futuro em 3.289 dias — e é NEGATIVO: −0,048 no estudo,
+           −0,059 na reserva, negativo em três das quatro eras. Isso é
+           reversão: dia que sobe forte tende a devolver.
+           O sistema pontuava `clamp(change24h*12)` — subiu, bullish.
+           NÃO invertemos o sinal: inverter seria usar o dado para escolher a
+           direção, que é calibração. O t na reserva é −1,82, abaixo do corte
+           de 2,576: não há prova de que é negativo, há ausência de base para
+           afirmar que é positivo. Rebaixado, como o book imbalance na v106. */
+        momentum:  ind("Momentum 24h · sensor, não pontua — direção não verificada", "auto", "", true),
         rsi:       ind("RSI-SMA (14, média simples)", "auto"),
         mediaMovel:ind("Preço vs. Média Móvel 50d", "auto"),
         /* v106 — BOOK IMBALANCE vira SENSOR, como o ouro na v68. Continua
@@ -1277,7 +1302,16 @@ function defaultState(){
       eventos:       { label:"Eventos extraordinários",      weight:.05, indicators:{
         volumeSpike: ind("Pico de volume de notícias de crise (GDELT)", "auto")
       } }, // combina com S.events[] (manual)
-      ativosGlobais: { label:"Ativos Globais",                weight:.08, indicators:{
+      /* m12 — ATIVOS GLOBAIS 8% → 21%. Recebe inteiros os 13 pontos do Macro.
+         S&P +0,351 e VIX −0,282 são as duas relações estáveis de todo o
+         conjunto medido: 0,32/0,40/0,34/0,41 e −0,31/−0,32/−0,25/−0,31 nas
+         quatro eras (varejo, institucional, pré-ETF, ETF). O BTC se comporta
+         como ativo de risco, não como ativo monetário.
+         21 = 8 + 13. Não há número afinado aqui: afinar seria encaixe.
+         O QUE ISTO NÃO FAZ: não melhora previsão. S&P e VIX têm pico de
+         correlação em defasagem ZERO — são simultâneos, não antecedem. Este
+         motor descreve melhor o presente e continua prevendo o mesmo. */
+      ativosGlobais: { label:"Ativos Globais",                weight:.21, indicators:{
         petroleo: ind("Petróleo WTI (momentum 90d)", "auto"),
         /* v68 — OURO entra como SENSOR, não como voto. excludeFromScore mantém
            ele fora da média do motor: é gravado na série todo dia, aparece no

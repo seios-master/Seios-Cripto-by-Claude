@@ -1,5 +1,5 @@
 # RESULTADOS DAS MEDIÇÕES — 18/19 de agosto de 2026
-## Anexo ao SEIOS-MEMORIA · três laboratórios isolados · 92 testes · nenhum aprovado
+## Anexo ao SEIOS-MEMORIA · sete laboratórios isolados · ~110 testes · nenhum aprovado
 
 > **Leia antes de propor qualquer coisa desta lista.** O que está aqui já foi medido,
 > com regra declarada antes e reserva temporal separada. Repropor sem dado novo é
@@ -163,4 +163,149 @@ Ver a seção de erros a não cometer no `SEIOS-MEMORIA`.
 
 ---
 
-*Registrado em 19/08/2026, com o `m11-2026-08-18` congelado e a série em 4 janelas de 777.*
+## RODADA 5 — o que ANDA JUNTO com o BTC (`btc-anda-com-o-que.html`)
+
+**Pergunta diferente de todas as anteriores:** não "o que prevê", mas "o que se move
+junto". Variação contra variação — nunca nível contra variação, que foi o defeito das
+duas primeiras versões desta página, corrigido por insistência do Jorge.
+
+**21 variáveis · 3.289 dias · quatro escalas (dia, semana, mês, trimestre) · quatro eras.**
+
+### O resultado, na escala mensal
+
+| Variável | r | Estabilidade nas 4 eras |
+|---|---|---|
+| **Fear & Greed** | +0,493 | **NÃO CONTA** — o índice é construído a partir do momentum e da volatilidade do próprio BTC. É o preço correlacionado consigo mesmo. |
+| **S&P 500** | **+0,351** | 0,32 · 0,40 · 0,34 · 0,41 — **a mais estável da tabela** |
+| Endereços ativos | +0,303 | reflexivo: 0,012 no dia, 0,433 no trimestre — atividade sobe *porque* o preço subiu |
+| **VIX** | **−0,282** | −0,31 · −0,32 · −0,25 · −0,31 — igualmente estável |
+| Hash rate | +0,179 | fraca |
+| Stablecoins (oferta) | −0,166 | **inverte por era**: −0,26 → +0,46. O agregado esconde uma virada |
+| Cobre | +0,156 | fraca |
+| **Dólar amplo** | **−0,141** | bem mais fraco que a narrativa; na era do ETF vira +0,06 |
+| Petróleo | +0,126 | fraca |
+| Treasury 10a | +0,103 | fraca |
+| Euro, ouro, juro real, Fed Funds, curva, CPI, M2, balanço do Fed, **liquidez líquida**, EPU | **−0,06 a +0,08** | **indiferentes** |
+
+**Cuidado de leitura:** cobre, CPI e M2 têm r = 0,000 nas escalas de dia e semana porque
+são séries mensais — não variam nesse prazo. Zero por construção, não por indiferença.
+
+### A conclusão que vale ouro
+
+**O BTC é um ativo de risco.** Sobe com ações, cai com medo. Não é ouro digital (ouro:
++0,021), não é hedge cambial (euro: +0,075), não responde a liquidez (liquidez líquida
+do Fed: −0,029).
+
+**E o sistema pesa exatamente ao contrário:** Macro 28% para os que dão ~0,05; Ativos
+Globais 8% para S&P e VIX, os únicos estáveis e moderados.
+
+---
+
+## RODADA 6 — a escada bate comprar e segurar? (`tres-testes.html`, teste 1)
+
+Política declarada antes: score ≥ +15 → 100% · entre −15 e +15 → 50% · ≤ −15 → 0%.
+Custo 0,1% sobre o giro. Referência: 100% comprado do primeiro ao último dia.
+
+| Período | Sistema (0,1%) | Sem custo | Comprar e segurar | Giros | Queda máx. sist. | Queda máx. B&H |
+|---|---|---|---|---|---|---|
+| tudo 2017–2026 | **20,78×** | 28,10× | 15,09× | 603 | **51,7%** | 83,2% |
+| estudo (até 2023) | **14,12×** | 18,03× | 9,86× | 488 | **51,7%** | 83,2% |
+| **era ETF (2024+)** | **1,44×** | 1,52× | **1,46×** | 116 | **26,9%** | 53,0% |
+
+**Não passou pela regra:** bateu no total e no estudo, **empatou/perdeu na era do ETF**.
+É o padrão de algo que funcionou num mercado que não existe mais.
+
+**MAS — e é o único achado que atravessou as duas janelas:** a escada **cortou a queda
+máxima pela metade em todas as janelas**, inclusive naquela em que empatou em retorno.
+Isso não é previsão; é **reduzir exposição em regime ruim**.
+
+**E o custo é brutal:** 603 giros comeram 26% do resultado (28,10× → 20,78×).
+
+---
+
+## RODADA 7 — precedência: alguma variável se move ANTES? (`tres-testes.html`, teste 2)
+
+Defasagens de −10 a +10 dias. Positiva = a variável se move primeiro.
+
+| Variável | Pico | r | t | Reserva |
+|---|---|---|---|---|
+| S&P 500 | **0 dias** | +0,250 | 12,44 | +0,356 |
+| VIX | **0 dias** | −0,219 | −10,82 | −0,329 |
+| Dólar amplo | **0 dias** | −0,132 | −6,43 | −0,111 |
+| Treasury 10a | +4 d | −0,058 | −2,79 | −0,033 (some) |
+| Juro real | +7 d | −0,061 | −2,93 | +0,011 (inverte) |
+| Petróleo | +9 d | −0,049 | −2,36 | −0,045 |
+| Endereços ativos | −1 d | +0,040 | 1,93 | +0,005 |
+| Hash rate | −8 d | −0,057 | −2,73 | −0,015 |
+| *Preço Coinbase* | *0 dias* | *+0,990* | *333* | *+1,000* |
+
+**Nada antecede.** As três relações reais (S&P, VIX, dólar) têm pico **exatamente em zero**
+— simultâneas. Quando você sabe, já aconteceu. As que deram defasagem positiva têm
+r ≤ 0,06 e somem ou invertem na reserva.
+
+**O Preço Coinbase foi um controle acidental que funcionou:** é o preço do BTC em outra
+bolsa. Deu r ≈ 1,0 em defasagem 0, como tinha que dar. Se tivesse dado outra coisa,
+seria prova de erro no alinhamento temporal de todo o teste.
+
+---
+
+## RODADA 8 — cripto-nativos por faixa (`tres-testes.html`, teste 3)
+
+| Variável | Estudo (q1 → q5) | Reserva (q1 → q5) | t efetivo |
+|---|---|---|---|
+| **Prêmio Coinbase** | 2,00% → **11,97%** monotônico | 0,21% → 1,11% (q5 com 17 dias) | **0,93** |
+| Endereços ativos 90d | 1,44% → **12,45%** monotônico | achatado em ~2% | 1,12 |
+| Funding | 9,47% → 0,94% | sem ordem | −0,91 |
+| Hash rate 90d | sem ordem | sem ordem | −0,21 |
+
+**O prêmio Coinbase morreu.** Era o único sobrevivente parcial de 92 medições — padrão
+lindo e monotônico no estudo, achatado na reserva. Endereços ativos têm a mesma
+assinatura. **É reflexividade: no bull de 2017–2021, tudo que sobe junto com o preço
+"prevê" o preço.**
+
+---
+
+## SÍNTESE — o que ~110 testes produziram
+
+**1. Zero previsão, por seis caminhos independentes.** Microestrutura horária, variáveis
+soltas, score agregado, precedência, faixas macro, faixas cripto. O padrão é sempre o
+mesmo: **o que funcionava até 2023 desaparece ou inverte na era do ETF.**
+
+**2. O sistema pesa o mundo errado para DESCREVER.** S&P e VIX são as únicas relações
+estáveis e moderadas, e vivem num motor de 8%. O Macro pesa 28% para variáveis com
+r ≈ 0,05.
+
+**3. O único resultado que atravessou as duas janelas é redução de queda**, não previsão.
+
+**4. Três crenças do projeto foram corrigidas:** o amortecimento não impedia o score de
+cruzar ±15 (era cobertura — cruza em 8,3% dos dias, mas ±40 em 0,0%); o momentum de 24h
+aparece com sinal invertido em três das quatro eras; e os seis sensores nunca testados
+não merecem promoção.
+
+**5. As 777 podem estar subdimensionadas.** Se os componentes vivem entre 0,02 e 0,07, o
+agregado dificilmente passa de ~0,05, e 777 observações só detectam 0,10. **O desfecho
+provável em abril é "inconclusivo", não "não existe".**
+
+**6. O que continua sem teste:** interações entre variáveis, condicionamento por regime,
+livro de ofertas, fluxo de ETF, put/call, GDELT histórico. **"Nada encontrado" não é
+"nada existe"** — mas testar isso exige mais dado do que temos.
+
+---
+
+## Erros meus nestas rodadas, para o próximo Claude não repetir
+
+- **Comparei nível com variação** nas duas primeiras versões do teste de co-movimento.
+  Jorge corrigiu três vezes até eu acertar. Se ele não tivesse insistido, a tabela do
+  item 2 acima não existiria.
+- **Construí a série sintética errada** ao validar a precedência (nível `50×(1+mov)` em
+  vez de série cumulativa) e quase "consertei" código que estava certo.
+- **Meu teste de monotonia aprovava `[1,1,9,1,1]`** — um pico isolado no meio, que é
+  justamente o que o acaso produz.
+- **Um laço passava do fim do vetor** com defasagem negativa; teria derrubado o teste 2
+  no navegador.
+- Em todos os casos, quem pegou foi **executar o teste**, não reler o código.
+
+---
+
+*Registrado em 19/08/2026, com o `m11-2026-08-18` congelado e a série em 4 janelas de 777.
+Atualizado no mesmo dia com as rodadas 5 a 8.*

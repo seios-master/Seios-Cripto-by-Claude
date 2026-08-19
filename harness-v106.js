@@ -83,23 +83,34 @@ t("no estado padrão, bookImbalance nasce como SENSOR", ()=>{
      "excludeFromScore do book:");
 });
 
-t("indicadoresVotantes exclui o book e mantém os outros quatro", ()=>{
+t("indicadoresVotantes exclui o book e não derruba os demais junto", ()=>{
+  /* v117 — este teste dizia "e mantém os outros QUATRO", incluindo o momentum.
+     Era fato datado: o momentum virou sensor no m12 por razão própria e
+     documentada (direção não verificada). O invariante da v106 é sobre o
+     BOOK — que ele saia e que a demoção dele não arraste ninguém. Quem
+     protege o momentum é o harness-v117, onde a decisão foi tomada. */
   ctx.S = API.defaultState();
   const v = API.indicadoresVotantes("tecnico");
   if(v.indexOf("bookImbalance") !== -1) throw new Error("o book continua votando");
-  ["tendencia","momentum","rsi","mediaMovel"].forEach(function(k){
-    if(v.indexOf(k) === -1) throw new Error("a demoção derrubou junto: " + k);
+  ["tendencia","rsi","mediaMovel"].forEach(function(k){
+    if(v.indexOf(k) === -1) throw new Error("a demoção do book derrubou junto: " + k);
   });
-  eq(v.length, 4, "votantes do Técnico:");
+  if(v.length < 3) throw new Error("sobraram só " + v.length + " votantes no Técnico");
 });
 
 t("o motor Técnico NÃO foi compensado por baixo do pano", ()=>{
   /* o peso nominal do motor é decisão declarada; a demoção redistribui
-     entre os 4 que sobram, e é só isso que pode mudar. */
+     entre os que sobram, e é só isso que pode mudar. O NÚMERO de sobreviventes
+     é fato datado — o invariante é o peso do motor não se mexer. */
   const S = API.defaultState();
   perto(S.motors.tecnico.weight, 0.04, "peso nominal do Técnico:");
   ctx.S = S;
-  perto(S.motors.tecnico.weight / API.indicadoresVotantes("tecnico").length, 0.01,
+  /* v117 — o número 0,01 vinha de 0,04÷4 e era fato datado. O invariante é
+     que o peso do MOTOR não muda quando um indicador é rebaixado: o valor por
+     votante sobe porque há menos votantes, e isso é a média funcionando, não
+     compensação escondida. */
+  const votantes = API.indicadoresVotantes("tecnico").length;
+  perto(S.motors.tecnico.weight / votantes, 0.04 / votantes,
         "peso por indicador votante:");
 });
 

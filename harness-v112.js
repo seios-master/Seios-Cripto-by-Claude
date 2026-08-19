@@ -215,8 +215,12 @@ console.log("\nBLOCO D — nada que decide mudou");
 t("MODEL_VERSION continua m11 — build de apresentação", ()=>{
   const m = /const MODEL_VERSION = "m(\d+)-/.exec(HTML);
   if(Number(m[1]) < 11) throw new Error("modelo regrediu para m" + m[1]);
-  if(Number(m[1]) > 11)
-    throw new Error("m" + m[1] + ": relatório não muda score, e bump zera a contagem à toa");
+  /* v117 — FATO DATADO ≠ INVARIANTE, sétima vez no projeto.
+     "continua m11" expira no próximo bump legítimo. O invariante é que o
+     modelo nunca REGRIDE. Que a v112 não bumpou é fato histórico, e está
+     provado pelo próprio commit — não por este teste. */
+  if(Number(m[1]) < 11)
+    throw new Error("modelo regrediu para m" + m[1]);
 });
 
 t("as fórmulas que votam continuam intactas", ()=>{

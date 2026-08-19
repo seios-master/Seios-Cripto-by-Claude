@@ -198,7 +198,8 @@ t("a cópia não escreve estado nenhum", ()=>{
 
 t("MODEL_VERSION continua m11", ()=>{
   const m = /const MODEL_VERSION = "m(\d+)-/.exec(HTML);
-  if(Number(m[1]) !== 11) throw new Error("modelo mudou para m" + m[1] + " numa build de botão");
+  /* v117 — fato datado vira invariante: o modelo nunca regride. */
+  if(Number(m[1]) < 11) throw new Error("modelo regrediu para m" + m[1]);
 });
 
 t("o BUILD mudou", ()=>{

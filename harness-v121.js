@@ -138,7 +138,14 @@ console.log("\nBLOCO B — cada indicador em exatamente uma camada");
 t("as três camadas existem com os tamanhos do desenho", ()=>{
   eq(API.CAMADAS.length, 3, "camadas:");
   const porId = {}; API.CAMADAS.forEach(function(c){ porId[c.id] = c; });
-  eq(porId.agora.indicadores.length, 7, "AGORA:");
+  /* v124 — o AGORA cresceu com o CVD. O invariante não é o número: é que a
+     camada contenha os indicadores de cadência instantânea. */
+  if(porId.agora.indicadores.length < 7) throw new Error("AGORA encolheu: " + porId.agora.indicadores.length);
+  ["tecnico.momentum","tecnico.bookImbalance","derivativos.takerRatio",
+   "derivativos.longShort","derivativos.funding","derivativos.openInterest",
+   "derivativos.putCall"].forEach(function(id){
+    if(porId.agora.indicadores.indexOf(id) === -1) throw new Error("sumiu do AGORA: " + id);
+  });
   eq(porId.semana.indicadores.length, 7, "A SEMANA:");   // + volumeSpike (é GDELT)
   eq(porId.terreno.indicadores.length, 14, "O TERRENO:");
 });
@@ -202,8 +209,10 @@ console.log("\nBLOCO C — O CASO REAL de 19/08 12:44");
 t("AGORA: sete medidos, e a maioria aponta alta", ()=>{
   carregar();
   const r = API.lerCamada("agora");
+  /* o CVD não tem valor neste fixture (a leitura de 12:44 é anterior a ele),
+     então entra como sem_dado e sai da conta — que é o comportamento certo. */
   eq(r.medidos, 7, "medidos:");
-  eq(r.total, 7, "total:");
+  if(r.total < 7) throw new Error("total do AGORA: " + r.total);
   eq(r.alta, 5, "apontando alta:");    // momentum, book, taker, OI, putCall
   /* CORRIGIDO ao ver o dado: funding (−10) e long/short (−11,3) ficam ENTRE
      −15 e 0 — são NEUTROS, não baixa. A faixa de ±15 é larga de propósito. */
@@ -243,7 +252,11 @@ t("quatro dos sete do AGORA são sensores — a explicação da surdez", ()=>{
     const p = id.split(".");
     return S.motors[p[0]].indicators[p[1]].excludeFromScore;
   });
-  eq(fora.length, 4, "indicadores do AGORA que não votam no score:");
+  /* v124 — eram quatro; com o CVD são cinco. O achado não é o número, é que
+     a MAIORIA da camada que lê o instante está fora do score. */
+  if(fora.length < 4) throw new Error("só " + fora.length + " fora do score");
+  if(!(fora.length > agora.indicadores.length / 2))
+    throw new Error("a maioria do AGORA passou a votar — o achado mudou de natureza");
 });
 
 console.log("\nBLOCO D — proporção e força podem discordar, e as duas aparecem");

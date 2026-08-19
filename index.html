@@ -1179,7 +1179,7 @@ const STORAGE_KEY = "seios_btc_v2";
 // fonte única da versão — usada no rodapé, no histórico e nos exports.
 // Muda toda vez que a fórmula de score/pesos muda, pra nunca misturar
 // decisões de regras diferentes como se fossem comparáveis.
-const BUILD_VERSION = "2026-08-19.123-serie-camadas";
+const BUILD_VERSION = "2026-08-19.124-cvd";
 /* v78: versão do MODELO separada da versão do BUILD. Mudança visual não é
    mudança de semântica: só sobe quando peso, fórmula, corte ou trava mudam.
    Toda observação gravada carrega as duas, pra que seis meses depois dê pra
@@ -1255,6 +1255,18 @@ function defaultState(){
         funding:   ind("Funding rate", "auto"),
         openInterest: ind("Open Interest × preço × funding (posicionamento)", "auto"),
         putCall:   ind("Put/Call ratio (Deribit)", "auto"),
+        /* v124 — CVD: EXECUÇÃO ACUMULADA, não razão instantânea.
+           O `takerRatio` mede a razão comprador/vendedor agressor de UMA janela
+           de 1h — foi rebaixado na v111 por isso. O CVD é o mesmo dado SOMADO:
+           quanto entrou comprando a mercado menos quanto saiu vendendo, em 24h.
+           Uma razão diz "agora está comprador"; o acumulado diz "nas últimas
+           24h entraram X milhões líquidos".
+           Nasce SENSOR: em 18/08 medimos que a agressão horária não antecede o
+           retorno da hora seguinte (r ≈ 0,027 em 8.998 obs, descartado), e o CVD
+           é da mesma família. Entra para DESCREVER a camada AGORA.
+           Aparece como PROPORÇÃO — líquido ÷ volume, em [-100,+100] — porque o
+           valor em dólares não é comparável entre regimes de volume. */
+        cvd24h:    ind("CVD 24h — compra líquida a mercado · sensor, não pontua", "auto", "", true),
         /* v111 — MICROESTRUTURA DE 1h VIRA SENSOR, como o book imbalance na v106.
            Os dois vêm de janela de 1h da Binance e são lidos por um sistema que
            coleta de 8 em 8 horas. MEDIDO nesta sessão, no mesmo dia:
@@ -3769,6 +3781,7 @@ async function refreshMarketData(){
   // atrasar nem quebrar o que decide
   try{ await coletarSensoresExploratorios(); }catch(e){ logFinal("sensores exploratórios: " + e.message); }
   await coletarVelasCamadas();   // v122 — velas dos três relógios
+  await coletarCVD();            // v124 — execução acumulada, sensor
 
   gravarObservacoesDaRodada()
     .then(function(n){ if(n) logFinal(`📈 ${n} observações point-in-time gravadas`); })
@@ -4479,6 +4492,23 @@ function registrarObservacao(motorKey, indKey, score, meta){
 /* v122 — velas para os três relógios da leitura por cadência. Duas chamadas
    por rodada, na mesma fonte que o sistema já usa. Se falhar, a rodada NÃO
    cai: o gráfico é opcional e o painel funciona sem ele. */
+/* v124 — 24 velas de 1h fechadas. Se falhar, a rodada não cai. */
+async function coletarCVD(){
+  try{
+    const r = await smartFetch("https://api.binance.com/api/v3/klines?symbol=BTCUSDT&interval=1h&limit=25");
+    if(!r.ok) throw new Error("Binance " + r.status);
+    const k = await r.json();
+    k.pop();                                   /* hora em formação fora */
+    const cvd = cvdDeVelas(k);
+    if(cvd.proporcao === null) throw new Error("sem volume");
+    const mi = Math.round(cvd.liquido / 1e6);
+    setAuto("derivativos", "cvd24h", clamp(cvd.proporcao, -100, 100),
+      "CVD 24h: " + (mi >= 0 ? "+" : "") + mi + "M líquidos a mercado (" +
+      cvd.proporcao.toFixed(1) + "% do volume) — sensor, não pontua",
+      { bruto: cvd.liquido });
+  }catch(e){ /* silencioso: sensor não pode derrubar coleta */ }
+}
+
 async function coletarVelasCamadas(){
   try{
     const [r1, r2] = await Promise.all([
@@ -5978,7 +6008,8 @@ const CAMADAS = [
       "derivativos.longShort",   // posicionamento de 1h
       "derivativos.funding",     // a cada 8h
       "derivativos.openInterest",// contínuo
-      "derivativos.putCall"      // Deribit, contínuo
+      "derivativos.putCall",     // Deribit, contínuo
+      "derivativos.cvd24h"       // v124 — execução acumulada de 24h
     ] },
   { id:"semana", nome:"A SEMANA", janela: "7d",
     desc:"o que se formou nos últimos dias — fonte fecha uma vez por dia",
@@ -6040,6 +6071,29 @@ function miniGrafico(precos, largura, altura){
   }).join(" ");
   return { d:d, variacao: ((bons[bons.length-1] / bons[0]) - 1) * 100,
            subiu: bons[bons.length-1] >= bons[0] };
+}
+
+/* v124 — CVD a partir das velas: cada vela da Binance traz o volume comprador
+   agressor separado do total, então isto é RECONSTRUÍVEL e não depende de o app
+   estar aberto.
+   Foi por isso que o CVD entra e as LIQUIDAÇÕES não: a Binance só publica
+   liquidação por WebSocket ao vivo, sem endpoint histórico. Um app aberto três
+   vezes ao dia capturaria segundos de fluxo e perderia o resto — um número pior
+   que nenhum, porque pareceria uma medida. Existe fonte paga com histórico; se
+   um dia entrar, entra por lá. */
+function cvdDeVelas(velas){
+  if(!Array.isArray(velas) || !velas.length)
+    return { proporcao:null, liquido:0, volume:0, velas:0 };
+  let liquido = 0, volume = 0, n = 0;
+  velas.forEach(function(k){
+    const qv = Number(k && k[7]), tbq = Number(k && k[10]);
+    if(!Number.isFinite(qv) || !Number.isFinite(tbq) || qv < 0) return;
+    liquido += (2 * tbq - qv);   /* comprado a mercado − vendido a mercado */
+    volume  += qv;
+    n++;
+  });
+  if(!n || volume <= 0) return { proporcao:null, liquido:liquido, volume:volume, velas:n };
+  return { proporcao:(liquido / volume) * 100, liquido:liquido, volume:volume, velas:n };
 }
 
 function classificarValor(v){

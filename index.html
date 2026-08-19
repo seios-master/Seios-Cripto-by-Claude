@@ -1179,7 +1179,7 @@ const STORAGE_KEY = "seios_btc_v2";
 // fonte única da versão — usada no rodapé, no histórico e nos exports.
 // Muda toda vez que a fórmula de score/pesos muda, pra nunca misturar
 // decisões de regras diferentes como se fossem comparáveis.
-const BUILD_VERSION = "2026-08-19.121-camadas";
+const BUILD_VERSION = "2026-08-19.122-relogios";
 /* v78: versão do MODELO separada da versão do BUILD. Mudança visual não é
    mudança de semântica: só sobe quando peso, fórmula, corte ou trava mudam.
    Toda observação gravada carrega as duas, pra que seis meses depois dê pra
@@ -3768,6 +3768,7 @@ async function refreshMarketData(){
   // v82: sensores exploratórios entram depois de tudo — não votam e não podem
   // atrasar nem quebrar o que decide
   try{ await coletarSensoresExploratorios(); }catch(e){ logFinal("sensores exploratórios: " + e.message); }
+  await coletarVelasCamadas();   // v122 — velas dos três relógios
 
   gravarObservacoesDaRodada()
     .then(function(n){ if(n) logFinal(`📈 ${n} observações point-in-time gravadas`); })
@@ -4475,6 +4476,27 @@ function registrarObservacao(motorKey, indKey, score, meta){
    Cada sensor é isolado: falha de um não derruba os outros nem a rodada.
    Nenhum deles toca em S.motors, então é impossível mexerem no score.
    O que eles fazem é uma coisa só: gravar, com carimbo temporal correto. */
+/* v122 — velas para os três relógios da leitura por cadência. Duas chamadas
+   por rodada, na mesma fonte que o sistema já usa. Se falhar, a rodada NÃO
+   cai: o gráfico é opcional e o painel funciona sem ele. */
+async function coletarVelasCamadas(){
+  try{
+    const [r1, r2] = await Promise.all([
+      smartFetch("https://api.binance.com/api/v3/klines?symbol=BTCUSDT&interval=1h&limit=25"),
+      smartFetch("https://api.binance.com/api/v3/klines?symbol=BTCUSDT&interval=1d&limit=31")
+    ]);
+    if(!r1.ok || !r2.ok) throw new Error("Binance recusou");
+    const h1 = await r1.json(), d1 = await r2.json();
+    h1.pop(); d1.pop();   /* vela em formação fora — regra da v110 */
+    S.market.velasCamadas = {
+      h1:  h1.map(function(k){ return Number(k[4]); }),
+      d7:  d1.slice(-7).map(function(k){ return Number(k[4]); }),
+      d30: d1.map(function(k){ return Number(k[4]); }),
+      em: Date.now()
+    };
+  }catch(e){ /* silencioso: exibição não pode derrubar coleta */ }
+}
+
 async function coletarSensoresExploratorios(){
   const gravados = [];
 
@@ -4878,6 +4900,25 @@ function relatorioTexto(snap, snaps){
     L.push("  53 minutos depois — 138 pontos de score num indicador de 90 dias.");
     L.push("");
   }
+
+  /* v122 — a leitura por cadência vai junto, para a evolução dela poder ser
+     acompanhada sem depender de captura de tela. */
+  try{
+    L.push("LEITURA POR CADÊNCIA");
+    leituraPorCadencia().forEach(function(r){
+      L.push("  " + r.nome + " (" + (r.janela || "") + "): " + r.rotulo +
+             " · " + r.pctAlta.toFixed(0) + "% alta · " + r.pctBaixa.toFixed(0) + "% baixa · " +
+             r.pctNeutro.toFixed(0) + "% neutro · forca " +
+             (r.forca === null ? "—" : (r.forca > 0 ? "+" : "") + r.forca.toFixed(1)) +
+             " · " + r.medidos + " de " + r.total + " medidos");
+      const its = r.itens.filter(function(x){ return classificarValor(x.valor) !== "sem_dado"; })
+        .sort(function(a,b){ return Math.abs(b.valor) - Math.abs(a.valor); })
+        .map(function(x){ return String(x.label).split(" (")[0] + " " +
+                                 (x.valor > 0 ? "+" : "") + x.valor.toFixed(0); });
+      L.push("    " + its.join(" · "));
+    });
+    L.push("");
+  }catch(eLC){ L.push("LEITURA POR CADÊNCIA: indisponível"); L.push(""); }
 
   if(snap.falhas && snap.falhas.length){
     L.push("FALHAS NESTA RODADA (" + snap.falhas.length + ")");
@@ -5912,7 +5953,7 @@ function blocoForaDoScore(){
      CryptoQuant e nunca preenche na prática. Se um dia preencher, entra no
      TERRENO (janela de 90 dias) e o teste da bateria vai cobrar. */
 const CAMADAS = [
-  { id:"agora", nome:"AGORA",
+  { id:"agora", nome:"AGORA", janela: "1h",
     desc:"o que está acontecendo neste instante — fonte muda a cada minuto ou hora",
     indicadores:[
       "tecnico.momentum",        // tick a tick
@@ -5923,7 +5964,7 @@ const CAMADAS = [
       "derivativos.openInterest",// contínuo
       "derivativos.putCall"      // Deribit, contínuo
     ] },
-  { id:"semana", nome:"A SEMANA",
+  { id:"semana", nome:"A SEMANA", janela: "7d",
     desc:"o que se formou nos últimos dias — fonte fecha uma vez por dia",
     indicadores:[
       "tecnico.rsi",                    // RSI-14 de fechamentos diários
@@ -5934,7 +5975,7 @@ const CAMADAS = [
       "geopolitico.gdelt",              // baldes de 15 min, ruidoso
       "eventos.volumeSpike"             // GDELT também — mesma fonte, mesma cadência
     ] },
-  { id:"terreno", nome:"O TERRENO",
+  { id:"terreno", nome:"O TERRENO", janela: "30d",
     desc:"em que ambiente isso acontece — muda em semanas ou meses",
     indicadores:[
       "onchain.mvrv","onchain.activeAddresses","onchain.hashrate",
@@ -5949,6 +5990,42 @@ const CAMADAS = [
 /* mesma faixa que o sistema já usa há muitas builds — sem corte inventado.
    Sem dado é FORA DA CONTA, não neutro: tratar ausência como neutro diluiria
    a proporção com silêncio. */
+/* v122 — TRÊS ELEMENTOS POR CAMADA: seta, barra de proporção e o preço no
+   relógio da própria camada. O gráfico é o mais útil e o mais perigoso:
+   ao lado de um rótulo, convida a ler "esta camada previu isto". Ele é
+   rotulado como CONTEXTO, e o painel repete que nada aqui antecede o preço —
+   as relações medidas em 18–19/08 têm pico em defasagem ZERO. */
+function setaDoRotulo(rotulo){
+  const M = { "ALTA":"↑", "ALTA PARCIAL":"↗", "DIVIDIDO":"↔",
+              "BAIXA PARCIAL":"↘", "BAIXA":"↓", "PARADO":"⊙" };
+  return M[rotulo] || "·";
+}
+
+/* usa os MEDIDOS, nunca o total declarado: com o total, a ausência viraria um
+   pedaço cinza que parece neutro — a confusão que a camada existe para evitar. */
+function barraProporcao(alta, baixa, neutro){
+  const n = (alta||0) + (baixa||0) + (neutro||0);
+  if(!n) return { pctAlta:0, pctBaixa:0, pctNeutro:0, vazia:true };
+  return { pctAlta:(alta/n)*100, pctBaixa:(baixa/n)*100, pctNeutro:(neutro/n)*100, vazia:false };
+}
+
+/* caminho SVG do preço. y é invertido no SVG: preço maior = y menor. */
+function miniGrafico(precos, largura, altura){
+  if(!Array.isArray(precos) || precos.length < 2) return null;
+  const bons = precos.filter(function(p){ return Number.isFinite(Number(p)); }).map(Number);
+  if(bons.length < 2) return null;
+  const min = Math.min.apply(null, bons), max = Math.max.apply(null, bons);
+  const amp = (max - min) || 1;             // preço plano: reta, sem dividir por zero
+  const passo = largura / (bons.length - 1);
+  const d = bons.map(function(p, i){
+    const x = (i * passo).toFixed(1);
+    const y = (altura - ((p - min) / amp) * altura).toFixed(1);
+    return (i === 0 ? "M" : "L") + x + " " + y;
+  }).join(" ");
+  return { d:d, variacao: ((bons[bons.length-1] / bons[0]) - 1) * 100,
+           subiu: bons[bons.length-1] >= bons[0] };
+}
+
 function classificarValor(v){
   if(v === null || v === undefined || !Number.isFinite(Number(v))) return "sem_dado";
   const n = Number(v);
@@ -6016,7 +6093,14 @@ function blocoCadencia(){
   const cor = { ALTA:"var(--teal)", "ALTA PARCIAL":"var(--teal)",
                 BAIXA:"var(--brick)", "BAIXA PARCIAL":"var(--brick)",
                 DIVIDIDO:"var(--gold)", PARADO:"var(--text-faint)", "SEM DADO":"var(--text-faint)" };
+  const velas = (S.market && S.market.velasCamadas) || null;
+  const SERIE = { agora:"h1", semana:"d7", terreno:"d30" };
   const blocos = leituras.map(function(r){
+    /* o gráfico é OPCIONAL: sem velas, o painel funciona igual */
+    const serie = velas ? velas[SERIE[r.id]] : null;
+    const g = miniGrafico(serie, 150, 26);
+    const bar = barraProporcao(r.alta, r.baixa, r.neutro);
+    const seta = setaDoRotulo(r.rotulo);
     const itens = r.itens
       .filter(function(x){ return classificarValor(x.valor) !== "sem_dado"; })
       .sort(function(a,b){ return Math.abs(b.valor) - Math.abs(a.valor); })
@@ -6033,8 +6117,15 @@ function blocoCadencia(){
             <span style="font-family:var(--font-mono);font-size:13px;letter-spacing:.08em;">${esc(r.nome)}</span>
             <span style="font-size:11px;color:var(--text-faint);margin-left:10px;">${esc(r.desc)}</span>
           </div>
-          <div style="font-family:var(--font-mono);font-size:15px;color:${cor[r.rotulo] || "var(--text)"};">
-            ${esc(r.rotulo)}
+          <div style="display:flex;align-items:center;gap:10px;">
+            ${g ? `<svg width="150" height="26" viewBox="0 0 150 26" aria-hidden="true" style="opacity:.85;">
+                     <path d="${g.d}" fill="none" stroke="${g.subiu ? "var(--teal)" : "var(--brick)"}" stroke-width="1.5"/>
+                   </svg>
+                   <span style="font-family:var(--font-mono);font-size:10px;color:var(--text-faint);">${
+                     esc(r.janela || "")} ${g.variacao >= 0 ? "+" : ""}${g.variacao.toFixed(1)}%</span>` : ""}
+            <div style="font-family:var(--font-mono);font-size:15px;color:${cor[r.rotulo] || "var(--text)"};">
+              ${seta} ${esc(r.rotulo)}
+            </div>
           </div>
         </div>
         <div style="font-family:var(--font-mono);font-size:11.5px;color:var(--text-dim);margin:6px 0;">
@@ -6044,6 +6135,11 @@ function blocoCadencia(){
           <span style="color:var(--line);"> | </span>
           <span style="color:var(--text-faint);">${r.medidos} de ${r.total} medidos</span>
         </div>
+        ${bar.vazia ? "" : `<div style="display:flex;height:6px;margin:4px 0 8px;border-radius:3px;overflow:hidden;">
+          <div style="width:${bar.pctAlta}%;background:var(--teal);"></div>
+          <div style="width:${bar.pctNeutro}%;background:var(--line);"></div>
+          <div style="width:${bar.pctBaixa}%;background:var(--brick);"></div>
+        </div>`}
         <div style="font-family:var(--font-mono);font-size:10.5px;line-height:1.9;">${itens}</div>
       </div>`;
   }).join("");
@@ -6062,7 +6158,10 @@ function blocoCadencia(){
       <br>
       <span style="color:var(--text-faint);">Proporção diz quantos concordam; força média diz
       com que convicção. Quando as duas discordam, isso é informação. Indicador sem dado fica
-      fora da conta e a cobertura é declarada. Score, pesos e a série das 777 não são afetados.</span>
+      fora da conta e a cobertura é declarada. Score, pesos e a série das 777 não são afetados.
+      <br>O gráfico ao lado de cada rótulo é <strong>o preço no relógio daquela camada</strong>
+      — 1h, 7 dias, 30 dias. É <strong>contexto</strong>, não afirmação: serve para você ver se
+      o que a camada diz combina com o que aconteceu naquela escala.</span>
     </div>
     ${blocos}`;
 }

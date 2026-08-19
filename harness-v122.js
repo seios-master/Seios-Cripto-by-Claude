@@ -128,9 +128,15 @@ t("a variação do período vem junto, para o texto", ()=>{
 
 console.log("\nBLOCO D — as velas de cada relógio");
 
-t("cada camada declara a própria janela", ()=>{
+t("cada camada declara a própria janela E ela chega em quem lê", ()=>{
+  /* v122.1 — o teste antigo só olhava a CONSTANTE. A janela estava declarada
+     e não era devolvida por lerCamada: o painel lia undefined e o diagnóstico
+     imprimia "AGORA ():". Verificar a declaração não é verificar a entrega. */
+  const f = semComentarios(declDe("lerCamada"));
+  if(!/janela:\s*janela/.test(f))
+    throw new Error("lerCamada não devolve a janela — o consumidor recebe undefined");
   const limpo = semComentarios(HTML);
-  if(!/janela:\s*"1h"/.test(limpo)) throw new Error("AGORA sem janela declarada");
+  if(!/janela:\s*"24h"/.test(limpo)) throw new Error("AGORA sem janela declarada");
   if(!/janela:\s*"7d"/.test(limpo)) throw new Error("SEMANA sem janela declarada");
   if(!/janela:\s*"30d"/.test(limpo)) throw new Error("TERRENO sem janela declarada");
 });

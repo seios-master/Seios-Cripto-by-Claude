@@ -1179,7 +1179,7 @@ const STORAGE_KEY = "seios_btc_v2";
 // fonte única da versão — usada no rodapé, no histórico e nos exports.
 // Muda toda vez que a fórmula de score/pesos muda, pra nunca misturar
 // decisões de regras diferentes como se fossem comparáveis.
-const BUILD_VERSION = "2026-08-19.122-relogios";
+const BUILD_VERSION = "2026-08-19.122.1-janela";
 /* v78: versão do MODELO separada da versão do BUILD. Mudança visual não é
    mudança de semântica: só sobe quando peso, fórmula, corte ou trava mudam.
    Toda observação gravada carrega as duas, pra que seis meses depois dê pra
@@ -5953,7 +5953,7 @@ function blocoForaDoScore(){
      CryptoQuant e nunca preenche na prática. Se um dia preencher, entra no
      TERRENO (janela de 90 dias) e o teste da bateria vai cobrar. */
 const CAMADAS = [
-  { id:"agora", nome:"AGORA", janela: "1h",
+  { id:"agora", nome:"AGORA", janela: "24h",   /* 24 velas de 1h — a extensão do gráfico, não a cadência da fonte */
     desc:"o que está acontecendo neste instante — fonte muda a cada minuto ou hora",
     indicadores:[
       "tecnico.momentum",        // tick a tick
@@ -6036,13 +6036,17 @@ function classificarValor(v){
 
 /* valores: se vier, usa a lista (para teste); senão lê a camada do estado */
 function lerCamada(camadaId, valores){
-  let lista, nome = camadaId, desc = "";
+  /* v122.1 — `janela` faltava aqui, e o painel lia `r.janela` como undefined.
+     Na tela não deu erro (virou string vazia ao lado do gráfico) e no
+     diagnóstico saiu "AGORA ():". Falha silenciosa: o dado não existia e
+     ninguém reclamou. */
+  let lista, nome = camadaId, desc = "", janela = "";
   if(Array.isArray(valores)){
     lista = valores.map(function(v, i){ return { id:"teste."+i, label:"teste "+i, valor:v }; });
   }else{
     const c = CAMADAS.filter(function(x){ return x.id === camadaId; })[0];
     if(!c) return null;
-    nome = c.nome; desc = c.desc;
+    nome = c.nome; desc = c.desc; janela = c.janela || "";
     lista = c.indicadores.map(function(id){
       const p = id.split(".");
       const motor = S.motors[p[0]], ind = motor && motor.indicators[p[1]];
@@ -6077,7 +6081,7 @@ function lerCamada(camadaId, valores){
   else if(baixa > alta)                        rotulo = "BAIXA PARCIAL";
   else                                         rotulo = "PARADO";
 
-  return { id:camadaId, nome:nome, desc:desc, total:lista.length, medidos:medidos.length,
+  return { id:camadaId, nome:nome, desc:desc, janela:janela, total:lista.length, medidos:medidos.length,
            alta:alta, baixa:baixa, neutro:neutro,
            pctAlta:pct(alta), pctBaixa:pct(baixa), pctNeutro:pct(neutro),
            forca:forca, rotulo:rotulo, itens:lista };
@@ -6121,7 +6125,8 @@ function blocoCadencia(){
             ${g ? `<svg width="150" height="26" viewBox="0 0 150 26" aria-hidden="true" style="opacity:.85;">
                      <path d="${g.d}" fill="none" stroke="${g.subiu ? "var(--teal)" : "var(--brick)"}" stroke-width="1.5"/>
                    </svg>
-                   <span style="font-family:var(--font-mono);font-size:10px;color:var(--text-faint);">${
+                   <span style="font-family:var(--font-mono);font-size:10px;color:var(--text-faint);"
+                     title="preço do BTC nesta janela — contexto, não o que a camada afirma">preço ${
                      esc(r.janela || "")} ${g.variacao >= 0 ? "+" : ""}${g.variacao.toFixed(1)}%</span>` : ""}
             <div style="font-family:var(--font-mono);font-size:15px;color:${cor[r.rotulo] || "var(--text)"};">
               ${seta} ${esc(r.rotulo)}

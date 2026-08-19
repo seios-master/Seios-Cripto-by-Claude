@@ -1,0 +1,466 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<title>SEIOS — BTC contra tudo</title>
+<style>
+  :root{
+    --bg:#000; --bg-alt:#050B07; --panel:#040A06; --line:#1F5B34; --line-soft:#123321;
+    --text:#33FF6E; --text-dim:#7FCC9A; --text-faint:#478A60;
+    --brick:#FF4444; --gold:#FFC53D; --teal:#33FF6E;
+    --mono:ui-monospace,"SF Mono",Menlo,monospace;
+  }
+  *{box-sizing:border-box;}
+  body{margin:0;background:var(--bg);color:var(--text);font-family:var(--mono);
+       font-size:13px;line-height:1.6;padding:0 0 60px;}
+  .wrap{max-width:1180px;margin:0 auto;padding:0 18px;}
+  header{border-bottom:1px solid var(--line);padding:22px 0;background:var(--bg-alt);}
+  h1{font-size:21px;margin:6px 0;}
+  .sub{color:var(--text-dim);font-size:12px;}
+  .regra{border:1px solid var(--teal);background:#33FF6E10;padding:16px 18px;margin:18px 0;
+         font-size:12.5px;color:var(--text-dim);}
+  .regra b{color:var(--teal);}
+  .aviso{border:1px solid var(--gold);background:#FFC53D14;padding:14px 16px;margin:18px 0;
+         color:var(--text-dim);font-size:12.5px;}
+  .aviso b{color:var(--gold);}
+  button{font-family:var(--mono);font-size:13px;padding:12px 18px;margin:16px 0;
+         background:var(--teal);color:#000;border:1px solid var(--teal);cursor:pointer;}
+  button.ghost{background:transparent;color:var(--text-dim);border-color:var(--line);}
+  button:disabled{opacity:.5;cursor:default;}
+  #log{border:1px solid var(--line-soft);background:var(--panel);padding:12px;min-height:50px;
+       font-size:11.5px;color:var(--text-dim);white-space:pre-wrap;max-height:280px;overflow-y:auto;}
+  table{width:100%;border-collapse:collapse;font-size:11px;margin:8px 0 18px;}
+  th{text-align:left;color:var(--text-faint);font-weight:400;padding:6px 7px;
+     border-bottom:1px solid var(--line);text-transform:uppercase;font-size:9.5px;}
+  td{padding:5px 7px;border-bottom:1px solid var(--line-soft);}
+  td.n{text-align:right;}
+  .sim{color:var(--teal);} .nao{color:var(--text-faint);} .alerta{color:var(--brick);}
+  .ouro{color:var(--gold);}
+  h2{font-size:15px;margin:28px 0 6px;}
+  h3{font-size:13px;margin:22px 0 2px;}
+  p.explica{color:var(--text-dim);font-size:12.5px;margin:6px 0 12px;}
+  #saida{display:none;}
+  #veredito{border:1px solid var(--line);padding:18px;margin:18px 0;font-size:13.5px;}
+  textarea{width:100%;height:360px;background:var(--panel);color:var(--text-dim);
+           border:1px solid var(--line-soft);font-family:var(--mono);font-size:11px;padding:10px;}
+</style>
+</head>
+<body>
+<header><div class="wrap">
+  <div class="sub">SEIOS · laboratório isolado — não é o sistema, não grava nada</div>
+  <h1>BTC contra tudo que o sistema coleta</h1>
+  <div class="sub">todas as variáveis, votem ou não · por faixa de valor · sem pesos, sem motores, sem score</div>
+</div></header>
+
+<div class="wrap">
+
+  <div class="aviso">
+    <b>Duas perguntas separadas, e a diferença entre elas é tudo:</b><br><br>
+    <b>ANDA JUNTO</b> — quando o dólar subiu, o BTC caiu <u>no mesmo período</u>? É descrição
+    de regime. Útil para entender o mercado, <b>inútil para decidir</b>: quando você sabe que
+    o dólar subiu, o BTC já se moveu.<br><br>
+    <b>ANTECEDE</b> — com a variável nesta faixa <u>hoje</u>, o que o BTC fez nos 7 e 30 dias
+    <u>seguintes</u>? Só isto é previsão.<br><br>
+    Espere números grandes na primeira coluna e quase nada na segunda. Se for isso, é a
+    resposta mais útil: o sistema descreve bem e prevê pouco — e são coisas diferentes.
+  </div>
+
+  <div class="regra">
+    <b>REGRA DECLARADA ANTES DE MEDIR — 19/08/2026</b><br><br>
+    Cinco faixas por variável, cortadas pelo <b>estudo</b> (até 31/12/2023) e aplicadas à
+    <b>reserva</b> (2024+) sem recalcular — recalcular seria trocar a régua no meio.<br><br>
+    <b>Um padrão só conta com as três condições:</b> (a) diferença entre o quinto alto e o
+    baixo com <b>|t| ≥ 2,576 já corrigido pela sobreposição</b> de 30 dias; (b) <b>mesma
+    direção</b> na reserva; (c) <b>monotonia</b> — os extremos têm que ser os extremos, e o
+    caminho não pode serrilhar. Pico isolado no meio é o que o acaso produz.<br><br>
+    <b>Sem terceira tentativa:</b> não se muda o número de faixas nem o horizonte depois de
+    ver o resultado.
+  </div>
+
+  <button id="btn">▶ Rodar tudo</button>
+  <div id="log">pronto.</div>
+
+  <div id="saida">
+    <div id="veredito"></div>
+    <h2>1 · Resumo — anda junto vs. antecede</h2>
+    <div id="resumo"></div>
+    <h2>2 · Cada variável, faixa por faixa</h2>
+    <div id="faixas"></div>
+    <h2>Copiar para o Claude</h2>
+    <button class="ghost" id="btnCopiar">⧉ Copiar resultado</button>
+    <textarea id="texto" readonly></textarea>
+  </div>
+</div>
+
+<script>
+const log=function(m){ const el=document.getElementById("log");
+  el.textContent+=(el.textContent?"\n":"")+m; el.scrollTop=el.scrollHeight; };
+const dorme=function(ms){ return new Promise(function(s){ setTimeout(s,ms); }); };
+const DIA=86400000;
+function ymd(ts){ return new Date(ts).toISOString().slice(0,10); }
+function media(a){ return a.length?a.reduce(function(x,y){return x+y;},0)/a.length:null; }
+function dp(a){ if(a.length<2) return null; const m=media(a);
+  return Math.sqrt(a.reduce(function(s,x){return s+(x-m)*(x-m);},0)/(a.length-1)); }
+function correlacao(x,y){
+  const mx=media(x),my=media(y); let n=0,dx=0,dy=0;
+  for(let i=0;i<x.length;i++){ const a=x[i]-mx,b=y[i]-my; n+=a*b; dx+=a*a; dy+=b*b; }
+  return (dx===0||dy===0)?0:n/Math.sqrt(dx*dy);
+}
+function f(x,d){ return (x===null||x===undefined||!Number.isFinite(x))?"—":x.toFixed(d); }
+function cortes(vals){
+  const o=vals.slice().sort(function(a,b){return a-b;});
+  return [0.2,0.4,0.6,0.8].map(function(p){ return o[Math.floor(p*(o.length-1))]; });
+}
+function faixaDe(v,cs){ for(let i=0;i<cs.length;i++) if(v<=cs[i]) return i; return cs.length; }
+function difExtremos(g,sobre){
+  const alto=g[4], baixo=g[0];
+  if(!alto||!baixo||alto.length<20||baixo.length<20) return null;
+  const d=media(alto)-media(baixo);
+  const se=Math.sqrt(Math.pow(dp(alto),2)/alto.length+Math.pow(dp(baixo),2)/baixo.length);
+  const t=se?d/se:0;
+  return { dif:d, t:t, tEf:t/Math.sqrt(sobre) };
+}
+function monotona(medias){
+  const b=medias.filter(function(m){ return m!==null; });
+  if(b.length<5) return false;
+  const menor=Math.min.apply(null,b), maior=Math.max.apply(null,b);
+  if(!((b[0]===menor&&b[4]===maior)||(b[0]===maior&&b[4]===menor))) return false;
+  const subindo=b[4]>b[0]; let voltas=0;
+  for(let i=1;i<b.length;i++) if(subindo?(b[i]<b[i-1]):(b[i]>b[i-1])) voltas++;
+  return voltas<=1;
+}
+
+/* ================= coleta ================= */
+async function klines(par){
+  const todas=[]; let fim=Date.now();
+  for(let i=0;i<12;i++){
+    const r=await fetch("https://api.binance.com/api/v3/klines?symbol="+par+"&interval=1d&limit=1000&endTime="+fim);
+    if(!r.ok) throw new Error(par+" "+r.status);
+    const d=await r.json(); if(!d.length) break;
+    todas.unshift.apply(todas,d); fim=d[0][0]-1;
+    if(d.length<1000) break; await dorme(280);
+  }
+  todas.pop();
+  log("  "+par+": "+todas.length+" dias");
+  return todas;
+}
+async function fred(s){
+  try{
+    const r=await fetch("/api/fred?series_id="+s+"&sort_order=asc&limit=100000");
+    if(!r.ok) throw new Error(r.status);
+    const d=await r.json(); const m={};
+    (d.observations||[]).forEach(function(o){ if(o.value!==".") m[o.date]=Number(o.value); });
+    log("  "+s+": "+Object.keys(m).length); return m;
+  }catch(e){ log("  ✗ "+s+" ("+e.message+")"); return null; }
+}
+/* CoinMetrics: uma métrica por vez. Na tentativa anterior, pedir três de uma vez
+   devolveu vazio sem erro — se uma não estiver no plano público, o lote inteiro morre. */
+async function cmMetrica(metrica){
+  try{
+    let url="https://community-api.coinmetrics.io/v4/timeseries/asset-metrics?assets=btc&metrics="+
+            metrica+"&frequency=1d&page_size=10000&start_time=2017-01-01";
+    const out={}; let voltas=0;
+    while(url&&voltas<8){
+      const r=await fetch(url);
+      if(!r.ok) throw new Error("HTTP "+r.status);
+      const d=await r.json();
+      if(d.error) throw new Error(JSON.stringify(d.error).slice(0,80));
+      (d.data||[]).forEach(function(o){
+        const v=Number(o[metrica]);
+        if(Number.isFinite(v)) out[String(o.time).slice(0,10)]=v;
+      });
+      url=d.next_page_url||null; voltas++; await dorme(250);
+    }
+    log("  CM "+metrica+": "+Object.keys(out).length+" dias");
+    return Object.keys(out).length?out:null;
+  }catch(e){ log("  ✗ CM "+metrica+" ("+e.message+")"); return null; }
+}
+async function hashrate(){
+  for(const caminho of ["all","3y"]){
+    try{
+      const r=await fetch("https://mempool.space/api/v1/mining/hashrate/"+caminho);
+      if(!r.ok) throw new Error(r.status);
+      const d=await r.json(); const m={};
+      (d.hashrates||[]).forEach(function(o){ m[ymd(o.timestamp*1000)]=Number(o.avgHashrate); });
+      if(Object.keys(m).length){ log("  hash rate ("+caminho+"): "+Object.keys(m).length); return m; }
+    }catch(e){}
+  }
+  log("  ✗ hash rate"); return null;
+}
+async function funding(){
+  try{
+    const bruto={}; let ini=Date.UTC(2019,8,1);
+    for(let i=0;i<45;i++){
+      const r=await fetch("https://fapi.binance.com/fapi/v1/fundingRate?symbol=BTCUSDT&limit=1000&startTime="+ini);
+      if(!r.ok) throw new Error(r.status);
+      const d=await r.json(); if(!d.length) break;
+      d.forEach(function(o){ const k=ymd(o.fundingTime); (bruto[k]=bruto[k]||[]).push(Number(o.fundingRate)); });
+      ini=d[d.length-1].fundingTime+1;
+      if(d.length<1000) break; await dorme(180);
+    }
+    const m={}; Object.keys(bruto).forEach(function(k){ m[k]=media(bruto[k]); });
+    log("  funding: "+Object.keys(m).length); return m;
+  }catch(e){ log("  ✗ funding"); return null; }
+}
+async function coinbase(){
+  try{
+    const m={}; let fim=new Date();
+    for(let i=0;i<16;i++){
+      const ini=new Date(fim.getTime()-300*DIA);
+      const r=await fetch("https://api.exchange.coinbase.com/products/BTC-USD/candles?granularity=86400&start="+
+                          ini.toISOString()+"&end="+fim.toISOString());
+      if(!r.ok) break;
+      const d=await r.json(); if(!d.length) break;
+      d.forEach(function(c){ m[ymd(c[0]*1000)]=Number(c[4]); });
+      fim=ini; await dorme(230);
+    }
+    log("  Coinbase: "+Object.keys(m).length); return m;
+  }catch(e){ log("  ✗ Coinbase"); return null; }
+}
+async function stablecoins(){
+  try{
+    const r=await fetch("https://stablecoins.llama.fi/stablecoincharts/all");
+    if(!r.ok) throw new Error(r.status);
+    const d=await r.json(); const m={};
+    d.forEach(function(o){
+      const v=o.totalCirculatingUSD;
+      const t=v&&((v.peggedUSD||0)+(v.peggedEUR||0)+(v.peggedVAR||0));
+      if(t) m[ymd(Number(o.date)*1000)]=t;
+    });
+    log("  stablecoins: "+Object.keys(m).length); return m;
+  }catch(e){ log("  ✗ stablecoins"); return null; }
+}
+async function fearGreed(){
+  try{
+    const r=await fetch("https://api.alternative.me/fng/?limit=0&format=json");
+    const d=await r.json(); const m={};
+    (d.data||[]).forEach(function(o){ m[ymd(Number(o.timestamp)*1000)]=Number(o.value); });
+    log("  Fear & Greed: "+Object.keys(m).length); return m;
+  }catch(e){ log("  ✗ Fear & Greed"); return null; }
+}
+function ultimoAte(m,data){
+  if(!m) return null;
+  if(m[data]!==undefined) return m[data];
+  let d=new Date(data+"T00:00:00Z").getTime();
+  for(let i=0;i<12;i++){ d-=DIA; const k=ymd(d); if(m[k]!==undefined) return m[k]; }
+  return null;
+}
+function variacao(m,data,dias){
+  const a=ultimoAte(m,data), b=ultimoAte(m,ymd(new Date(data+"T00:00:00Z").getTime()-dias*DIA));
+  return (a===null||b===null||!b)?null:((a/b-1)*100);
+}
+function delta(m,data,dias){
+  const a=ultimoAte(m,data), b=ultimoAte(m,ymd(new Date(data+"T00:00:00Z").getTime()-dias*DIA));
+  return (a===null||b===null)?null:(a-b);
+}
+
+const CORTE="2024-01-01";
+
+document.getElementById("btn").addEventListener("click", async function(){
+  const b=this; b.disabled=true; document.getElementById("log").textContent="";
+  try{
+    log("BTC…");     const kl=await klines("BTCUSDT");
+    log("ouro (PAXG)…"); let paxg=null;
+    try{ const p=await klines("PAXGUSDT"); paxg={};
+         p.forEach(function(k){ paxg[ymd(k[0])]=Number(k[4]); }); }catch(e){ log("  ✗ PAXG"); }
+    log("FRED…");
+    const S=["DTWEXBGS","DFF","CPIAUCSL","M2SL","T10Y2Y","DGS10","DFII10","VIXCLS",
+             "DCOILWTICO","SP500","DEXUSEU","PCOPPUSDM","USEPUINDXD","WALCL","RRPONTSYD","WTREGEN"];
+    const F={};
+    for(let i=0;i<S.length;i++){ F[S[i]]=await fred(S[i]); await dorme(160); }
+    log("CoinMetrics…");
+    const mktCap=await cmMetrica("CapMrktCurUSD");
+    const realCap=await cmMetrica("CapRealUSD");
+    const adr=await cmMetrica("AdrActCnt");
+    log("outras fontes…");
+    const HR=await hashrate(), FU=await funding(), CB=await coinbase(),
+          ST=await stablecoins(), FG=await fearGreed();
+
+    /* ---------- montagem ---------- */
+    const dias=kl.map(function(k){
+      return { data:ymd(k[0]), close:Number(k[4]), vol:Number(k[7]) };
+    }).filter(function(d){ return Number.isFinite(d.close)&&d.close>0; });
+    for(let i=0;i<dias.length;i++){
+      if(i+7<dias.length)  dias[i].f7=(dias[i+7].close/dias[i].close-1)*100;
+      if(i+30<dias.length) dias[i].f30=(dias[i+30].close/dias[i].close-1)*100;
+      if(i>=30) dias[i].btc30=(dias[i].close/dias[i-30].close-1)*100;
+      if(i>=30){ let s=0; for(let k2=i-29;k2<=i;k2++) s+=dias[k2].vol;
+                 dias[i].volSpike=(dias[i].vol/(s/30)-1)*100; }
+      if(i>=14){ let g=0,p=0;
+        for(let k2=i-13;k2<=i;k2++){ const x=dias[k2].close-dias[k2-1].close; if(x>0)g+=x; else p-=x; }
+        dias[i].rsi=p===0?100:100-100/(1+(g/14)/(p/14)); }
+      if(i>=50){ let s=0; for(let k2=i-49;k2<=i;k2++) s+=dias[k2].close;
+                 dias[i].mm50=(dias[i].close/(s/50)-1)*100; }
+    }
+    dias.forEach(function(d){
+      d.dxy=ultimoAte(F.DTWEXBGS,d.data);        d.dxy90=variacao(F.DTWEXBGS,d.data,90);
+      d.juros=ultimoAte(F.DFF,d.data);           d.juros90=delta(F.DFF,d.data,90);
+      d.cpi=variacao(F.CPIAUCSL,d.data,365);     d.m2=variacao(F.M2SL,d.data,365);
+      d.curva=ultimoAte(F.T10Y2Y,d.data);        d.dgs10=ultimoAte(F.DGS10,d.data);
+      d.real=ultimoAte(F.DFII10,d.data);         d.real90=delta(F.DFII10,d.data,90);
+      d.vix=ultimoAte(F.VIXCLS,d.data);
+      d.petro=ultimoAte(F.DCOILWTICO,d.data);    d.petro90=variacao(F.DCOILWTICO,d.data,90);
+      d.sp=ultimoAte(F.SP500,d.data);            d.sp90=variacao(F.SP500,d.data,90);
+      d.euro=ultimoAte(F.DEXUSEU,d.data);        d.euro90=variacao(F.DEXUSEU,d.data,90);
+      d.cobre=ultimoAte(F.PCOPPUSDM,d.data);     d.cobre90=variacao(F.PCOPPUSDM,d.data,90);
+      d.epu=ultimoAte(F.USEPUINDXD,d.data);      d.epu90=variacao(F.USEPUINDXD,d.data,90);
+      d.walcl=variacao(F.WALCL,d.data,30);
+      /* liquidez líquida = balanço − conta do Tesouro − recompras reversas */
+      const w=ultimoAte(F.WALCL,d.data), tg=ultimoAte(F.WTREGEN,d.data), rr=ultimoAte(F.RRPONTSYD,d.data);
+      d.liqLiq = (w!==null&&tg!==null&&rr!==null) ? (w-tg*1000-rr*1000) : null;
+      d.ouro   = paxg?ultimoAte(paxg,d.data):null;
+      d.ouro90 = paxg?variacao(paxg,d.data,90):null;
+      d.fg     = FG?ultimoAte(FG,d.data):null;
+      d.stable = ST?ultimoAte(ST,d.data):null;
+      d.stable30=ST?variacao(ST,d.data,30):null;
+      d.stable7= ST?variacao(ST,d.data,7):null;
+      d.hash90 = HR?variacao(HR,d.data,90):null;
+      d.fund   = FU?ultimoAte(FU,d.data):null;
+      const mc=mktCap?ultimoAte(mktCap,d.data):null, rc=realCap?ultimoAte(realCap,d.data):null;
+      d.mvrv   = (mc&&rc)?mc/rc:null;
+      d.adr90  = adr?variacao(adr,d.data,90):null;
+      const cb=CB?ultimoAte(CB,d.data):null;
+      d.premio = (cb&&d.close)?((cb/d.close-1)*100):null;
+    });
+    /* liquidez líquida em variação de 30d */
+    const mapaLiq={}; dias.forEach(function(d){ if(d.liqLiq!==null) mapaLiq[d.data]=d.liqLiq; });
+    dias.forEach(function(d){ d.liqLiq30=variacao(mapaLiq,d.data,30); });
+
+    log("dias: "+dias.length+" ("+dias[0].data+" a "+dias[dias.length-1].data+")");
+
+    const VARS=[
+      {c:"dxy",n:"Dólar amplo (nível)",u:""},{c:"dxy90",n:"Dólar — 90d",u:"%"},
+      {c:"juros",n:"Fed Funds (taxa)",u:"%"},{c:"juros90",n:"Fed Funds — Δ90d",u:"pp"},
+      {c:"cpi",n:"Inflação CPI a/a",u:"%"},{c:"m2",n:"M2 a/a",u:"%"},
+      {c:"curva",n:"Curva 10a−2a",u:"pp"},{c:"dgs10",n:"Treasury 10a",u:"%"},
+      {c:"real",n:"Juro real 10a ⚗",u:"%"},{c:"real90",n:"Juro real — Δ90d ⚗",u:"pp"},
+      {c:"vix",n:"VIX",u:""},
+      {c:"petro",n:"Petróleo WTI (nível)",u:"US$"},{c:"petro90",n:"Petróleo — 90d",u:"%"},
+      {c:"sp",n:"S&P 500 (nível)",u:""},{c:"sp90",n:"S&P 500 — 90d",u:"%"},
+      {c:"euro",n:"Euro/dólar (nível) ⚗",u:""},{c:"euro90",n:"Euro — 90d ⚗",u:"%"},
+      {c:"cobre",n:"Cobre (nível)",u:""},{c:"cobre90",n:"Cobre — 90d",u:"%"},
+      {c:"epu",n:"EPU (nível)",u:""},{c:"epu90",n:"EPU — 90d",u:"%"},
+      {c:"walcl",n:"Balanço do Fed — 30d ⚗",u:"%"},
+      {c:"liqLiq30",n:"Liquidez líquida — 30d ⚗",u:"%"},
+      {c:"ouro",n:"Ouro PAXG (nível) ⚗",u:"US$"},{c:"ouro90",n:"Ouro — 90d ⚗",u:"%"},
+      {c:"fg",n:"Fear & Greed",u:""},
+      {c:"stable",n:"Stablecoins (oferta) ⚗",u:"US$"},
+      {c:"stable30",n:"Stablecoins — 30d ⚗",u:"%"},{c:"stable7",n:"Stablecoins — 7d ⚗",u:"%"},
+      {c:"hash90",n:"Hash rate — 90d",u:"%"},
+      {c:"fund",n:"Funding (taxa 8h)",u:""},
+      {c:"mvrv",n:"MVRV",u:""},{c:"adr90",n:"Endereços ativos — 90d",u:"%"},
+      {c:"premio",n:"Prêmio Coinbase",u:"%"},
+      {c:"rsi",n:"RSI 14d",u:""},{c:"mm50",n:"Preço vs. MM50",u:"%"},
+      {c:"volSpike",n:"Volume vs. média 30d",u:"%"}
+    ];
+
+    const estudo=dias.filter(function(d){ return d.data<CORTE; });
+    const reserva=dias.filter(function(d){ return d.data>=CORTE; });
+    const resumo=[], detalhes=[], aprovados=[], semDado=[];
+
+    VARS.forEach(function(V){
+      const vals=estudo.map(function(d){return d[V.c];}).filter(Number.isFinite);
+      if(vals.length<150){ semDado.push(V.n+" ("+vals.length+" dias)"); return; }
+      const cs=cortes(vals);
+      const pc=estudo.filter(function(d){ return Number.isFinite(d[V.c])&&Number.isFinite(d.btc30); });
+      const rCont=pc.length>100?correlacao(pc.map(function(d){return d[V.c];}),pc.map(function(d){return d.btc30;})):null;
+
+      function grupos(base,campo){
+        const g=[[],[],[],[],[]];
+        base.forEach(function(d){
+          if(!Number.isFinite(d[V.c])||!Number.isFinite(d[campo])) return;
+          g[faixaDe(d[V.c],cs)].push(d[campo]);
+        });
+        return g;
+      }
+      const g30e=grupos(estudo,"f30"), g30r=grupos(reserva,"f30"), g7e=grupos(estudo,"f7");
+      const d30e=difExtremos(g30e,30), d30r=difExtremos(g30r,30);
+      const medias=g30e.map(function(x){ return x.length?media(x):null; });
+      const mono=monotona(medias);
+      const passa=d30e&&d30r&&Math.abs(d30e.tEf)>=2.576&&Math.sign(d30e.dif)===Math.sign(d30r.dif)&&mono;
+      if(passa) aprovados.push(V.n);
+      resumo.push({V:V,rCont:rCont,d30e:d30e,d30r:d30r,mono:mono,passa:passa,cs:cs,g30e:g30e,g30r:g30r,g7e:g7e});
+
+      let h='<h3>'+V.n+(passa?' <span class="sim">— padrão consistente</span>':'')+'</h3>'+
+        '<table><thead><tr><th>Faixa</th><th>Valor da variável</th><th class="n">Dias</th>'+
+        '<th class="n">BTC +30d</th><th class="n">% positivo</th><th class="n">BTC +7d</th>'+
+        '<th class="n">Reserva +30d</th></tr></thead><tbody>';
+      const rot=["1 · mais baixo","2","3 · meio","4","5 · mais alto"];
+      for(let i=0;i<5;i++){
+        const lim=i===0?("≤ "+f(cs[0],2)+V.u):(i===4?("> "+f(cs[3],2)+V.u):(f(cs[i-1],2)+" a "+f(cs[i],2)+V.u));
+        const m30=g30e[i].length?media(g30e[i]):null;
+        const pos=g30e[i].length?(g30e[i].filter(function(x){return x>0;}).length/g30e[i].length*100):null;
+        const m7=g7e[i].length?media(g7e[i]):null;
+        const mr=g30r[i].length?media(g30r[i]):null;
+        h+='<tr><td>'+rot[i]+'</td><td class="nao">'+lim+'</td><td class="n">'+g30e[i].length+'</td>'+
+           '<td class="n '+(m30>0?"sim":"alerta")+'">'+f(m30,2)+'%</td><td class="n">'+f(pos,0)+'%</td>'+
+           '<td class="n">'+f(m7,2)+'%</td><td class="n '+(mr>0?"sim":"alerta")+'">'+f(mr,2)+'%</td></tr>';
+      }
+      h+='</tbody></table><p class="explica">Quinto alto − baixo (30d): <strong>'+
+        (d30e?f(d30e.dif,2)+'pp · t '+f(d30e.t,2)+' · <u>t efetivo '+f(d30e.tEf,2)+'</u>':"—")+
+        '</strong> · reserva: <strong>'+(d30r?f(d30r.dif,2)+'pp':"—")+
+        '</strong> · monotonia: <strong>'+(mono?"sim":"não")+'</strong></p>';
+      detalhes.push(h);
+    });
+
+    resumo.sort(function(a,b){ return Math.abs(b.rCont||0)-Math.abs(a.rCont||0); });
+    let hr='<table><thead><tr><th>Variável</th><th class="n">Anda junto (r)</th>'+
+      '<th class="n">Antecede — dif 30d</th><th class="n">t efetivo</th>'+
+      '<th class="n">Reserva</th><th class="n">Monot.</th><th>Veredito</th></tr></thead><tbody>';
+    resumo.forEach(function(R){
+      hr+='<tr><td>'+R.V.n+'</td><td class="n '+(Math.abs(R.rCont||0)>0.2?"ouro":"")+'">'+f(R.rCont,3)+'</td>'+
+        '<td class="n">'+(R.d30e?f(R.d30e.dif,2)+"pp":"—")+'</td>'+
+        '<td class="n">'+(R.d30e?f(R.d30e.tEf,2):"—")+'</td>'+
+        '<td class="n">'+((R.d30e&&R.d30r)?(Math.sign(R.d30e.dif)===Math.sign(R.d30r.dif)?"mesma":"INVERTE"):"—")+'</td>'+
+        '<td class="n">'+(R.mono?"sim":"não")+'</td>'+
+        '<td class="'+(R.passa?"sim":"nao")+'">'+(R.passa?"PASSA":"não")+'</td></tr>';
+    });
+    document.getElementById("resumo").innerHTML=hr+"</tbody></table>"+
+      (semDado.length?'<p class="explica ouro">Sem histórico suficiente: '+semDado.join(" · ")+'</p>':"");
+    document.getElementById("faixas").innerHTML=detalhes.join("");
+
+    document.getElementById("veredito").innerHTML = aprovados.length
+      ? '<span class="sim"><strong>'+aprovados.length+' com padrão de faixa consistente: '+aprovados.join(", ")+
+        '.</strong></span><br><br>Hipótese, não licença.'
+      : '<span class="alerta"><strong>Nenhuma passou nas três condições.</strong></span>'+
+        '<br><br>Números grandes em "anda junto" continuam sendo descrição de regime, não previsão.';
+
+    const txt=[];
+    txt.push("SEIOS · BTC CONTRA TUDO — faixas");
+    txt.push("medido em "+new Date().toLocaleString("pt-BR"));
+    txt.push("estudo "+estudo.length+" dias · reserva "+reserva.length+" dias · "+resumo.length+" variáveis");
+    if(semDado.length) txt.push("sem histórico: "+semDado.join(" · "));
+    txt.push("");
+    txt.push("=== RESUMO (ordenado por 'anda junto') ===");
+    resumo.forEach(function(R){
+      txt.push("  "+R.V.n+": junto r="+f(R.rCont,3)+
+        " | antecede dif="+(R.d30e?f(R.d30e.dif,2)+"pp t_ef="+f(R.d30e.tEf,2):"—")+
+        " | reserva "+((R.d30e&&R.d30r)?(Math.sign(R.d30e.dif)===Math.sign(R.d30r.dif)?"mesma":"INVERTE"):"—")+
+        " | mono "+(R.mono?"sim":"não")+" | "+(R.passa?"PASSA":"não"));
+    });
+    txt.push("");
+    txt.push("=== FAIXAS — retorno médio do BTC 30d depois (estudo) ===");
+    resumo.forEach(function(R){
+      txt.push("  "+R.V.n+" [cortes "+R.cs.map(function(c){return f(c,2);}).join(" | ")+"]");
+      txt.push("    "+R.g30e.map(function(x,i){ return "q"+(i+1)+"="+(x.length?f(media(x),2)+"%("+x.length+")":"—"); }).join(" · "));
+      txt.push("    reserva: "+R.g30r.map(function(x,i){ return "q"+(i+1)+"="+(x.length?f(media(x),2)+"%("+x.length+")":"—"); }).join(" · "));
+    });
+    txt.push("");
+    txt.push("VEREDITO: "+(aprovados.length?aprovados.join(", "):"nenhuma passou"));
+    document.getElementById("texto").value=txt.join("\n");
+
+    document.getElementById("saida").style.display="block";
+    log("pronto.");
+  }catch(e){ log("FALHOU: "+e.message); }
+  b.disabled=false;
+});
+
+document.getElementById("btnCopiar").addEventListener("click", async function(){
+  const t=document.getElementById("texto");
+  try{ await navigator.clipboard.writeText(t.value); this.textContent="✓ copiado"; }
+  catch(e){ t.focus(); t.select(); this.textContent="selecione o texto e copie"; }
+});
+</script>
+</body>
+</html>

@@ -682,6 +682,10 @@ var PELE_ATUAL = "padrao";
   <!-- Faixa ao vivo: fica FORA do #heroWrap porque renderHero() reescreve o
        innerHTML dele a cada atualização, e isso apagaria o gráfico tick a tick
        no meio do desenho. Aqui ela sobrevive a qualquer render. -->
+  <!-- v121 — leitura em três camadas, na tela principal. Fica FORA do #heroWrap
+       pelo mesmo motivo da faixa ao vivo: renderHero() reescreve aquele bloco. -->
+  <section class="panel" id="painelCadencia" style="margin:18px 0;"></section>
+
   <div class="live-strip" id="liveTickWrap">
     <div class="live-left">
       <span class="live-dot" id="liveStatus">○</span>
@@ -861,6 +865,7 @@ var PELE_ATUAL = "padrao";
         <div class="top-factors" id="allMotorsFactors"></div>
         <h4 style="margin-top:14px;">Rastro de explicação</h4>
         <ul id="decisionReasoning"></ul>
+        <div id="painelForaDoScore"></div>
       </div>
     </div>
   </section>
@@ -1174,7 +1179,7 @@ const STORAGE_KEY = "seios_btc_v2";
 // fonte única da versão — usada no rodapé, no histórico e nos exports.
 // Muda toda vez que a fórmula de score/pesos muda, pra nunca misturar
 // decisões de regras diferentes como se fossem comparáveis.
-const BUILD_VERSION = "2026-08-19.119-calib-sensor";
+const BUILD_VERSION = "2026-08-19.121-camadas";
 /* v78: versão do MODELO separada da versão do BUILD. Mudança visual não é
    mudança de semântica: só sobe quando peso, fórmula, corte ou trava mudam.
    Toda observação gravada carrega as duas, pra que seis meses depois dê pra
@@ -5748,6 +5753,320 @@ function marcaDoIndicadorCalib(id){
   return ind.excludeFromScore ? "◉" : "";
 }
 
+/* =====================================================================
+   v120 — O QUE FICOU DE FORA DO SCORE, COM O NÚMERO DO QUE CUSTARIA
+   =====================================================================
+   Em 19/08 o BTC saiu de ~62k e bateu 68,7k. O score foi de 11,60 para
+   11,89 e o veredito ficou "Neutro · Observar" o dia inteiro. A pergunta
+   "o que estava sinalizando alta e o sistema não enxergou?" é legítima, e a
+   resposta estava espalhada por trinta linhas de diagnóstico.
+
+   A resposta contraria a intuição — inclusive a minha. MEDIDO com o
+   agregador real naquela leitura: se os seis sensores votassem, o score
+   NÃO subiria. Cairia de 11,89 para 10,07. Momentum (+71,51) e book
+   (+44,68) apontavam alta; ouro (−29,23), long/short (−11,32) e euro
+   (−3,16) apontavam o contrário — e o ouro pesa dentro de Ativos Globais,
+   o maior motor do m12.
+
+   Por isso este painel mostra o CONTRAFACTUAL calculado, não uma lista de
+   valores que cada um interpreta como quiser. Ele MOSTRA; não promove
+   ninguém, não recomenda nada, e não muda uma vírgula do score. */
+function sensoresDaLeitura(){
+  const MOTIVOS = {
+    "tecnico.bookImbalance": "instantâneo do livro num relógio de 8h (v106)",
+    "tecnico.momentum":      "direção não verificada: 9 anos sugerem reversão (m12)",
+    "derivativos.longShort":  "janela de 1h num relógio de 8h (v111)",
+    "derivativos.takerRatio": "janela de 1h num relógio de 8h (v111)",
+    "ativosGlobais.ouro":     "sem significância: t = 0,43 (v68)",
+    "ativosGlobais.euro":     "dupla contagem — o dólar amplo já vota no Macro (v111)"
+  };
+  const out = [];
+  Object.keys(S.motors).forEach(function(mk){
+    const motor = S.motors[mk];
+    Object.keys(motor.indicators).forEach(function(ik){
+      const ind = motor.indicators[ik];
+      if(!ind.excludeFromScore) return;
+      const v = valorVigente(mk, ik);
+      const id = mk + "." + ik;
+      out.push({
+        id: id, label: ind.label ? String(ind.label).split(" · ")[0] : ik,
+        motor: motor.label, valor: v,
+        lado: (v === null || v === undefined) ? "sem dado" : (v > 0 ? "alta" : (v < 0 ? "baixa" : "neutro")),
+        motivo: MOTIVOS[id] || "rebaixado — ver o comentário no código"
+      });
+    });
+  });
+  return out;
+}
+
+/* liga os sensores, agrega, e DESLIGA — com finally, porque uma exceção no
+   meio deixaria os sensores votando de verdade, que é o pior defeito
+   possível numa build cujo propósito é só exibir. */
+function contrafactualComSensores(){
+  const atual = agregarCanonico(contribuicoesCanonicas()).score;
+  const mexidos = [];
+  try{
+    Object.keys(S.motors).forEach(function(mk){
+      const motor = S.motors[mk];
+      Object.keys(motor.indicators).forEach(function(ik){
+        if(motor.indicators[ik].excludeFromScore){
+          mexidos.push([mk, ik]);
+          motor.indicators[ik].excludeFromScore = false;
+        }
+      });
+    });
+    const com = agregarCanonico(contribuicoesCanonicas()).score;
+    return { atual: atual, comSensores: com, delta: com - atual };
+  } finally {
+    mexidos.forEach(function(p){ S.motors[p[0]].indicators[p[1]].excludeFromScore = true; });
+  }
+}
+
+function blocoForaDoScore(){
+  const sensores = sensoresDaLeitura();
+  if(!sensores.length) return "";
+  let cf = null;
+  try{ cf = contrafactualComSensores(); }catch(e){ cf = null; }
+  const alta = sensores.filter(function(s){ return s.lado === "alta"; });
+  const baixa = sensores.filter(function(s){ return s.lado === "baixa"; });
+
+  const linhas = sensores
+    .slice().sort(function(a,b){ return Math.abs(b.valor||0) - Math.abs(a.valor||0); })
+    .map(function(s){
+      const cor = s.lado === "alta" ? "var(--teal)" : (s.lado === "baixa" ? "var(--brick)" : "var(--text-faint)");
+      return '<tr><td style="padding:5px 8px;">' + esc(s.label) + '</td>' +
+             '<td style="padding:5px 8px;color:var(--text-faint);font-size:10px;">' + esc(s.motor) + '</td>' +
+             '<td style="padding:5px 8px;text-align:right;color:' + cor + ';">' +
+               (s.valor === null || s.valor === undefined ? "—" : (s.valor > 0 ? "+" : "") + s.valor.toFixed(1)) + '</td>' +
+             '<td style="padding:5px 8px;font-size:10.5px;color:var(--text-dim);">' + esc(s.motivo) + '</td></tr>';
+    }).join("");
+
+  return `
+  <div style="margin-top:20px;border-top:1px solid var(--line-soft);padding-top:14px;">
+    <div style="font-family:var(--font-mono);font-size:10px;letter-spacing:.06em;
+                text-transform:uppercase;color:var(--text-faint);margin-bottom:8px;">
+      Fora do score — o que é medido e não vota
+    </div>
+    <div style="font-size:12.5px;color:var(--text-dim);margin-bottom:10px;">
+      ${alta.length} apontando alta · ${baixa.length} apontando baixa.
+      ${cf ? '<strong>Se os seis votassem, o score seria ' + cf.comSensores.toFixed(2) +
+             ' em vez de ' + cf.atual.toFixed(2) + '</strong> (' +
+             (cf.delta >= 0 ? "+" : "") + cf.delta.toFixed(2) + ').' : ''}
+    </div>
+    <table style="width:100%;border-collapse:collapse;font-family:var(--font-mono);font-size:11px;">
+      <thead><tr style="color:var(--text-faint);text-align:left;">
+        <th style="padding:5px 8px;">Sensor</th><th style="padding:5px 8px;">Motor</th>
+        <th style="padding:5px 8px;text-align:right;">Valor</th>
+        <th style="padding:5px 8px;">Por que não vota</th>
+      </tr></thead><tbody>${linhas}</tbody>
+    </table>
+    <div style="font-size:12px;color:var(--text-dim);margin-top:10px;line-height:1.6;">
+      <strong>Isto não é um sinal ignorado.</strong> Nenhum destes tem
+      <strong>direção verificada</strong> — foram rebaixados justamente porque não sabemos
+      para que lado apontam, ou porque contam duas vezes algo que já está no score. Um valor
+      alto aqui não é motivo para agir, e um valor baixo também não é.
+      <br><br>
+      O que este painel serve para responder é outra coisa: <strong>de que tamanho é o que
+      está sendo deixado de fora.</strong> Se um dia o contrafactual apontar sempre na mesma
+      direção do que aconteceu depois, a série vai mostrar — e aí a conversa será sobre
+      promover, com dado. Até lá, aqui é observação.
+    </div>
+  </div>`;
+}
+
+/* =====================================================================
+   v121 — LEITURA EM TRÊS CAMADAS: cada relógio com o seu
+   =====================================================================
+   Sistema NOVO ao lado do antigo. O m12 continua produzindo score,
+   alimentando a série das 777 e sendo o objeto do experimento. Isto aqui
+   não vota, não grava e não decide nada.
+
+   POR QUE. Em 19/08 o BTC saiu de ~62k e bateu 68,7k. Dois motores se
+   moveram (Técnico +11,8, Derivativos +9,6) e quatro NÃO TINHAM COMO se
+   mover: o FRED atualiza uma vez por dia útil, o M2 uma vez por mês,
+   On-chain e Ativos Globais leem janelas de 90 dias. O score andou 1,7 num
+   dia de +6%. A média entre o que muda por minuto e o que muda por mês não
+   descreve nem um nem outro.
+
+   A REGRA: cada indicador pertence à camada da CADÊNCIA DA FONTE, não do
+   motor onde foi colocado. E cadência não é horizonte — o RSI vem de
+   fechamentos diários mas fala do momento; o MVRV atualiza todo dia e fala
+   do ciclo. Por isso as camadas NÃO se chamam curto/médio/longo: esses
+   nomes prometeriam previsão, e ~110 medições em 18–19/08 estabeleceram
+   que não há previsão aqui. S&P, VIX e dólar têm pico de correlação em
+   defasagem ZERO.
+
+   O QUE A DIVISÃO REVELOU: dos sete indicadores da camada AGORA, QUATRO
+   estão fora do score (momentum, book, taker, long/short). É a explicação
+   aritmética de por que o sistema pareceu surdo — a camada que lê o
+   instante estava com 3 de 7 votando.
+
+   Nesta leitura os sensores VOTAM: o motivo do rebaixamento foi "janela de
+   1h num relógio de 8h", e aqui a pergunta É o instante. Eles continuam
+   sensores PARA O SCORE — nada no m12 muda.
+
+   Fora das três camadas, com motivo que não depende de relógio:
+   · euro — dupla contagem, o dólar amplo já está no TERRENO
+   · ouro — t = 0,43 na v68, −0,02 contra retorno futuro no laboratório
+   · exchangeFlow — tem setAuto no código, mas depende de chave paga do
+     CryptoQuant e nunca preenche na prática. Se um dia preencher, entra no
+     TERRENO (janela de 90 dias) e o teste da bateria vai cobrar. */
+const CAMADAS = [
+  { id:"agora", nome:"AGORA",
+    desc:"o que está acontecendo neste instante — fonte muda a cada minuto ou hora",
+    indicadores:[
+      "tecnico.momentum",        // tick a tick
+      "tecnico.bookImbalance",   // livro, contínuo
+      "derivativos.takerRatio",  // agressão de 1h
+      "derivativos.longShort",   // posicionamento de 1h
+      "derivativos.funding",     // a cada 8h
+      "derivativos.openInterest",// contínuo
+      "derivativos.putCall"      // Deribit, contínuo
+    ] },
+  { id:"semana", nome:"A SEMANA",
+    desc:"o que se formou nos últimos dias — fonte fecha uma vez por dia",
+    indicadores:[
+      "tecnico.rsi",                    // RSI-14 de fechamentos diários
+      "tecnico.mediaMovel",             // preço vs. MM50 diária
+      "tecnico.tendencia",              // 30 fechamentos
+      "institucional.coinbasePremium",  // prêmio do dia
+      "sentimento.fearGreed",           // uma vez por dia
+      "geopolitico.gdelt",              // baldes de 15 min, ruidoso
+      "eventos.volumeSpike"             // GDELT também — mesma fonte, mesma cadência
+    ] },
+  { id:"terreno", nome:"O TERRENO",
+    desc:"em que ambiente isso acontece — muda em semanas ou meses",
+    indicadores:[
+      "onchain.mvrv","onchain.activeAddresses","onchain.hashrate",
+      "macro.juros","macro.curva","macro.dxy",
+      "macro.inflacao","macro.liquidez",           // mensais
+      "ativosGlobais.petroleo","ativosGlobais.sp500","ativosGlobais.cobre",
+      "ativosGlobais.vix","ativosGlobais.juros10a",
+      "geopolitico.epu"
+    ] }
+];
+
+/* mesma faixa que o sistema já usa há muitas builds — sem corte inventado.
+   Sem dado é FORA DA CONTA, não neutro: tratar ausência como neutro diluiria
+   a proporção com silêncio. */
+function classificarValor(v){
+  if(v === null || v === undefined || !Number.isFinite(Number(v))) return "sem_dado";
+  const n = Number(v);
+  if(n >= 15) return "alta";
+  if(n <= -15) return "baixa";
+  return "neutro";
+}
+
+/* valores: se vier, usa a lista (para teste); senão lê a camada do estado */
+function lerCamada(camadaId, valores){
+  let lista, nome = camadaId, desc = "";
+  if(Array.isArray(valores)){
+    lista = valores.map(function(v, i){ return { id:"teste."+i, label:"teste "+i, valor:v }; });
+  }else{
+    const c = CAMADAS.filter(function(x){ return x.id === camadaId; })[0];
+    if(!c) return null;
+    nome = c.nome; desc = c.desc;
+    lista = c.indicadores.map(function(id){
+      const p = id.split(".");
+      const motor = S.motors[p[0]], ind = motor && motor.indicators[p[1]];
+      return { id:id, label: ind && ind.label ? String(ind.label).split(" · ")[0] : p[1],
+               motor: motor ? motor.label : "?", valor: valorVigente(p[0], p[1]) };
+    });
+  }
+  const medidos = lista.filter(function(x){ return classificarValor(x.valor) !== "sem_dado"; });
+  const alta   = medidos.filter(function(x){ return classificarValor(x.valor) === "alta"; }).length;
+  const baixa  = medidos.filter(function(x){ return classificarValor(x.valor) === "baixa"; }).length;
+  const neutro = medidos.length - alta - baixa;
+  const forca  = medidos.length ? medidos.reduce(function(a,x){ return a + Number(x.valor); }, 0) / medidos.length : null;
+  const pct = function(n){ return medidos.length ? (n / medidos.length) * 100 : 0; };
+
+  /* PROPORÇÃO diz quantos concordam; FORÇA diz com que convicção. Os dois
+     porque podem discordar, e a discordância é informação: 75% em alta com
+     força +4 significa muitos apontando alta fraca e poucos gritando o
+     contrário. Uma média sozinha apagaria isso. */
+  /* A REGRA, na ordem — e o quinto rótulo veio da leitura real de 19/08.
+     O TERRENO daquele dia tinha 7 apontando alta, ZERO apontando baixa e 7
+     neutros. Chamar isso de DIVIDIDO seria falso (não há conflito) e de
+     PARADO também (metade está apontando). Faltava "ALTA PARCIAL".
+     Outra coisa que só apareceu com dado na mão: funding −10 e long/short
+     −11,3 são NEUTROS, não baixa — a faixa de ±15 é larga de propósito. */
+  let rotulo;
+  if(!medidos.length)                          rotulo = "SEM DADO";
+  else if(pct(alta) >= 60)                     rotulo = (forca > 0) ? "ALTA" : "DIVIDIDO";
+  else if(pct(baixa) >= 60)                    rotulo = (forca < 0) ? "BAIXA" : "DIVIDIDO";
+  else if(pct(alta) >= 20 && pct(baixa) >= 20) rotulo = "DIVIDIDO";
+  else if(pct(neutro) > 50)                    rotulo = "PARADO";
+  else if(alta > baixa)                        rotulo = "ALTA PARCIAL";
+  else if(baixa > alta)                        rotulo = "BAIXA PARCIAL";
+  else                                         rotulo = "PARADO";
+
+  return { id:camadaId, nome:nome, desc:desc, total:lista.length, medidos:medidos.length,
+           alta:alta, baixa:baixa, neutro:neutro,
+           pctAlta:pct(alta), pctBaixa:pct(baixa), pctNeutro:pct(neutro),
+           forca:forca, rotulo:rotulo, itens:lista };
+}
+
+function leituraPorCadencia(){
+  return CAMADAS.map(function(c){ return lerCamada(c.id); });
+}
+
+function blocoCadencia(){
+  const leituras = leituraPorCadencia();
+  if(!leituras.length) return "";
+  const cor = { ALTA:"var(--teal)", "ALTA PARCIAL":"var(--teal)",
+                BAIXA:"var(--brick)", "BAIXA PARCIAL":"var(--brick)",
+                DIVIDIDO:"var(--gold)", PARADO:"var(--text-faint)", "SEM DADO":"var(--text-faint)" };
+  const blocos = leituras.map(function(r){
+    const itens = r.itens
+      .filter(function(x){ return classificarValor(x.valor) !== "sem_dado"; })
+      .sort(function(a,b){ return Math.abs(b.valor) - Math.abs(a.valor); })
+      .map(function(x){
+        const cl = classificarValor(x.valor);
+        const c = cl === "alta" ? "var(--teal)" : (cl === "baixa" ? "var(--brick)" : "var(--text-faint)");
+        return '<span style="color:' + c + ';white-space:nowrap;">' + esc(x.label.slice(0,22)) +
+               ' ' + (x.valor > 0 ? "+" : "") + x.valor.toFixed(0) + '</span>';
+      }).join('<span style="color:var(--line);"> · </span>');
+    return `
+      <div style="border-top:1px solid var(--line-soft);padding:12px 0;">
+        <div style="display:flex;justify-content:space-between;align-items:baseline;flex-wrap:wrap;gap:8px;">
+          <div>
+            <span style="font-family:var(--font-mono);font-size:13px;letter-spacing:.08em;">${esc(r.nome)}</span>
+            <span style="font-size:11px;color:var(--text-faint);margin-left:10px;">${esc(r.desc)}</span>
+          </div>
+          <div style="font-family:var(--font-mono);font-size:15px;color:${cor[r.rotulo] || "var(--text)"};">
+            ${esc(r.rotulo)}
+          </div>
+        </div>
+        <div style="font-family:var(--font-mono);font-size:11.5px;color:var(--text-dim);margin:6px 0;">
+          ${r.pctAlta.toFixed(0)}% alta · ${r.pctBaixa.toFixed(0)}% baixa · ${r.pctNeutro.toFixed(0)}% neutro
+          <span style="color:var(--line);"> | </span>
+          força média ${r.forca === null ? "—" : (r.forca > 0 ? "+" : "") + r.forca.toFixed(0)}
+          <span style="color:var(--line);"> | </span>
+          <span style="color:var(--text-faint);">${r.medidos} de ${r.total} medidos</span>
+        </div>
+        <div style="font-family:var(--font-mono);font-size:10.5px;line-height:1.9;">${itens}</div>
+      </div>`;
+  }).join("");
+
+  return `
+    <div style="font-family:var(--font-mono);font-size:10px;letter-spacing:.06em;
+                text-transform:uppercase;color:var(--text-faint);margin-bottom:4px;">
+      Leitura por cadência — cada relógio com o seu
+    </div>
+    <div style="font-size:12.5px;color:var(--text-dim);margin-bottom:6px;">
+      Três leituras separadas, <strong>sem média entre elas</strong>. Cada indicador entra na
+      camada da cadência da própria fonte: o que muda por minuto não é somado com o que muda
+      por mês. <strong>Isto descreve o presente em três velocidades — não é previsão.</strong>
+      Nenhuma variável medida neste projeto antecede o preço: as relações reais têm pico em
+      defasagem zero.
+      <br>
+      <span style="color:var(--text-faint);">Proporção diz quantos concordam; força média diz
+      com que convicção. Quando as duas discordam, isso é informação. Indicador sem dado fica
+      fora da conta e a cobertura é declarada. Score, pesos e a série das 777 não são afetados.</span>
+    </div>
+    ${blocos}`;
+}
+
 function computeMarketState(){
   const composites = {};
   Object.entries(S.motors).forEach(([key])=>{ composites[key] = motorComposite(key); });
@@ -9195,6 +9514,11 @@ function renderDecision(){
   const ul = document.getElementById("decisionReasoning");
   // o rastro pode conter título de cenário digitado pelo usuário — escapa
   ul.innerHTML = d.reasoning.map(r=>`<li>${esc(r)}</li>`).join("");
+  /* v120 — o que ficou de fora do score, logo abaixo do rastro. Se este
+     bloco falhar, o painel de decisão não pode cair junto: ele é exibição. */
+  { const alvoFS = document.getElementById("painelForaDoScore");
+    if(alvoFS){ try{ alvoFS.innerHTML = blocoForaDoScore(); }
+                catch(eFS){ alvoFS.innerHTML = ""; } } }
   const chips = document.getElementById("topFactors");
   chips.innerHTML = d.topFactors.length
     ? d.topFactors.map(f=>{
@@ -9619,6 +9943,10 @@ function renderHero(){
    princípio que já vale para as fontes de dados desde a v46 — cada uma falha
    sozinha sem derrubar as outras. A tela não tinha ganhado isso ainda. */
 function renderAll(){
+  /* v121 — a leitura em camadas é exibição: se falhar, não pode derrubar a tela. */
+  { const alvoC = document.getElementById("painelCadencia");
+    if(alvoC){ try{ alvoC.innerHTML = blocoCadencia(); }
+               catch(eC){ alvoC.innerHTML = ""; } } }
   const blocos = [
     ["hero", renderHero], ["ticker", renderTicker], ["motores", renderMotors],
     ["estado", renderState], ["cenários", renderScenarios], ["premissas", renderPremises],

@@ -1,0 +1,392 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<title>SEIOS — termômetro de apetite</title>
+<style>
+  :root{
+    --bg:#0E1A2B; --bg-alt:#132234; --panel:#132437; --line:#2F5478; --line-soft:#1E3A55;
+    --text:#E8F1F8; --text-dim:#9FBBD4; --text-faint:#6D8CA8;
+    --teal:#5FE3B0; --brick:#FF8A80; --gold:#FFD37E; --azul:#7FB2FF;
+    --mono:ui-monospace,"SF Mono",Menlo,monospace;
+  }
+  *{box-sizing:border-box;}
+  body{margin:0;background:var(--bg);color:var(--text);font-family:var(--mono);
+       font-size:13px;line-height:1.6;padding:0 0 60px;}
+  .wrap{max-width:1180px;margin:0 auto;padding:0 18px;}
+  header{border-bottom:1px solid var(--line);padding:22px 0;background:var(--bg-alt);}
+  h1{font-size:21px;margin:6px 0;}
+  .sub{color:var(--text-dim);font-size:12px;}
+  .aviso{border:1px solid var(--gold);background:#FFD37E14;padding:14px 16px;margin:18px 0;
+         color:var(--text-dim);font-size:12.5px;}
+  .aviso b{color:var(--gold);}
+  .nota{border:1px solid var(--azul);background:#7FB2FF12;padding:14px 16px;margin:18px 0;
+        color:var(--text-dim);font-size:12.5px;}
+  .nota b{color:var(--azul);}
+  button{font-family:var(--mono);font-size:13px;padding:12px 18px;margin:14px 0;
+         background:var(--teal);color:#08131f;border:1px solid var(--teal);cursor:pointer;}
+  button.ghost{background:transparent;color:var(--text-dim);border-color:var(--line);}
+  button:disabled{opacity:.45;cursor:default;}
+  #log{border:1px solid var(--line-soft);background:#0a1420;padding:11px;min-height:50px;
+       font-size:11px;color:var(--text-dim);white-space:pre-wrap;max-height:200px;overflow-y:auto;}
+  table{width:100%;border-collapse:collapse;font-size:11.5px;margin:12px 0;}
+  th{text-align:left;color:var(--text-faint);font-weight:400;padding:6px 8px;
+     border-bottom:1px solid var(--line);text-transform:uppercase;font-size:10px;}
+  td{padding:6px 8px;border-bottom:1px solid var(--line-soft);}
+  td.n{text-align:right;}
+  .sim{color:var(--teal);} .nao{color:var(--text-faint);} .alerta{color:var(--brick);}
+  .ouro{color:var(--gold);}
+  h2{font-size:16px;margin:28px 0 4px;}
+  p.explica{color:var(--text-dim);font-size:12.5px;margin:6px 0 12px;}
+  #saida{display:none;}
+  .agora{border:1px solid var(--line);padding:22px;margin:18px 0;text-align:center;}
+  .numerao{font-size:64px;line-height:1;letter-spacing:-.02em;}
+  .estadao{font-size:22px;letter-spacing:.08em;margin-top:6px;}
+  .barra{display:flex;height:10px;border-radius:5px;overflow:hidden;margin:16px 0 6px;}
+  textarea{width:100%;height:340px;background:#0a1420;color:var(--text-dim);
+           border:1px solid var(--line-soft);font-family:var(--mono);font-size:11px;padding:10px;}
+</style>
+</head>
+<body>
+<header><div class="wrap">
+  <div class="sub">SEIOS · medição isolada — não é o sistema, não grava nada, não muda nada</div>
+  <h1>Termômetro de apetite — o que está acontecendo AGORA</h1>
+  <div class="sub">cinco fluxos · percentil contra a própria história · 30 dias em velas de 5 minutos</div>
+</div></header>
+
+<div class="wrap">
+
+  <div class="nota">
+    <b>O que este medidor É.</b> Uma leitura de <u>estado</u>: quanta pressão compradora
+    existe no mercado neste instante, comparada com o que é normal para o próprio BTC.
+    <br><br>
+    <b>O que ele NÃO é.</b> Previsão. Isso está medido e encerrado: em onze rodadas e
+    ~150 testes, nada antecede o preço. O resultado mais forte que apareceu — variação do
+    open interest, r = +0,355 com t = 6,54 na reserva — <b>evaporou para r = +0,013 quando
+    removemos as 48 horas do episódio que o gerou.</b> Era preço e OI subindo juntos, não
+    um antecedendo o outro.
+    <br><br>
+    <b>Por que ainda assim vale.</b> Descrever o presente com honestidade é uma pergunta
+    diferente de prever o futuro — e é a que o SEIOS responde bem. O teste deste medidor
+    não é estatístico: <b>é se ele lê as últimas 48 horas de um jeito que você reconheça.</b>
+  </div>
+
+  <div class="aviso">
+    <b>As duas decisões de construção, e o motivo de cada uma.</b>
+    <br><br>
+    <b>1 · Só fluxo. Nada lento, e nada derivado do preço.</b> Durante a alta de 1.918
+    dólares em 4 horas do dia 20/08, <u>19 dos 31 indicadores do sistema não se moveram um
+    décimo</u> — são fontes diárias ou de janela de 90 dias. E dos 12 que se moveram,
+    quatro eram <code>momentum</code>, <code>rsi</code>, <code>mediaMovel</code> e
+    <code>tendencia</code>: o preço com outro nome. Um termômetro que os inclui só diz que
+    o preço subiu. <b>Ficaram de fora de propósito.</b>
+    <br><br>
+    <b>2 · Percentil, não escala fixa.</b> Medimos hoje que o corte de ±15 herdado por
+    todos os indicadores está errado para quase todos: o <code>funding</code> cruza em
+    <b>0%</b> dos dias, o <code>cvd24h</code> em <b>1,8%</b>, e <code>activeAddresses</code>
+    e <code>hashrate</code> em <b>82% e 86%</b>. Dois nunca falam, dois falam sempre.
+    <b>Em percentil contra a própria distribuição, todos falam a mesma língua</b> — e um CVD
+    de +8,3% deixa de ser "dentro do neutro" para ser o que realmente é: percentil 97.
+  </div>
+
+  <button id="btn">▶ Medir apetite — 30 dias, 5 em 5 minutos</button>
+  <div id="log">pronto.</div>
+
+  <div id="saida">
+    <h2>Agora</h2>
+    <div id="agora" class="agora"></div>
+
+    <h2>As 48 horas da explosão</h2>
+    <p class="explica">O teste que importa: o termômetro distinguiu a alta do mercado
+      parado? Cada linha é uma leitura de hora em hora.</p>
+    <div id="explosao"></div>
+
+    <h2>Os cinco componentes, agora</h2>
+    <div id="componentes"></div>
+
+    <h2>Onde o termômetro vive</h2>
+    <p class="explica">Distribuição das leituras nos 30 dias. Se ele passar a maior parte do
+      tempo num extremo, a escala está errada.</p>
+    <div id="dist"></div>
+
+    <h2>Histórico completo — hora a hora</h2>
+    <div id="historico"></div>
+
+    <h2>Copiar para o Claude</h2>
+    <button class="ghost" id="btnCopiar">⧉ Copiar</button>
+    <textarea id="texto" readonly></textarea>
+  </div>
+</div>
+
+<script>
+const PASSO=12;   /* 12 velas de 5min = 1 hora */
+function media(a){ return a.length?a.reduce(function(x,y){return x+y;},0)/a.length:null; }
+function f(x,d){ return (x===null||x===undefined||!Number.isFinite(x))?"—":x.toFixed(d); }
+const dorme=function(ms){ return new Promise(function(s){ setTimeout(s,ms); }); };
+const log=function(m){ const e=document.getElementById("log");
+  e.textContent=(e.textContent==="pronto.")?m:(e.textContent+"\n"+m); e.scrollTop=e.scrollHeight; };
+
+/* percentil de v dentro de uma lista JÁ ordenada */
+function percentilDe(ord, v){
+  if(!ord.length) return null;
+  let lo=0, hi=ord.length;
+  while(lo<hi){ const m=(lo+hi)>>1; if(ord[m]<=v) lo=m+1; else hi=m; }
+  return (lo/ord.length)*100;
+}
+/* percentil EXPANDIDO: usa só o passado, nunca o futuro */
+function serieParaPercentis(vals, minimo){
+  const out=new Array(vals.length).fill(null);
+  const vistos=[];
+  for(let i=0;i<vals.length;i++){
+    const v=vals[i];
+    if(Number.isFinite(v)){
+      if(vistos.length>=minimo){
+        const ord=vistos.slice().sort(function(a,b){ return a-b; });
+        out[i]=percentilDe(ord, v);
+      }
+      vistos.push(v);
+    }
+  }
+  return out;
+}
+function estadoDe(n){
+  if(n===null) return {nome:"SEM DADO", cor:"var(--text-faint)"};
+  if(n>=75) return {nome:"COMPRADOR FORTE", cor:"var(--teal)"};
+  if(n>=58) return {nome:"COMPRADOR",       cor:"var(--teal)"};
+  if(n>=42) return {nome:"MORNO",           cor:"var(--gold)"};
+  if(n>=25) return {nome:"VENDEDOR",        cor:"var(--brick)"};
+  return              {nome:"VENDEDOR FORTE",cor:"var(--brick)"};
+}
+
+async function velas5m(){
+  const t=[]; let fim=Date.now();
+  for(let i=0;i<12;i++){
+    const r=await fetch("https://api.binance.com/api/v3/klines?symbol=BTCUSDT&interval=5m&limit=1000&endTime="+fim);
+    if(!r.ok) throw new Error("klines "+r.status);
+    const d=await r.json(); if(!d.length) break;
+    t.unshift.apply(t,d); fim=d[0][0]-1;
+    log("  velas: "+t.length);
+    if(d.length<1000||t.length>=8700) break; await dorme(260);
+  }
+  t.pop();
+  return t;
+}
+/* paginação PARA TRÁS — os endpoints /futures/data/ ignoram startTime na prática */
+async function futuresData(caminho){
+  const LOTE=500, LIMITE=Date.now()-30*24*3600*1000;
+  const out=[]; let fim=Date.now(), v=0;
+  while(v<25){
+    const r=await fetch("https://fapi.binance.com/futures/data/"+caminho+
+                        "?symbol=BTCUSDT&period=5m&limit="+LOTE+"&endTime="+fim);
+    if(!r.ok) throw new Error(caminho+" "+r.status);
+    const d=await r.json(); if(!d.length) break;
+    out.push.apply(out,d);
+    const antigo=Number(d[0].timestamp);
+    if(!Number.isFinite(antigo)||antigo<=LIMITE||fim<=antigo) break;
+    fim=antigo-1; v++;
+    if(d.length<LOTE) break;
+    await dorme(150);
+  }
+  const vistos={}, limpo=[];
+  out.forEach(function(o){ const t=Number(o.timestamp);
+    if(!vistos[t]){ vistos[t]=1; limpo.push(o); } });
+  limpo.sort(function(a,b){ return Number(a.timestamp)-Number(b.timestamp); });
+  return limpo;
+}
+
+document.getElementById("btn").addEventListener("click", async function(){
+  this.disabled=true; document.getElementById("log").textContent="";
+  try{
+    log("velas de 5 minutos…");
+    const kl=await velas5m();
+    log("  "+kl.length+" velas");
+    log("open interest…");      const oi=await futuresData("openInterestHist");      log("  "+oi.length);
+    log("agressão oficial…");   const tk=await futuresData("takerlongshortRatio");   log("  "+tk.length);
+    log("funding…");
+    let fr=[];
+    try{
+      const r=await fetch("https://fapi.binance.com/fapi/v1/fundingRate?symbol=BTCUSDT&limit=1000");
+      fr=await r.json(); log("  "+fr.length);
+    }catch(e){ log("  ✗ funding"); }
+
+    const M={};
+    kl.forEach(function(k){
+      const qv=Number(k[7]), tbq=Number(k[10]);
+      M[k[0]]={ t:k[0], close:Number(k[4]), qv:qv, tbq:tbq,
+                liq: Number.isFinite(qv)&&Number.isFinite(tbq) ? (2*tbq-qv) : null };
+    });
+    function casar(l,campo,fn){ l.forEach(function(o){ const t=Number(o.timestamp);
+      const m=M[t]||M[t-(t%300000)]; if(m) m[campo]=fn(o); }); }
+    casar(oi,"oi",function(o){ return Number(o.sumOpenInterest); });
+    casar(tk,"taker",function(o){ return Number(o.buySellRatio); });
+    /* funding é a cada 8h — vale até o próximo */
+    const frOrd=(fr||[]).map(function(o){ return { t:Number(o.fundingTime), v:Number(o.fundingRate) }; })
+                        .filter(function(o){ return Number.isFinite(o.t)&&Number.isFinite(o.v); })
+                        .sort(function(a,b){ return a.t-b.t; });
+
+    const H=Object.keys(M).map(function(k){ return M[k]; })
+                  .sort(function(a,b){ return a.t-b.t; })
+                  .filter(function(x){ return Number.isFinite(x.close); });
+    let iF=0;
+    H.forEach(function(x){
+      while(iF+1<frOrd.length && frOrd[iF+1].t<=x.t) iF++;
+      x.funding = frOrd.length ? frOrd[iF].v : null;
+    });
+
+    /* ---- os cinco fluxos, todos usando só o passado ---- */
+    const J=PASSO;                       /* 1 hora */
+    for(let i=0;i<H.length;i++){
+      /* 1 · CVD de 24h — compra líquida acumulada, proporção do volume */
+      if(i>=24*J){
+        let liq=0, vol=0, ok=true;
+        for(let k=i-24*J+1;k<=i;k++){
+          if(H[k].liq===null||!Number.isFinite(H[k].qv)){ ok=false; break; }
+          liq+=H[k].liq; vol+=H[k].qv;
+        }
+        H[i].cvd = (ok&&vol>0) ? (liq/vol)*100 : null;
+      }
+      /* 2 · agressão da última hora — mais rápida que o CVD */
+      if(i>=J){
+        let liq=0, vol=0, ok=true;
+        for(let k=i-J+1;k<=i;k++){
+          if(H[k].liq===null||!Number.isFinite(H[k].qv)){ ok=false; break; }
+          liq+=H[k].liq; vol+=H[k].qv;
+        }
+        H[i].agr = (ok&&vol>0) ? (liq/vol)*100 : null;
+      }
+      /* 3 · taker oficial da Binance */
+      H[i].tk = Number.isFinite(H[i].taker) ? H[i].taker : null;
+      /* 4 · open interest — variação em 4h (posição sendo montada) */
+      if(i>=4*J && Number.isFinite(H[i].oi) && Number.isFinite(H[i-4*J].oi) && H[i-4*J].oi)
+        H[i].dOI = (H[i].oi/H[i-4*J].oi-1)*100;
+      /* 5 · funding — invertido: funding ALTO = manada comprada = risco.
+         É leitura contrária, como o Fear & Greed no sistema. */
+      H[i].fund = Number.isFinite(H[i].funding) ? -H[i].funding : null;
+    }
+
+    const MIN_HIST=500;
+    const pc = {
+      cvd:  serieParaPercentis(H.map(function(x){ return x.cvd;  }), MIN_HIST),
+      agr:  serieParaPercentis(H.map(function(x){ return x.agr;  }), MIN_HIST),
+      tk:   serieParaPercentis(H.map(function(x){ return x.tk;   }), MIN_HIST),
+      dOI:  serieParaPercentis(H.map(function(x){ return x.dOI;  }), MIN_HIST),
+      fund: serieParaPercentis(H.map(function(x){ return x.fund; }), MIN_HIST)
+    };
+    const COMP=[["cvd","CVD 24h — compra líquida acumulada"],
+                ["agr","Agressão da última hora"],
+                ["tk","Taker buy/sell oficial"],
+                ["dOI","Open interest — variação 4h"],
+                ["fund","Funding invertido (alto = manada comprada)"]];
+    H.forEach(function(x,i){
+      const vs=COMP.map(function(c){ return pc[c[0]][i]; }).filter(function(v){ return v!==null; });
+      x.apetite = vs.length>=3 ? media(vs) : null;   /* precisa de 3 dos 5 */
+      x.nComp = vs.length;
+      COMP.forEach(function(c){ x["p_"+c[0]]=pc[c[0]][i]; });
+    });
+    const bons=H.filter(function(x){ return x.apetite!==null; });
+    log("leituras com apetite: "+bons.length+
+        " ("+((H[H.length-1].t-bons[0].t)/86400000).toFixed(1)+" dias)");
+
+    /* ---- agora ---- */
+    const u=bons[bons.length-1], e=estadoDe(u.apetite);
+    document.getElementById("agora").innerHTML=
+      '<div class="numerao" style="color:'+e.cor+';">'+f(u.apetite,0)+'</div>'+
+      '<div class="estadao" style="color:'+e.cor+';">'+e.nome+'</div>'+
+      '<div class="barra"><div style="width:'+f(u.apetite,0)+'%;background:'+e.cor+';"></div>'+
+      '<div style="flex:1;background:var(--line-soft);"></div></div>'+
+      '<div style="color:var(--text-faint);font-size:11.5px;">'+
+      new Date(u.t).toLocaleString("pt-BR")+' · BTC $'+u.close.toLocaleString("pt-BR")+
+      ' · '+u.nComp+' de 5 componentes</div>';
+
+    /* ---- as 48 horas ---- */
+    const ultimas=bons.filter(function(x){ return x.t >= u.t-48*3600000; })
+                      .filter(function(x,i){ return i%PASSO===0; });
+    let h48='<table><thead><tr><th>Quando</th><th class="n">BTC</th><th class="n">apetite</th>'+
+      '<th>estado</th><th class="n">CVD</th><th class="n">agressão</th><th class="n">taker</th>'+
+      '<th class="n">OI 4h</th><th class="n">funding</th></tr></thead><tbody>';
+    ultimas.forEach(function(x){
+      const s=estadoDe(x.apetite);
+      h48+='<tr><td>'+new Date(x.t).toLocaleString("pt-BR",{day:"2-digit",month:"2-digit",hour:"2-digit",minute:"2-digit"})+
+        '</td><td class="n">'+Math.round(x.close).toLocaleString("pt-BR")+'</td>'+
+        '<td class="n" style="color:'+s.cor+';">'+f(x.apetite,0)+'</td>'+
+        '<td style="color:'+s.cor+';font-size:10.5px;">'+s.nome+'</td>'+
+        '<td class="n">'+f(x.p_cvd,0)+'</td><td class="n">'+f(x.p_agr,0)+'</td>'+
+        '<td class="n">'+f(x.p_tk,0)+'</td><td class="n">'+f(x.p_dOI,0)+'</td>'+
+        '<td class="n">'+f(x.p_fund,0)+'</td></tr>';
+    });
+    document.getElementById("explosao").innerHTML=h48+'</tbody></table>'+
+      '<p class="explica">Todas as colunas em <strong>percentil</strong>: 50 é o normal do '+
+      'próprio BTC, 90 é mais forte que 90% das leituras dos 30 dias.</p>';
+
+    /* ---- componentes agora ---- */
+    let hc='<table><thead><tr><th>Componente</th><th class="n">valor bruto</th>'+
+      '<th class="n">percentil</th><th>leitura</th></tr></thead><tbody>';
+    const bruto={cvd:u.cvd, agr:u.agr, tk:u.tk, dOI:u.dOI, fund:u.fund};
+    COMP.forEach(function(c){
+      const p=u["p_"+c[0]];
+      const s=p===null?"—":(p>=75?"forte":(p>=58?"acima do normal":(p>=42?"normal":(p>=25?"abaixo":"fraco"))));
+      hc+='<tr><td>'+c[1]+'</td><td class="n">'+f(bruto[c[0]],c[0]==="fund"?5:2)+'</td>'+
+          '<td class="n '+(p!==null&&p>=58?"sim":(p!==null&&p<42?"alerta":"nao"))+'">'+f(p,0)+'</td>'+
+          '<td class="nao">'+s+'</td></tr>';
+    });
+    document.getElementById("componentes").innerHTML=hc+"</tbody></table>";
+
+    /* ---- distribuição ---- */
+    const ap=bons.map(function(x){ return x.apetite; }).sort(function(a,b){ return a-b; });
+    const faixas=[["COMPRADOR FORTE (≥75)",75,101],["COMPRADOR (58–74)",58,75],
+                  ["MORNO (42–57)",42,58],["VENDEDOR (25–41)",25,42],["VENDEDOR FORTE (<25)",-1,25]];
+    let hd='<table><thead><tr><th>Estado</th><th class="n">% do tempo</th><th class="n">horas</th></tr></thead><tbody>';
+    faixas.forEach(function(F){
+      const n=ap.filter(function(v){ return v>=F[1]&&v<F[2]; }).length;
+      hd+='<tr><td>'+F[0]+'</td><td class="n">'+f(n/ap.length*100,1)+'%</td>'+
+          '<td class="n">'+Math.round(n/PASSO)+'</td></tr>';
+    });
+    document.getElementById("dist").innerHTML=hd+'</tbody></table>'+
+      '<p class="explica">Mediana do termômetro: <strong>'+f(ap[Math.floor(ap.length/2)],0)+
+      '</strong>. Se estiver longe de 50, a escala está torta.</p>';
+
+    /* ---- histórico ---- */
+    const amostra=bons.filter(function(x,i){ return i%(PASSO*6)===0; });
+    let hh='<table><thead><tr><th>Quando</th><th class="n">BTC</th><th class="n">apetite</th><th>estado</th></tr></thead><tbody>';
+    amostra.forEach(function(x){
+      const s=estadoDe(x.apetite);
+      hh+='<tr><td>'+new Date(x.t).toLocaleString("pt-BR",{day:"2-digit",month:"2-digit",hour:"2-digit"})+
+        '</td><td class="n">'+Math.round(x.close).toLocaleString("pt-BR")+'</td>'+
+        '<td class="n" style="color:'+s.cor+';">'+f(x.apetite,0)+'</td>'+
+        '<td style="color:'+s.cor+';font-size:10.5px;">'+s.nome+'</td></tr>';
+    });
+    document.getElementById("historico").innerHTML=hh+"</tbody></table>";
+
+    /* ---- texto ---- */
+    const T=["SEIOS · TERMÔMETRO DE APETITE",
+      "medido em "+new Date().toLocaleString("pt-BR"),
+      "leituras: "+bons.length+" velas de 5min · mediana do termômetro: "+f(ap[Math.floor(ap.length/2)],0),
+      "","AGORA: "+f(u.apetite,0)+" — "+e.nome+" · BTC $"+Math.round(u.close),
+      "componentes (percentil): CVD "+f(u.p_cvd,0)+" · agressão "+f(u.p_agr,0)+
+        " · taker "+f(u.p_tk,0)+" · OI4h "+f(u.p_dOI,0)+" · funding "+f(u.p_fund,0),
+      "","=== AS 48 HORAS ==="];
+    ultimas.forEach(function(x){
+      T.push("  "+new Date(x.t).toLocaleString("pt-BR",{day:"2-digit",month:"2-digit",hour:"2-digit",minute:"2-digit"})+
+        "  BTC "+Math.round(x.close)+"  apetite "+f(x.apetite,0)+" ("+estadoDe(x.apetite).nome+")"+
+        "  [cvd "+f(x.p_cvd,0)+" agr "+f(x.p_agr,0)+" tk "+f(x.p_tk,0)+" oi "+f(x.p_dOI,0)+" fd "+f(x.p_fund,0)+"]");
+    });
+    T.push(""); T.push("=== DISTRIBUIÇÃO ===");
+    faixas.forEach(function(F){
+      const n=ap.filter(function(v){ return v>=F[1]&&v<F[2]; }).length;
+      T.push("  "+F[0]+": "+f(n/ap.length*100,1)+"%");
+    });
+    document.getElementById("texto").value=T.join("\n");
+    document.getElementById("saida").style.display="block";
+    log("pronto.");
+  }catch(e){ log("FALHOU: "+e.message); this.disabled=false; }
+});
+
+document.getElementById("btnCopiar").addEventListener("click", async function(){
+  const t=document.getElementById("texto");
+  try{ await navigator.clipboard.writeText(t.value); this.textContent="✓ copiado"; }
+  catch(e){ t.focus(); t.select(); this.textContent="selecione e copie"; }
+});
+</script>
+</body>
+</html>

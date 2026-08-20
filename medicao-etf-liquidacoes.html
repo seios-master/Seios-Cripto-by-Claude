@@ -273,14 +273,21 @@ document.getElementById("btn2").addEventListener("click", async function(){
   if(!chave){ log("cole a chave da Coinalyze primeiro (conta grátis em coinalyze.net)."); return; }
   this.disabled=true;
   try{
-    const base="https://api.coinalyze.net/v1";
-    const cab={ headers:{ "api_key": chave } };
-    log("buscando liquidações diárias (Binance BTCUSDT perp)…");
+    /* v2 — pela rota do próprio domínio. A Coinalyze não devolve cabeçalho de
+       origem cruzada, e o Safari bloqueia a chamada direta antes de ela sair:
+       o "Load failed" não era chave errada, era CORS. Mesma solução do FRED
+       (v89) e do GDELT (v104). */
+    log("buscando liquidações diárias (Binance BTCUSDT perp), via /api/coinalyze…");
     const fim=Math.floor(Date.now()/1000);
     const ini=fim - 400*24*3600;
-    const url=base+"/liquidation-history?symbols=BTCUSDT_PERP.A&interval=daily&from="+ini+"&to="+fim+"&convert_to_usd=true";
-    const r=await fetch(url, cab);
-    if(!r.ok) throw new Error("Coinalyze "+r.status+" — chave inválida ou limite atingido");
+    const url="/api/coinalyze?caminho=liquidation-history&symbols=BTCUSDT_PERP.A"+
+              "&interval=daily&from="+ini+"&to="+fim+"&convert_to_usd=true"+
+              "&api_key="+encodeURIComponent(chave);
+    const r=await fetch(url);
+    if(!r.ok){
+      let det=""; try{ const j=await r.json(); det=" — "+(j.error||""); }catch(e){}
+      throw new Error("Coinalyze "+r.status+det);
+    }
     const d=await r.json();
     const hist=(d && d[0] && d[0].history) || [];
     if(!hist.length) throw new Error("resposta sem histórico — confira o símbolo/plano");

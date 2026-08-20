@@ -78,12 +78,13 @@
     foi escolhida olhando dado.<br><br>
     <b>Partição temporal:</b> até 31/12/2023 estuda · 2024 em diante confirma (era do ETF).<br><br>
     <b>Passa se, e somente se:</b> a diferença entre "padrão ligado" e "padrão desligado"
-    tiver <b>|t| ≥ 2,576</b> no estudo <u>e</u> na reserva, com o <b>mesmo sinal</b>, e o
-    padrão ocorrer em <b>pelo menos 30 dias</b> de cada fase.<br><br>
+    tiver <b>|t efetivo| ≥ 2,576</b> no estudo <u>e</u> na reserva, com o <b>mesmo sinal</b>,
+    e o padrão ocorrer em <b>pelo menos 60 dias</b> de cada fase.<br><br>
     <b>Correção de olhadas múltiplas:</b> com 8 combinações, o corte de 1% por teste dá
     ~8% de chance de um falso positivo no conjunto. Por isso a <b>reserva é obrigatória</b>
     — ela é a defesa real, não o corte.<br><br>
-    <b>Horizonte:</b> retorno de 7 dias, blocos que não se sobrepõem. Fixado agora.<br><br>
+    <b>Horizonte:</b> retorno de 7 dias, uma janela por dia. Dias vizinhos compartilham 6 dos 7 dias de caminho, então o <b>t é dividido por √7</b> — a correção da v109.<br><br>
+    <b>Mudança de método declarada em 20/08, ANTES de rodar de novo:</b> a primeira versão usou blocos sem sobreposição e eliminou <u>seis das oito</u> combinações por amostra insuficiente — os padrões restritivos, que são os interessantes, nunca ocorriam 30 vezes em 137 blocos. <b>O critério de passagem não mudou</b>, e as oito combinações são as mesmas.<br><br>
     <b>Sem terceira tentativa.</b> Não se acrescenta combinação, não se muda horizonte,
     não se afrouxa corte depois de ver resultado.
   </div>
@@ -106,7 +107,16 @@
 </div>
 
 <script>
-const DIA=86400000, CORTE="2024-01-01", HORIZONTE=7, MIN_DIAS=30;
+/* v2 — 20/08/2026, MUDANÇA DE MÉTODO DECLARADA ANTES DE RODAR DE NOVO.
+   A v1 usou blocos de 7 dias SEM sobreposição: 3.300 dias viraram 470 blocos, e
+   exigir 30 ocorrências por fase eliminou SEIS das oito combinações por "amostra
+   insuficiente" — não por não funcionarem. Erro meu de projeto: apertei o critério
+   até só o trivial caber.
+   AGORA: janelas DIÁRIAS sobrepostas, com a correção da v109 — t ÷ √7, porque dias
+   vizinhos compartilham 6 dos 7 dias de caminho.
+   O CRITÉRIO DE PASSAGEM NÃO MUDOU: |t efetivo| >= 2,576 nas duas fases, mesmo sinal.
+   As oito combinações são as mesmas, nenhuma acrescentada nem reescrita. */
+const DIA=86400000, CORTE="2024-01-01", HORIZONTE=7, MIN_DIAS=60, SOBREPOSICAO=7;
 function ymd(t){ return new Date(t).toISOString().slice(0,10); }
 function media(a){ return a.length?a.reduce(function(x,y){return x+y;},0)/a.length:null; }
 function dp(a){ if(a.length<2) return null; const m=media(a);
@@ -121,8 +131,10 @@ function comparar(ligado, desligado){
   if(ligado.length < MIN_DIAS || desligado.length < MIN_DIAS) return null;
   const d = media(ligado) - media(desligado);
   const se = Math.sqrt(Math.pow(dp(ligado),2)/ligado.length + Math.pow(dp(desligado),2)/desligado.length);
-  return { dif:d, t: se ? d/se : 0, nL:ligado.length, nD:desligado.length,
-           mL:media(ligado), mD:media(desligado) };
+  const t = se ? d/se : 0;
+  /* v109 — o t ingênuo trata cada dia como independente e infla por ~√7 */
+  return { dif:d, t:t, tEf: t/Math.sqrt(SOBREPOSICAO),
+           nL:ligado.length, nD:desligado.length, mL:media(ligado), mD:media(desligado) };
 }
 
 async function velas(par, intervalo, blocos){
@@ -267,8 +279,8 @@ document.getElementById("btn").addEventListener("click", async function(){
       if(d.mom===undefined) d.mom=null;
     });
     /* blocos que não se sobrepõem */
-    const base=[]; for(let i=0;i<dias.length;i+=HORIZONTE) if(Number.isFinite(dias[i].fwd)) base.push(dias[i]);
-    log("blocos de "+HORIZONTE+"d sem sobreposição: "+base.length+
+    const base=dias.filter(function(d){ return Number.isFinite(d.fwd); });
+    log("janelas diárias de "+HORIZONTE+"d (sobrepostas, t ÷ √"+SOBREPOSICAO+"): "+base.length+
         " ("+base[0].data+" a "+base[base.length-1].data+")");
 
     const est=base.filter(function(d){ return d.data<CORTE; });
@@ -276,8 +288,8 @@ document.getElementById("btn").addEventListener("click", async function(){
     log("estudo: "+est.length+" · reserva: "+res.length);
 
     let h='<table><thead><tr><th>Combinação</th><th class="n">dias est.</th>'+
-      '<th class="n">dif. est.</th><th class="n">t est.</th><th class="n">dias res.</th>'+
-      '<th class="n">dif. res.</th><th class="n">t res.</th><th>Veredito</th></tr></thead><tbody>';
+      '<th class="n">dif. est.</th><th class="n">t ef. est.</th><th class="n">dias res.</th>'+
+      '<th class="n">dif. res.</th><th class="n">t ef. res.</th><th>Veredito</th></tr></thead><tbody>';
     let det="", txt=[], passaram=[];
     COMBOS.forEach(function(C){
       function fatiar(fase){
@@ -286,13 +298,13 @@ document.getElementById("btn").addEventListener("click", async function(){
         return comparar(lig,des);
       }
       const a=fatiar(est), b=fatiar(res);
-      const ok = a && b && Math.abs(a.t)>=2.576 && Math.abs(b.t)>=2.576 && Math.sign(a.dif)===Math.sign(b.dif);
+      const ok = a && b && Math.abs(a.tEf)>=2.576 && Math.abs(b.tEf)>=2.576 && Math.sign(a.dif)===Math.sign(b.dif);
       if(ok) passaram.push(C.nome);
       h+='<tr><td>'+C.nome+'</td>'+
          '<td class="n">'+(a?a.nL:"—")+'</td><td class="n">'+(a?f(a.dif,2)+"pp":"—")+'</td>'+
-         '<td class="n">'+(a?f(a.t,2):"—")+'</td>'+
+         '<td class="n">'+(a?f(a.tEf,2):"—")+'</td>'+
          '<td class="n">'+(b?b.nL:"—")+'</td><td class="n">'+(b?f(b.dif,2)+"pp":"—")+'</td>'+
-         '<td class="n">'+(b?f(b.t,2):"—")+'</td>'+
+         '<td class="n">'+(b?f(b.tEf,2):"—")+'</td>'+
          '<td class="'+(ok?"sim":"nao")+'">'+(ok?"PASSA":"não")+'</td></tr>';
       det+='<div style="border-top:1px solid var(--line-soft);padding:10px 0;">'+
         '<strong>'+C.nome+'</strong><br>'+
@@ -303,8 +315,8 @@ document.getElementById("btn").addEventListener("click", async function(){
         '<br>reserva: '+
         (b?("padrão ligado "+f(b.mL,2)+"% em "+b.nL+" blocos · desligado "+f(b.mD,2)+"% em "+b.nD):
             "menos de "+MIN_DIAS+" blocos — não avaliado")+'</span></div>';
-      txt.push("  "+C.nome+": est "+(a?"n="+a.nL+" dif="+f(a.dif,2)+"pp t="+f(a.t,2):"insuf.")+
-        " | res "+(b?"n="+b.nL+" dif="+f(b.dif,2)+"pp t="+f(b.t,2):"insuf.")+" | "+(ok?"PASSA":"não"));
+      txt.push("  "+C.nome+": est "+(a?"n="+a.nL+" dif="+f(a.dif,2)+"pp t_ef="+f(a.tEf,2):"insuf.")+
+        " | res "+(b?"n="+b.nL+" dif="+f(b.dif,2)+"pp t_ef="+f(b.tEf,2):"insuf.")+" | "+(ok?"PASSA":"não"));
     });
     document.getElementById("tabela").innerHTML=h+"</tbody></table>";
     document.getElementById("detalhe").innerHTML=det;

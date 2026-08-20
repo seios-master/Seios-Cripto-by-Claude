@@ -1,0 +1,361 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<title>SEIOS — fluxo de ETF e liquidações</title>
+<style>
+  :root{
+    --bg:#0E1A2B; --bg-alt:#132234; --panel:#132437; --line:#2F5478; --line-soft:#1E3A55;
+    --text:#E8F1F8; --text-dim:#9FBBD4; --text-faint:#6D8CA8;
+    --teal:#5FE3B0; --brick:#FF8A80; --gold:#FFD37E;
+    --mono:ui-monospace,"SF Mono",Menlo,monospace;
+  }
+  *{box-sizing:border-box;}
+  body{margin:0;background:var(--bg);color:var(--text);font-family:var(--mono);
+       font-size:13px;line-height:1.6;padding:0 0 60px;}
+  .wrap{max-width:1100px;margin:0 auto;padding:0 18px;}
+  header{border-bottom:1px solid var(--line);padding:22px 0;background:var(--bg-alt);}
+  h1{font-size:21px;margin:6px 0;}
+  .sub{color:var(--text-dim);font-size:12px;}
+  .regra{border:1px solid var(--teal);background:#5FE3B012;padding:16px 18px;margin:18px 0;
+         font-size:12.5px;color:var(--text-dim);}
+  .regra b{color:var(--teal);}
+  .aviso{border:1px solid var(--gold);background:#FFD37E14;padding:14px 16px;margin:18px 0;
+         color:var(--text-dim);font-size:12.5px;}
+  .aviso b{color:var(--gold);}
+  input{font-family:var(--mono);font-size:12px;padding:9px 11px;background:var(--panel);
+        color:var(--text);border:1px solid var(--line);width:340px;max-width:100%;}
+  button{font-family:var(--mono);font-size:13px;padding:11px 17px;margin:10px 6px 10px 0;
+         background:var(--teal);color:#08131f;border:1px solid var(--teal);cursor:pointer;}
+  button.ghost{background:transparent;color:var(--text-dim);border-color:var(--line);}
+  button:disabled{opacity:.45;cursor:default;}
+  .log{border:1px solid var(--line-soft);background:#0a1420;padding:11px;font-size:11px;
+       color:var(--text-dim);white-space:pre-wrap;max-height:210px;overflow-y:auto;margin:8px 0;}
+  table{width:100%;border-collapse:collapse;font-size:11.5px;margin:10px 0;}
+  th{text-align:left;color:var(--text-faint);font-weight:400;padding:6px 8px;
+     border-bottom:1px solid var(--line);text-transform:uppercase;font-size:10px;}
+  td{padding:6px 8px;border-bottom:1px solid var(--line-soft);}
+  td.n{text-align:right;}
+  .sim{color:var(--teal);} .nao{color:var(--text-faint);} .alerta{color:var(--brick);}
+  .ouro{color:var(--gold);}
+  h2{font-size:16px;margin:28px 0 4px;}
+  p.explica{color:var(--text-dim);font-size:12.5px;margin:6px 0 10px;}
+  section{border:1px solid var(--line-soft);padding:18px;margin:22px 0;background:var(--panel);}
+  #ver1,#ver2{border:1px solid var(--line);padding:16px;margin:14px 0;font-size:13px;}
+  textarea{width:100%;height:280px;background:#0a1420;color:var(--text-dim);
+           border:1px solid var(--line-soft);font-family:var(--mono);font-size:11px;padding:10px;}
+</style>
+</head>
+<body>
+<header><div class="wrap">
+  <div class="sub">SEIOS · medição isolada — não é o sistema, não grava nada, não muda nada</div>
+  <h1>Fluxo de ETF e liquidações antecedem o preço?</h1>
+  <div class="sub">as duas fontes que faltavam · ambas gratuitas · TFTC (CC BY 4.0) e Coinalyze</div>
+</div></header>
+
+<div class="wrap">
+
+  <div class="aviso">
+    <b>Por que estas duas.</b> São os dois buracos que o dia 20/08 escancarou. O motor
+    Institucional pesa 15% e roda com <b>um único indicador</b> — <code>etfFlow</code>,
+    <code>custodia</code> e <code>soberanos</code> estão declarados e nunca preencheram. E a
+    alta de 69,3k → 71,8k, com open interest subindo, tem assinatura de liquidação de
+    vendidos — que o sistema não tinha como verificar.
+    <br><br>
+    <b>O que já sabemos, e vale como aviso.</b> ~110 medições em 18–19/08 não aprovaram
+    nada. As relações reais que encontramos (S&P +0,351, VIX −0,282) têm pico de correlação
+    em <b>defasagem ZERO</b> — descrevem, não antecedem. <b>Liquidação é reativa por
+    construção:</b> acontece <i>porque</i> o preço se moveu. O fluxo de ETF é público e
+    diário — todo mundo vê ao mesmo tempo. <b>O desfecho provável é "não antecede".</b>
+    <br><br>
+    <b>O que muda mesmo assim:</b> independentemente do resultado, dois indicadores mortos
+    do sistema ganham fonte real. Descrever passa a ser possível, mesmo que prever não seja.
+  </div>
+
+  <div class="regra">
+    <b>REGRA DECLARADA ANTES DE MEDIR — 20/08/2026</b><br><br>
+    <b>Partição temporal, não aleatória:</b> ETF até 31/12/2025 estuda, 2026 confirma.
+    Liquidações: primeiros 60% estudam, últimos 40% confirmam.<br><br>
+    <b>Passa se, e somente se:</b> |t| ≥ 2,576 no estudo <u>e</u> na reserva, com o
+    <u>mesmo sinal</u>. Uma relação que inverte entre as metades não é sinal — é regime que
+    mudou, e foi exatamente o que derrubou o score agregado (+0,071 → −0,019).<br><br>
+    <b>Horizontes fixados agora:</b> ETF contra retorno de 1, 3 e 7 dias. Liquidações
+    contra o retorno da janela seguinte (mesma granularidade da série).<br><br>
+    <b>Sem terceira tentativa.</b> Não se muda horizonte nem corte depois de ver o
+    resultado.<br><br>
+    <b>O que um "passa" autoriza:</b> virar sensor no sistema, acumulando série. <b>Não</b>
+    autoriza votar no score — a regra do m12 vale: direção não verificada não vota.
+  </div>
+
+  <!-- ================= TESTE 1 ================= -->
+  <section>
+    <h2>Teste 1 · Fluxo de ETF → retorno futuro</h2>
+    <p class="explica">Fonte: <code>tftc.io/bitcoin-etf-flows/data.json</code> — CC BY 4.0,
+      histórico completo desde 11/01/2024, atualizado duas vezes por dia. Preço: velas
+      diárias da Binance. <b>Não precisa de chave.</b></p>
+    <button id="btn1">▶ Rodar teste 1</button>
+    <div class="log" id="log1">aguardando.</div>
+    <div id="ver1" style="display:none;"></div>
+    <div id="out1"></div>
+  </section>
+
+  <!-- ================= TESTE 2 ================= -->
+  <section>
+    <h2>Teste 2 · Liquidações long/short → retorno futuro</h2>
+    <p class="explica">Fonte: <code>api.coinalyze.net</code> — chave gratuita em
+      <code>coinalyze.net</code> (conta grátis → API). 40 chamadas/min.
+      <b>Limitação declarada pela própria fonte:</b> só 1.500–2.000 pontos em granularidade
+      intradiária; a série diária tem histórico longo. E a Binance limita liquidações
+      públicas a uma ordem por segundo desde 2021 — <b>o dado subestima os picos.</b></p>
+    <div>
+      <input id="chave" type="password" placeholder="cole aqui a chave da Coinalyze (fica só no navegador)">
+    </div>
+    <button id="btn2">▶ Rodar teste 2</button>
+    <div class="log" id="log2">aguardando chave.</div>
+    <div id="ver2" style="display:none;"></div>
+    <div id="out2"></div>
+  </section>
+
+  <section>
+    <h2>Copiar para o Claude</h2>
+    <button class="ghost" id="btnCopiar">⧉ Copiar</button>
+    <textarea id="texto" readonly></textarea>
+  </section>
+</div>
+
+<script>
+const DIA=86400000;
+function ymd(t){ return new Date(t).toISOString().slice(0,10); }
+function media(a){ return a.length?a.reduce(function(x,y){return x+y;},0)/a.length:null; }
+function correlacao(x,y){
+  const mx=media(x),my=media(y); let n=0,dx=0,dy=0;
+  for(let i=0;i<x.length;i++){ const a=x[i]-mx,b=y[i]-my; n+=a*b; dx+=a*a; dy+=b*b; }
+  return (dx===0||dy===0)?0:n/Math.sqrt(dx*dy);
+}
+function tDeR(r,n){ return (n<3||Math.abs(r)>=1)?0:r*Math.sqrt((n-2)/(1-r*r)); }
+function rMin(n){ const t=2.576; return n<4?NaN:t/Math.sqrt(n-2+t*t); }
+function f(x,d){ return (x===null||x===undefined||!Number.isFinite(x))?"—":x.toFixed(d); }
+function avaliar(pares){
+  const b=pares.filter(function(p){ return Number.isFinite(p.x)&&Number.isFinite(p.y); });
+  if(b.length<40) return null;
+  const r=correlacao(b.map(function(p){return p.x;}), b.map(function(p){return p.y;}));
+  return { n:b.length, r:r, t:tDeR(r,b.length), rMin:rMin(b.length) };
+}
+const dorme=function(ms){ return new Promise(function(s){ setTimeout(s,ms); }); };
+function mkLog(id){ return function(m){ const e=document.getElementById(id);
+  e.textContent=(e.textContent==="aguardando."||e.textContent==="aguardando chave.")?m:(e.textContent+"\n"+m);
+  e.scrollTop=e.scrollHeight; }; }
+
+async function velasDiarias(){
+  const t=[]; let fim=Date.now();
+  for(let i=0;i<4;i++){
+    const r=await fetch("https://api.binance.com/api/v3/klines?symbol=BTCUSDT&interval=1d&limit=1000&endTime="+fim);
+    if(!r.ok) throw new Error("Binance "+r.status);
+    const d=await r.json(); if(!d.length) break;
+    t.unshift.apply(t,d); fim=d[0][0]-1;
+    if(d.length<1000) break; await dorme(300);
+  }
+  return t;   /* a vela de hoje FICA: o retorno futuro dela é que não existe, e o filtro cuida disso */
+}
+
+let T1="", T2="";
+function atualizaTexto(){
+  document.getElementById("texto").value =
+    "SEIOS · ETF FLOW E LIQUIDAÇÕES\nmedido em "+new Date().toLocaleString("pt-BR")+"\n\n"+T1+"\n"+T2;
+}
+
+/* ---------------- TESTE 1: fluxo de ETF ---------------- */
+document.getElementById("btn1").addEventListener("click", async function(){
+  const log=mkLog("log1"); this.disabled=true;
+  try{
+    log("buscando fluxo de ETF (TFTC, CC BY 4.0)…");
+    const r=await fetch("https://www.tftc.io/bitcoin-etf-flows/data.json");
+    if(!r.ok) throw new Error("TFTC "+r.status);
+    const bruto=await r.json();
+
+    /* o formato pode variar: procura uma lista com data e total */
+    let linhas=null;
+    (function achar(o){
+      if(linhas) return;
+      if(Array.isArray(o) && o.length>20 && typeof o[0]==="object"){
+        const k=Object.keys(o[0]).map(function(x){return x.toLowerCase();});
+        if(k.some(function(x){return x.indexOf("date")>=0||x==="day";}) &&
+           k.some(function(x){return x.indexOf("total")>=0||x.indexOf("flow")>=0||x.indexOf("net")>=0;}))
+          { linhas=o; return; }
+      }
+      if(o && typeof o==="object") Object.keys(o).forEach(function(k){ achar(o[k]); });
+    })(bruto);
+    if(!linhas) throw new Error("não encontrei a lista de fluxos no JSON — formato mudou");
+    log("registros de fluxo: "+linhas.length);
+
+    const chaveData=Object.keys(linhas[0]).filter(function(k){
+      return k.toLowerCase().indexOf("date")>=0 || k.toLowerCase()==="day"; })[0];
+    const chaveTotal=Object.keys(linhas[0]).filter(function(k){
+      const l=k.toLowerCase(); return l.indexOf("total")>=0||l.indexOf("netflow")>=0||l==="flow"||l==="net"; })[0];
+    log("campos: data="+chaveData+" · total="+chaveTotal);
+
+    const fluxo={};
+    linhas.forEach(function(o){
+      const dt=String(o[chaveData]).slice(0,10);
+      const v=Number(String(o[chaveTotal]).replace(/[(),$]/g,function(c){ return c==="("?"-":""; }));
+      if(/^\d{4}-\d{2}-\d{2}$/.test(dt) && Number.isFinite(v)) fluxo[dt]=v;
+    });
+    log("dias com fluxo válido: "+Object.keys(fluxo).length);
+
+    log("buscando velas diárias…");
+    const kl=await velasDiarias();
+    const dias=kl.map(function(k){ return { data:ymd(k[0]), close:Number(k[4]) }; })
+                 .filter(function(d){ return Number.isFinite(d.close)&&d.close>0; });
+    for(let i=0;i<dias.length;i++){
+      if(i+1<dias.length) dias[i].r1=(dias[i+1].close/dias[i].close-1)*100;
+      if(i+3<dias.length) dias[i].r3=(dias[i+3].close/dias[i].close-1)*100;
+      if(i+7<dias.length) dias[i].r7=(dias[i+7].close/dias[i].close-1)*100;
+      dias[i].fluxo = fluxo[dias[i].data];
+    }
+    const comFluxo=dias.filter(function(d){ return Number.isFinite(d.fluxo); });
+    log("dias casados com preço: "+comFluxo.length);
+
+    const CORTE="2026-01-01";
+    const est=comFluxo.filter(function(d){ return d.data<CORTE; });
+    const res=comFluxo.filter(function(d){ return d.data>=CORTE; });
+    log("estudo: "+est.length+" · reserva: "+res.length);
+
+    const HZ=[["r1","1 dia",1],["r3","3 dias",3],["r7","7 dias",7]];
+    let h='<table><thead><tr><th>Horizonte</th><th class="n">N est.</th><th class="n">r est.</th>'+
+      '<th class="n">t est.</th><th class="n">N res.</th><th class="n">r res.</th>'+
+      '<th class="n">t res.</th><th>Veredito</th></tr></thead><tbody>';
+    const linhasTxt=[]; let passou=[];
+    HZ.forEach(function(z){
+      const pe=[],pr=[];
+      for(let i=0;i<est.length;i+=z[2]) if(Number.isFinite(est[i][z[0]])) pe.push({x:est[i].fluxo,y:est[i][z[0]]});
+      for(let i=0;i<res.length;i+=z[2]) if(Number.isFinite(res[i][z[0]])) pr.push({x:res[i].fluxo,y:res[i][z[0]]});
+      const a=avaliar(pe), b=avaliar(pr);
+      const ok=a&&b&&Math.abs(a.t)>=2.576&&Math.abs(b.t)>=2.576&&Math.sign(a.r)===Math.sign(b.r);
+      if(ok) passou.push(z[1]);
+      h+='<tr><td>'+z[1]+'</td><td class="n">'+(a?a.n:"—")+'</td><td class="n">'+(a?f(a.r,3):"—")+
+         '</td><td class="n">'+(a?f(a.t,2):"—")+'</td><td class="n">'+(b?b.n:"—")+
+         '</td><td class="n">'+(b?f(b.r,3):"—")+'</td><td class="n">'+(b?f(b.t,2):"—")+
+         '</td><td class="'+(ok?"sim":"nao")+'">'+(ok?"PASSA":"não")+'</td></tr>';
+      linhasTxt.push("  ETF → "+z[1]+": est "+(a?"N="+a.n+" r="+f(a.r,3)+" t="+f(a.t,2):"—")+
+        " | res "+(b?"N="+b.n+" r="+f(b.r,3)+" t="+f(b.t,2):"—")+" | "+(ok?"PASSA":"não"));
+    });
+    h+='</tbody></table>';
+
+    /* leitura direta: dias de entrada vs. dias de saída */
+    const ent=comFluxo.filter(function(d){ return d.fluxo>0 && Number.isFinite(d.r1); }).map(function(d){ return d.r1; });
+    const sai=comFluxo.filter(function(d){ return d.fluxo<0 && Number.isFinite(d.r1); }).map(function(d){ return d.r1; });
+    h+='<table><thead><tr><th>Quando o fluxo foi…</th><th class="n">Dias</th>'+
+       '<th class="n">BTC no dia SEGUINTE</th><th class="n">subiu em</th></tr></thead><tbody>'+
+       '<tr><td>entrada (positivo)</td><td class="n">'+ent.length+'</td><td class="n '+((media(ent)||0)>0?"sim":"alerta")+'">'+
+       f(media(ent),2)+'%</td><td class="n">'+f(ent.length?ent.filter(function(x){return x>0;}).length/ent.length*100:null,0)+'%</td></tr>'+
+       '<tr><td>saída (negativo)</td><td class="n">'+sai.length+'</td><td class="n '+((media(sai)||0)>0?"sim":"alerta")+'">'+
+       f(media(sai),2)+'%</td><td class="n">'+f(sai.length?sai.filter(function(x){return x>0;}).length/sai.length*100:null,0)+'%</td></tr>'+
+       '</tbody></table>';
+    linhasTxt.push("  entrada → BTC dia seguinte "+f(media(ent),2)+"% ("+ent.length+"d) · saída → "+f(media(sai),2)+"% ("+sai.length+"d)");
+
+    const v=document.getElementById("ver1"); v.style.display="block";
+    v.innerHTML = passou.length
+      ? '<span class="sim"><strong>PASSOU em: '+passou.join(", ")+'.</strong></span><br><br>Hipótese, não licença: entra como sensor, acumula série, e a confirmação vem de dado novo.'
+      : '<span class="alerta"><strong>Nenhum horizonte passou pela regra declarada.</strong></span><br><br>O fluxo de ETF descreve demanda institucional — mas, como tudo que medimos, não antecede o preço. <strong>Ainda assim vale coletar:</strong> preenche <code>etfFlow</code>, que está morto desde sempre.';
+    document.getElementById("out1").innerHTML=h;
+    T1="=== TESTE 1 · FLUXO DE ETF (TFTC) ===\n  dias casados: "+comFluxo.length+
+       " · estudo "+est.length+" · reserva "+res.length+"\n"+linhasTxt.join("\n")+
+       "\n  VEREDITO: "+(passou.length?passou.join(", "):"nenhum passou")+"\n";
+    atualizaTexto(); log("pronto.");
+  }catch(e){ log("FALHOU: "+e.message); this.disabled=false; }
+});
+
+/* ---------------- TESTE 2: liquidações ---------------- */
+document.getElementById("btn2").addEventListener("click", async function(){
+  const log=mkLog("log2");
+  const chave=document.getElementById("chave").value.trim();
+  if(!chave){ log("cole a chave da Coinalyze primeiro (conta grátis em coinalyze.net)."); return; }
+  this.disabled=true;
+  try{
+    const base="https://api.coinalyze.net/v1";
+    const cab={ headers:{ "api_key": chave } };
+    log("buscando liquidações diárias (Binance BTCUSDT perp)…");
+    const fim=Math.floor(Date.now()/1000);
+    const ini=fim - 400*24*3600;
+    const url=base+"/liquidation-history?symbols=BTCUSDT_PERP.A&interval=daily&from="+ini+"&to="+fim+"&convert_to_usd=true";
+    const r=await fetch(url, cab);
+    if(!r.ok) throw new Error("Coinalyze "+r.status+" — chave inválida ou limite atingido");
+    const d=await r.json();
+    const hist=(d && d[0] && d[0].history) || [];
+    if(!hist.length) throw new Error("resposta sem histórico — confira o símbolo/plano");
+    log("pontos de liquidação: "+hist.length);
+
+    log("buscando velas diárias…");
+    const kl=await velasDiarias();
+    const preco={}; kl.forEach(function(k){ preco[ymd(k[0])]=Number(k[4]); });
+
+    const linhas=hist.map(function(p){
+      const dt=ymd(p.t*1000);
+      return { data:dt, longs:Number(p.l), shorts:Number(p.s), close:preco[dt] };
+    }).filter(function(x){ return Number.isFinite(x.longs)&&Number.isFinite(x.shorts)&&Number.isFinite(x.close); });
+    linhas.sort(function(a,b){ return a.data<b.data?-1:1; });
+    for(let i=0;i<linhas.length-1;i++) linhas[i].ret=(linhas[i+1].close/linhas[i].close-1)*100;
+    const usaveis=linhas.filter(function(x){ return Number.isFinite(x.ret); });
+    log("dias casados com preço: "+usaveis.length);
+
+    const corte=Math.floor(usaveis.length*0.6);
+    const est=usaveis.slice(0,corte), res=usaveis.slice(corte);
+    log("estudo: "+est.length+" · reserva: "+res.length);
+
+    const MED=[
+      ["shorts","Liquidação de VENDIDOS (US$)", function(x){ return x.shorts; }],
+      ["longs","Liquidação de COMPRADOS (US$)", function(x){ return x.longs; }],
+      ["dif","Vendidos − Comprados", function(x){ return x.shorts - x.longs; }],
+      ["prop","Proporção vendidos (% do total)", function(x){
+        const t=x.shorts+x.longs; return t>0?((x.shorts/t)*100-50):null; }]
+    ];
+    let h='<table><thead><tr><th>Medida</th><th class="n">N est.</th><th class="n">r est.</th>'+
+      '<th class="n">t est.</th><th class="n">N res.</th><th class="n">r res.</th>'+
+      '<th class="n">t res.</th><th>Veredito</th></tr></thead><tbody>';
+    const txt=[]; const passou=[];
+    MED.forEach(function(m){
+      const a=avaliar(est.map(function(x){ return {x:m[2](x), y:x.ret}; }));
+      const b=avaliar(res.map(function(x){ return {x:m[2](x), y:x.ret}; }));
+      const ok=a&&b&&Math.abs(a.t)>=2.576&&Math.abs(b.t)>=2.576&&Math.sign(a.r)===Math.sign(b.r);
+      if(ok) passou.push(m[1]);
+      h+='<tr><td>'+m[1]+'</td><td class="n">'+(a?a.n:"—")+'</td><td class="n">'+(a?f(a.r,3):"—")+
+         '</td><td class="n">'+(a?f(a.t,2):"—")+'</td><td class="n">'+(b?b.n:"—")+
+         '</td><td class="n">'+(b?f(b.r,3):"—")+'</td><td class="n">'+(b?f(b.t,2):"—")+
+         '</td><td class="'+(ok?"sim":"nao")+'">'+(ok?"PASSA":"não")+'</td></tr>';
+      txt.push("  "+m[1]+": est "+(a?"N="+a.n+" r="+f(a.r,3)+" t="+f(a.t,2):"—")+
+        " | res "+(b?"N="+b.n+" r="+f(b.r,3)+" t="+f(b.t,2):"—")+" | "+(ok?"PASSA":"não"));
+    });
+    h+='</tbody></table>';
+
+    /* leitura direta: dias de liquidação extrema */
+    const ord=usaveis.slice().sort(function(a,b){ return (b.shorts)-(a.shorts); });
+    const top=ord.slice(0, Math.max(10, Math.floor(ord.length*0.1)));
+    h+='<p class="explica">Nos <strong>'+top.length+' dias de maior liquidação de vendidos</strong>, '+
+       'o BTC no dia seguinte fez em média <strong class="'+((media(top.map(function(x){return x.ret;}))||0)>0?"sim":"alerta")+'">'+
+       f(media(top.map(function(x){ return x.ret; })),2)+'%</strong> — contra '+
+       f(media(usaveis.map(function(x){ return x.ret; })),2)+'% de todos os dias.</p>';
+    txt.push("  top 10% de liquidação de vendidos → BTC dia seguinte "+
+      f(media(top.map(function(x){return x.ret;})),2)+"% vs "+f(media(usaveis.map(function(x){return x.ret;})),2)+"% geral");
+
+    const v=document.getElementById("ver2"); v.style.display="block";
+    v.innerHTML = passou.length
+      ? '<span class="sim"><strong>PASSOU: '+passou.join(", ")+'.</strong></span><br><br>Hipótese, não licença.'
+      : '<span class="alerta"><strong>Nenhuma medida passou pela regra declarada.</strong></span>'+
+        '<br><br>Era o esperado: <strong>liquidação é reativa por construção</strong> — acontece porque o preço se moveu. O valor dela é DESCRITIVO: explicar se uma alta veio de compra ou de vendidos sendo estourados.';
+    document.getElementById("out2").innerHTML=h;
+    T2="=== TESTE 2 · LIQUIDAÇÕES (Coinalyze) ===\n  dias: "+usaveis.length+
+       " · estudo "+est.length+" · reserva "+res.length+"\n"+txt.join("\n")+
+       "\n  VEREDITO: "+(passou.length?passou.join(", "):"nenhuma passou")+"\n";
+    atualizaTexto(); log("pronto.");
+  }catch(e){ log("FALHOU: "+e.message); this.disabled=false; }
+});
+
+document.getElementById("btnCopiar").addEventListener("click", async function(){
+  const t=document.getElementById("texto");
+  try{ await navigator.clipboard.writeText(t.value); this.textContent="✓ copiado"; }
+  catch(e){ t.focus(); t.select(); this.textContent="selecione e copie"; }
+});
+</script>
+</body>
+</html>

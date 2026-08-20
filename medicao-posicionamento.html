@@ -179,26 +179,33 @@ function comparar(dentro, todas, sobre){
    pontos, doze vezes mais. O r mínimo cai para ~0,04 — abaixo de tudo que já
    medimos, então um efeito real passa a ser visível.
    A pergunta é a MESMA; só a resolução muda. */
+/* v3 — PAGINAÇÃO PARA TRÁS, com endTime.
+   A v2 paginou com startTime e trouxe 487 pontos — praticamente os mesmos 498 da
+   v1. MEDIDO: os endpoints /futures/data/ devolvem o lote MAIS RECENTE e ignoram
+   startTime na prática, mesmo a documentação dizendo que ele existe.
+   O padrão que funciona nestes endpoints é caminhar de trás para frente:
+   pedir o lote mais recente, depois pedir tudo ANTES do ponto mais antigo
+   recebido, e repetir. 30 dias em velas de 5min são ~8.640 pontos = 18 lotes. */
 async function binanceData(caminho){
-  const PASSO=5*60*1000, LOTE=500;
-  const fim=Date.now(), ini=fim-30*24*3600*1000;
-  const out=[]; let cursor=ini, voltas=0;
-  while(cursor<fim && voltas<30){
+  const LOTE=500, LIMITE_MS=Date.now()-30*24*3600*1000;
+  const out=[]; let fim=Date.now(), voltas=0;
+  while(voltas<25){
     const url="https://fapi.binance.com/futures/data/"+caminho+
-              "?symbol=BTCUSDT&period=5m&limit="+LOTE+"&startTime="+cursor+"&endTime="+fim;
+              "?symbol=BTCUSDT&period=5m&limit="+LOTE+"&endTime="+fim;
     const r=await fetch(url);
     if(!r.ok) throw new Error(caminho+" "+r.status);
     const d=await r.json();
     if(!d.length) break;
     out.push.apply(out,d);
-    const ultimo=Number(d[d.length-1].timestamp);
-    if(!Number.isFinite(ultimo)||ultimo<=cursor) break;
-    cursor=ultimo+PASSO;
+    const maisAntigo=Number(d[0].timestamp);
+    if(!Number.isFinite(maisAntigo)) break;
+    if(maisAntigo<=LIMITE_MS) break;      /* chegou aos 30 dias */
+    if(fim<=maisAntigo) break;            /* não avançou: para em vez de girar */
+    fim=maisAntigo-1;
     voltas++;
     if(d.length<LOTE) break;
-    await dorme(180);
+    await dorme(160);
   }
-  /* a Binance pode repetir o ponto de fronteira entre lotes */
   const vistos={}, limpo=[];
   out.forEach(function(o){ const t=Number(o.timestamp);
     if(!vistos[t]){ vistos[t]=1; limpo.push(o); } });
@@ -228,9 +235,12 @@ document.getElementById("btn").addEventListener("click", async function(){
     const kl=await velasBase();
     log("  "+kl.length+" velas");
 
-    log("open interest histórico, 5min paginado…");
+    log("open interest, 5min paginado para trás…");
     const oi=await binanceData("openInterestHist");
-    log("  "+oi.length+" pontos");
+    const cobertura=function(l){ return l.length<2 ? "—" :
+      ((Number(l[l.length-1].timestamp)-Number(l[0].timestamp))/86400000).toFixed(1)+" dias"; };
+    log("  "+oi.length+" pontos · "+cobertura(oi));
+    if(oi.length<2000) log("  ⚠ menos de 2.000 pontos: a paginação não alcançou 30 dias");
     await dorme(250);
     log("posição dos MAIORES traders…");
     const topPos=await binanceData("topLongShortPositionRatio");

@@ -684,6 +684,8 @@ var PELE_ATUAL = "padrao";
        no meio do desenho. Aqui ela sobrevive a qualquer render. -->
   <!-- v121 — leitura em três camadas, na tela principal. Fica FORA do #heroWrap
        pelo mesmo motivo da faixa ao vivo: renderHero() reescreve aquele bloco. -->
+  <section class="panel" id="painelApetite" style="margin:18px 0;"></section>
+
   <section class="panel" id="painelCadencia" style="margin:18px 0;"></section>
 
   <div class="live-strip" id="liveTickWrap">
@@ -1179,7 +1181,7 @@ const STORAGE_KEY = "seios_btc_v2";
 // fonte única da versão — usada no rodapé, no histórico e nos exports.
 // Muda toda vez que a fórmula de score/pesos muda, pra nunca misturar
 // decisões de regras diferentes como se fossem comparáveis.
-const BUILD_VERSION = "2026-08-19.124-cvd";
+const BUILD_VERSION = "2026-08-20.125-apetite";
 /* v78: versão do MODELO separada da versão do BUILD. Mudança visual não é
    mudança de semântica: só sobe quando peso, fórmula, corte ou trava mudam.
    Toda observação gravada carrega as duas, pra que seis meses depois dê pra
@@ -3782,6 +3784,7 @@ async function refreshMarketData(){
   try{ await coletarSensoresExploratorios(); }catch(e){ logFinal("sensores exploratórios: " + e.message); }
   await coletarVelasCamadas();   // v122 — velas dos três relógios
   await coletarCVD();            // v124 — execução acumulada, sensor
+  await coletarApetite();        // v125 — termômetro de apetite, painel próprio
 
   gravarObservacoesDaRodada()
     .then(function(n){ if(n) logFinal(`📈 ${n} observações point-in-time gravadas`); })
@@ -4493,6 +4496,75 @@ function registrarObservacao(motorKey, indKey, score, meta){
    por rodada, na mesma fonte que o sistema já usa. Se falhar, a rodada NÃO
    cai: o gráfico é opcional e o painel funciona sem ele. */
 /* v124 — 24 velas de 1h fechadas. Se falhar, a rodada não cai. */
+/* v125 — os três fluxos com histórico próprio, para o percentil ter base.
+   Se falhar, a rodada NÃO cai: o termômetro é exibição. */
+async function coletarApetite(){
+  try{
+    const PASSO=12;                     /* 12 velas de 5min = 1 hora */
+    const r = await smartFetch("https://api.binance.com/api/v3/klines?symbol=BTCUSDT&interval=5m&limit=1000");
+    if(!r.ok) throw new Error("klines " + r.status);
+    const kl = await r.json();
+    kl.pop();                           /* vela em formação fora */
+
+    /* 1 · CVD de 24h, janela deslizante */
+    const cvdSerie=[];
+    for(let i=24*PASSO; i<kl.length; i++){
+      let liq=0, vol=0, ok=true;
+      for(let k=i-24*PASSO+1; k<=i; k++){
+        const qv=Number(kl[k][7]), tbq=Number(kl[k][10]);
+        if(!Number.isFinite(qv)||!Number.isFinite(tbq)){ ok=false; break; }
+        liq += (2*tbq-qv); vol += qv;
+      }
+      if(ok && vol>0) cvdSerie.push((liq/vol)*100);
+    }
+
+    /* 2 · open interest, variação em 4h — paginação PARA TRÁS, porque os
+       endpoints /futures/data/ ignoram startTime na prática (medido em 20/08) */
+    const oiPontos=[]; let fimOI=Date.now();
+    for(let v=0; v<6; v++){
+      const ro = await smartFetch("https://fapi.binance.com/futures/data/openInterestHist" +
+                                  "?symbol=BTCUSDT&period=5m&limit=500&endTime="+fimOI);
+      if(!ro.ok) break;
+      const d = await ro.json();
+      if(!d.length) break;
+      oiPontos.unshift.apply(oiPontos, d);
+      const antigo = Number(d[0].timestamp);
+      if(!Number.isFinite(antigo) || fimOI <= antigo) break;
+      fimOI = antigo-1;
+      if(d.length < 500) break;
+    }
+    const oiSerie=[];
+    for(let i=4*PASSO; i<oiPontos.length; i++){
+      const a=Number(oiPontos[i].sumOpenInterest), b=Number(oiPontos[i-4*PASSO].sumOpenInterest);
+      if(Number.isFinite(a)&&Number.isFinite(b)&&b) oiSerie.push((a/b-1)*100);
+    }
+
+    /* 3 · funding INVERTIDO: taxa alta = manada comprada = risco */
+    const rf = await smartFetch("https://fapi.binance.com/fapi/v1/fundingRate?symbol=BTCUSDT&limit=500");
+    const fdSerie=[];
+    if(rf.ok){
+      const d = await rf.json();
+      (d||[]).forEach(function(o){ const v=Number(o.fundingRate);
+        if(Number.isFinite(v)) fdSerie.push(-v); });
+    }
+
+    const pct = {
+      cvd:     cvdSerie.length ? percentilDeApetite(cvdSerie.slice(0,-1), cvdSerie[cvdSerie.length-1]) : null,
+      oi:      oiSerie.length  ? percentilDeApetite(oiSerie.slice(0,-1),  oiSerie[oiSerie.length-1])  : null,
+      funding: fdSerie.length  ? percentilDeApetite(fdSerie.slice(0,-1),  fdSerie[fdSerie.length-1])  : null
+    };
+    const bruto = {
+      cvd:     cvdSerie.length ? cvdSerie[cvdSerie.length-1] : null,
+      oi:      oiSerie.length  ? oiSerie[oiSerie.length-1]   : null,
+      funding: fdSerie.length  ? -fdSerie[fdSerie.length-1]  : null
+    };
+    const a = calcularApetite(pct);
+    S.market.apetite = { valor:a.valor, estado:a.estado.nome, componentes:a.componentes,
+                         pct:pct, bruto:bruto, em:Date.now(),
+                         base:{ cvd:cvdSerie.length, oi:oiSerie.length, funding:fdSerie.length } };
+  }catch(e){ /* silencioso: exibição não derruba coleta */ }
+}
+
 async function coletarCVD(){
   try{
     const r = await smartFetch("https://api.binance.com/api/v3/klines?symbol=BTCUSDT&interval=1h&limit=25");
@@ -4786,6 +4858,17 @@ function montarSnapshot(results){
        exibição, não pode impedir a gravação do score. */
     camadas: (function(){ try{ return resumoDasCamadas(leituraPorCadencia()); }
                           catch(eC){ return {}; } })(),
+    /* v125 — o apetite vai junto na série. Em try porque o snapshot alimenta
+       as 777: um erro no termômetro não pode impedir a gravação do score. */
+    apetite: (function(){ try{
+      const A = S.market && S.market.apetite;
+      if(!A || A.valor === null || A.valor === undefined) return null;
+      return { valor: Math.round(A.valor*10)/10, estado: A.estado,
+               componentes: A.componentes,
+               pct: { cvd: A.pct && A.pct.cvd !== null ? Math.round(A.pct.cvd) : null,
+                      oi:  A.pct && A.pct.oi  !== null ? Math.round(A.pct.oi)  : null,
+                      funding: A.pct && A.pct.funding !== null ? Math.round(A.pct.funding) : null } };
+    }catch(eA){ return null; } })(),
     pesosEfetivos: efetivos,
     indicadores: indicadores,
     falhas: results && results.fail ? results.fail.slice() : [],
@@ -6096,6 +6179,77 @@ function cvdDeVelas(velas){
   return { proporcao:(liquido / volume) * 100, liquido:liquido, volume:volume, velas:n };
 }
 
+/* =====================================================================
+   v125 — TERMÔMETRO DE APETITE: só fluxo, só acumulado, só descrição
+   =====================================================================
+   Em 19–20/08 o BTC saiu de ~62k e passou de 73k. Durante o movimento,
+   19 dos 31 indicadores do sistema NÃO SE MOVERAM um décimo — são fontes
+   diárias ou de janela de 90 dias. E dos 12 que se moveram, quatro eram
+   momentum, rsi, mediaMovel e tendencia: o preço com outro nome.
+
+   OS TRÊS COMPONENTES, testados contra as 48 horas reais:
+   · CVD 24h          — 29 → 92 na virada, 92 → 50 esvaziando. O melhor.
+   · Open interest 4h — 16 → 78 → 100 às 11:35; o BTC saltou 3.166 na hora
+                        seguinte.
+   · Funding invertido — 74–90 na subida, despencou a 6 e ficou lá. Descreve
+                        regime: a manada entrou comprada e não saiu.
+                        É leitura CONTRÁRIA, como o Fear & Greed.
+
+   REPROVADOS, e retirados:
+   · Taker oficial  — 67→33→50→95→38→3→5→81 entre horas consecutivas. E mediu
+                      r = −0,001 contra o retorno em 8.900 pontos.
+   · Agressão de 1h — oscila igual, e é redundante com o CVD.
+   O padrão: os três que serviram são ACUMULADOS; os dois que falharam são
+   INSTANTÂNEOS. Terceira vez que isso aparece — foi o que rebaixou o
+   takerRatio (v111) e o book (v106).
+
+   PERCENTIL, NÃO ESCALA FIXA. O corte de ±15 cruza em 0% dos dias no
+   funding, 1,8% no CVD, 82% nos endereços e 86% no hash rate. Em percentil
+   expandido todos falam a mesma língua; o laboratório deu mediana 51.
+
+   NÃO É PREVISÃO. Onze rodadas, ~150 testes, nada antecede o preço. O melhor
+   resultado que apareceu (OI, r=+0,355, t=6,54) EVAPOROU para r=+0,013 sem
+   as 48h do episódio que o gerou. */
+
+/* percentil expandido: compara com o próprio passado, nunca com o futuro */
+function percentilDeApetite(historico, valor){
+  if(!Array.isArray(historico) || historico.length < 30) return null;
+  /* DEFEITO PEGO PELO HARNESS v125: Number(null) é ZERO, não NaN. A guarda
+     original deixava passar null e undefined, e um componente AUSENTE virava
+     "percentil de zero" — uma afirmação falsa de fluxo fraco onde havia
+     silêncio. Ausência tem que recusar, não pontuar. */
+  if(valor === null || valor === undefined || typeof valor !== "number"
+     || !Number.isFinite(valor)) return null;
+  const ord = historico.filter(function(v){ return Number.isFinite(v); })
+                       .slice().sort(function(a,b){ return a-b; });
+  if(ord.length < 30) return null;
+  let lo=0, hi=ord.length;
+  while(lo<hi){ const m=(lo+hi)>>1; if(ord[m]<=Number(valor)) lo=m+1; else hi=m; }
+  return (lo/ord.length)*100;
+}
+
+function estadoDeApetite(n){
+  if(n === null || n === undefined || !Number.isFinite(Number(n)))
+    return { nome:"SEM DADO", cor:"var(--text-faint)" };
+  const v = Number(n);
+  if(v >= 75) return { nome:"COMPRADOR FORTE", cor:"var(--teal)" };
+  if(v >= 58) return { nome:"COMPRADOR",       cor:"var(--teal)" };
+  if(v >= 42) return { nome:"MORNO",           cor:"var(--gold)" };
+  if(v >= 25) return { nome:"VENDEDOR",        cor:"var(--brick)" };
+  return             { nome:"VENDEDOR FORTE",  cor:"var(--brick)" };
+}
+
+/* recebe os percentis já calculados. Precisa de 2 dos 3 — com um só, a média
+   seria o próprio componente com cara de índice. */
+function calcularApetite(p){
+  const vs = ["cvd","oi","funding"]
+    .map(function(k){ return p && Number.isFinite(Number(p[k])) ? Number(p[k]) : null; })
+    .filter(function(v){ return v !== null; });
+  if(vs.length < 2) return { valor:null, estado:estadoDeApetite(null), componentes:vs.length };
+  const m = vs.reduce(function(a,b){ return a+b; }, 0) / vs.length;
+  return { valor:m, estado:estadoDeApetite(m), componentes:vs.length };
+}
+
 function classificarValor(v){
   if(v === null || v === undefined || !Number.isFinite(Number(v))) return "sem_dado";
   const n = Number(v);
@@ -6189,6 +6343,71 @@ function resumoDasCamadas(leituras){
 
 function leituraPorCadencia(){
   return CAMADAS.map(function(c){ return lerCamada(c.id); });
+}
+
+/* v125 — o painel do termômetro. Vive separado das três camadas e do score:
+   é uma leitura de FLUXO, não uma agregação de motores. */
+function blocoApetite(){
+  const A = S.market && S.market.apetite;
+  if(!A || A.valor === null || A.valor === undefined) return "";
+  const e = estadoDeApetite(A.valor);
+  const COMP = [
+    ["cvd","CVD 24h","compra líquida acumulada — quanto do volume foi compra a mercado"],
+    ["oi","Open interest 4h","posição sendo montada ou desmontada"],
+    ["funding","Funding invertido","taxa alta = manada comprada = risco (leitura contrária)"]
+  ];
+  const linhas = COMP.map(function(c){
+    const p = A.pct ? A.pct[c[0]] : null;
+    const b = A.bruto ? A.bruto[c[0]] : null;
+    const cor = p === null ? "var(--text-faint)"
+              : (p >= 58 ? "var(--teal)" : (p < 42 ? "var(--brick)" : "var(--text-dim)"));
+    const leitura = p === null ? "sem dado"
+      : (p >= 75 ? "forte" : (p >= 58 ? "acima do normal"
+      : (p >= 42 ? "normal" : (p >= 25 ? "abaixo" : "fraco"))));
+    return '<tr><td style="padding:5px 8px;">' + esc(c[1]) +
+      '<div style="font-size:10px;color:var(--text-faint);">' + esc(c[2]) + '</div></td>' +
+      '<td style="padding:5px 8px;text-align:right;color:var(--text-faint);">' +
+        (b === null ? "—" : (c[0]==="funding" ? (b*100).toFixed(4)+"%" : b.toFixed(2))) + '</td>' +
+      '<td style="padding:5px 8px;text-align:right;color:' + cor + ';font-size:15px;">' +
+        (p === null ? "—" : Math.round(p)) + '</td>' +
+      '<td style="padding:5px 8px;font-size:10.5px;color:var(--text-dim);">' + leitura + '</td></tr>';
+  }).join("");
+
+  return `
+    <div style="font-family:var(--font-mono);font-size:10px;letter-spacing:.06em;
+                text-transform:uppercase;color:var(--text-faint);margin-bottom:4px;">
+      Apetite — o fluxo, agora
+    </div>
+    <div style="display:flex;align-items:baseline;gap:14px;flex-wrap:wrap;margin:8px 0;">
+      <span style="font-family:var(--font-mono);font-size:44px;line-height:1;color:${e.cor};">${Math.round(A.valor)}</span>
+      <span style="font-family:var(--font-mono);font-size:17px;letter-spacing:.08em;color:${e.cor};">${esc(e.nome)}</span>
+      <span style="font-size:11px;color:var(--text-faint);">${A.componentes} de 3 componentes</span>
+    </div>
+    <div style="display:flex;height:8px;border-radius:4px;overflow:hidden;margin:6px 0 12px;">
+      <div style="width:${Math.round(A.valor)}%;background:${e.cor};"></div>
+      <div style="flex:1;background:var(--line-soft);"></div>
+    </div>
+    <table style="width:100%;border-collapse:collapse;font-family:var(--font-mono);font-size:11px;">
+      <thead><tr style="color:var(--text-faint);text-align:left;">
+        <th style="padding:5px 8px;">Componente</th>
+        <th style="padding:5px 8px;text-align:right;">bruto</th>
+        <th style="padding:5px 8px;text-align:right;">percentil</th>
+        <th style="padding:5px 8px;">leitura</th>
+      </tr></thead><tbody>${linhas}</tbody>
+    </table>
+    <div style="font-size:12px;color:var(--text-dim);margin-top:10px;line-height:1.6;">
+      <strong>Só fluxo, e só acumulado.</strong> Nada de macro, nada de on-chain, e
+      <strong>nada derivado do preço</strong> — momentum, RSI e médias diriam apenas que o
+      preço subiu. Cada componente é lido em <strong>percentil contra a própria história</strong>,
+      não em escala fixa: o corte de ±15 que o resto do sistema usa cruza em 0% dos dias no
+      funding e em 86% no hash rate, e em percentil todos falam a mesma língua.
+      <br><br>
+      <strong>Isto descreve o presente — não é previsão.</strong> Em ~150 medições, nada neste
+      projeto antecede o preço. O melhor resultado que apareceu — variação do open interest,
+      r = +0,355 — caiu para r = +0,013 quando removemos as 48 horas do episódio que o gerou.
+      <span style="color:var(--text-faint);">Score, pesos, camadas e a série das 777 não são
+      afetados por este painel.</span>
+    </div>`;
 }
 
 function blocoCadencia(){
@@ -10151,6 +10370,10 @@ function renderAll(){
   { const alvoC = document.getElementById("painelCadencia");
     if(alvoC){ try{ alvoC.innerHTML = blocoCadencia(); }
                catch(eC){ alvoC.innerHTML = ""; } } }
+  /* v125 — o termômetro é exibição: se falhar, não derruba a tela */
+  { const alvoA = document.getElementById("painelApetite");
+    if(alvoA){ try{ alvoA.innerHTML = blocoApetite(); }
+               catch(eA){ alvoA.innerHTML = ""; } } }
   const blocos = [
     ["hero", renderHero], ["ticker", renderTicker], ["motores", renderMotors],
     ["estado", renderState], ["cenários", renderScenarios], ["premissas", renderPremises],

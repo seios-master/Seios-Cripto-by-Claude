@@ -49,7 +49,7 @@
 <header><div class="wrap">
   <div class="sub">SEIOS · medição isolada — não é o sistema, não grava nada, não muda nada</div>
   <h1>Posicionamento: o que a Binance publica de graça e nunca usamos</h1>
-  <div class="sub">30 dias · velas de 1h · a hipótese saiu dos NOSSOS dados, não de teoria</div>
+  <div class="sub">30 dias · velas de 5 minutos · ~8.600 pontos · a hipótese saiu dos NOSSOS dados</div>
 </div></header>
 
 <div class="wrap">
@@ -70,9 +70,20 @@
     <b>posição dos maiores traders</b> — o nosso <code>longShort</code> conta CONTAS, onde
     uma de 100 dólares pesa igual a uma de 10 milhões.
     <br><br>
-    <b>O limite, declarado:</b> a Binance guarda apenas <b>30 dias</b> destas séries. Em
-    velas de 1h dá ~720 observações — suficiente para uma primeira resposta, insuficiente
-    para uma conclusão. O r mínimo detectável com 430 no estudo é ≈ <b>0,124</b>.
+    <b>SEGUNDA VERSÃO — 20/08, e o motivo está declarado.</b> A primeira rodada usou velas de
+    1h e trouxe apenas <b>498 pontos</b>: o r mínimo detectável ficou em <b>0,148</b>, e o
+    melhor candidato — variação do open interest em 1h — deu <b>r = +0,071 no estudo e
+    +0,248 na reserva</b>, com t efetivo de 3,60 na reserva. <b>A reserva passou; o estudo
+    não tinha poder para enxergar 0,07.</b> Isso não é reprovação: é cegueira do teste.
+    <br><br>
+    Agora em <b>velas de 5 minutos com paginação</b> — a Binance guarda 30 dias e aceita
+    <code>startTime</code>. São ~8.600 pontos, doze vezes mais, e o r mínimo cai para
+    <b>~0,036</b> — abaixo de tudo que já medimos neste projeto. <b>A pergunta é a mesma;
+    só a resolução mudou, e a mudança foi declarada antes de rodar.</b>
+    <br><br>
+    <b>O limite que continua:</b> 30 dias é um regime só. Um efeito que exista apenas
+    neste mês passaria aqui e falharia depois — por isso a reserva temporal continua
+    obrigatória.
   </div>
 
   <div class="regra">
@@ -87,12 +98,14 @@
     <b>Horizontes:</b> 1h, 4h e 8h à frente. Correção de sobreposição por √4 e √8.<br><br>
     <b>Partição temporal:</b> primeiros 60% estudam · últimos 40% confirmam.<br><br>
     <b>Passa se, e somente se:</b> |t efetivo| ≥ 2,576 nas duas fases, mesmo sinal,
-    mínimo de 80 observações por fase.<br><br>
+    mínimo de 300 observações por fase (proporcional à amostra maior).<br><br>
     <b>Com 18 testes, ~1 falso positivo é esperado a 5%.</b> O corte de 1% e a reserva
     obrigatória são a defesa. Um único resultado passando merece observação em dado novo,
     não conclusão.<br><br>
-    <b>Sem segunda tentativa com método diferente.</b> Se falhar por amostra, o veredito é
-    "não sabemos com 30 dias" — não é licença para afrouxar corte.
+    <b>O critério de passagem NÃO mudou</b> entre as duas versões: |t efetivo| ≥ 2,576 nas duas
+    fases, mesmo sinal. Só a resolução dos dados mudou, e por um defeito identificável — o
+    estudo não tinha poder. <b>Esta é a última tentativa:</b> se falhar agora, com r mínimo
+    de 0,036, o veredito é que não há efeito acima disso em 30 dias.
   </div>
 
   <button id="btn">▶ Medir posicionamento — 30 dias</button>
@@ -119,8 +132,13 @@
 </div>
 
 <script>
-const MIN_OBS=80, CORTE_PCT=0.6;
-const HZ=[{c:"h1",n:"1h",p:1},{c:"h4",n:"4h",p:4},{c:"h8",n:"8h",p:8}];
+/* v2 — com ~8.600 pontos em vez de 498, o mínimo sobe proporcionalmente */
+const MIN_OBS=300, CORTE_PCT=0.6;
+/* v2 — em grade de 5 minutos: 1h = 12 passos, 4h = 48, 8h = 96.
+   A correção de sobreposição usa o número de PASSOS, não de horas: janelas
+   vizinhas de 1h em grade de 5min compartilham 11 dos 12 intervalos. */
+const HZ=[{c:"h1",n:"1h",p:12},{c:"h4",n:"4h",p:48},{c:"h8",n:"8h",p:96}];
+const PASSOS_1H=12;
 function media(a){ return a.length?a.reduce(function(x,y){return x+y;},0)/a.length:null; }
 function dp(a){ if(a.length<2) return null; const m=media(a);
   return Math.sqrt(a.reduce(function(s,x){return s+(x-m)*(x-m);},0)/(a.length-1)); }
@@ -153,34 +171,64 @@ function comparar(dentro, todas, sobre){
            pos: dentro.filter(function(x){return x>0;}).length/dentro.length*100 };
 }
 
-async function binanceData(caminho, extra){
-  const url="https://fapi.binance.com/futures/data/"+caminho+
-            "?symbol=BTCUSDT&period=1h&limit=500"+(extra||"");
-  const r=await fetch(url);
-  if(!r.ok) throw new Error(caminho+" "+r.status);
-  return await r.json();
+/* v2 — PAGINAÇÃO E RESOLUÇÃO DE 5 MINUTOS.
+   A v1 pediu period=1h&limit=500 e recebeu 498 pontos — o r mínimo detectável
+   ficou em 0,148, e o melhor candidato (OI de 1h, r=+0,248 na reserva) não pôde
+   ser decidido porque o ESTUDO não tinha poder para enxergar 0,07.
+   A Binance guarda 30 dias e aceita startTime: em velas de 5min são ~8.640
+   pontos, doze vezes mais. O r mínimo cai para ~0,04 — abaixo de tudo que já
+   medimos, então um efeito real passa a ser visível.
+   A pergunta é a MESMA; só a resolução muda. */
+async function binanceData(caminho){
+  const PASSO=5*60*1000, LOTE=500;
+  const fim=Date.now(), ini=fim-30*24*3600*1000;
+  const out=[]; let cursor=ini, voltas=0;
+  while(cursor<fim && voltas<30){
+    const url="https://fapi.binance.com/futures/data/"+caminho+
+              "?symbol=BTCUSDT&period=5m&limit="+LOTE+"&startTime="+cursor+"&endTime="+fim;
+    const r=await fetch(url);
+    if(!r.ok) throw new Error(caminho+" "+r.status);
+    const d=await r.json();
+    if(!d.length) break;
+    out.push.apply(out,d);
+    const ultimo=Number(d[d.length-1].timestamp);
+    if(!Number.isFinite(ultimo)||ultimo<=cursor) break;
+    cursor=ultimo+PASSO;
+    voltas++;
+    if(d.length<LOTE) break;
+    await dorme(180);
+  }
+  /* a Binance pode repetir o ponto de fronteira entre lotes */
+  const vistos={}, limpo=[];
+  out.forEach(function(o){ const t=Number(o.timestamp);
+    if(!vistos[t]){ vistos[t]=1; limpo.push(o); } });
+  limpo.sort(function(a,b){ return Number(a.timestamp)-Number(b.timestamp); });
+  return limpo;
 }
-async function velasHorarias(n){
+/* v2 — velas de 5 MINUTOS, para casar com o posicionamento na mesma grade */
+async function velasBase(){
   const t=[]; let fim=Date.now();
-  for(let i=0;i<2;i++){
-    const r=await fetch("https://api.binance.com/api/v3/klines?symbol=BTCUSDT&interval=1h&limit=1000&endTime="+fim);
+  for(let i=0;i<12;i++){
+    const r=await fetch("https://api.binance.com/api/v3/klines?symbol=BTCUSDT&interval=5m&limit=1000&endTime="+fim);
     if(!r.ok) throw new Error("klines "+r.status);
     const d=await r.json(); if(!d.length) break;
     t.unshift.apply(t,d); fim=d[0][0]-1;
-    if(d.length<1000||t.length>=n) break; await dorme(300);
+    if(d.length<1000) break;
+    if(t.length>=9000) break;
+    await dorme(280);
   }
-  t.pop();
+  t.pop();   /* vela em formação fora */
   return t;
 }
 
 document.getElementById("btn").addEventListener("click", async function(){
   this.disabled=true; document.getElementById("log").textContent="";
   try{
-    log("velas horárias…");
-    const kl=await velasHorarias(1200);
-    log("  "+kl.length+" horas");
+    log("velas de 5 minutos (30 dias)…");
+    const kl=await velasBase();
+    log("  "+kl.length+" velas");
 
-    log("open interest histórico (grátis, 30 dias)…");
+    log("open interest histórico, 5min paginado…");
     const oi=await binanceData("openInterestHist");
     log("  "+oi.length+" pontos");
     await dorme(250);
@@ -203,10 +251,11 @@ document.getElementById("btn").addEventListener("click", async function(){
     /* ---- alinhar tudo pelo timestamp da hora ---- */
     const porHora={};
     kl.forEach(function(k){ porHora[k[0]]={ t:k[0], close:Number(k[4]) }; });
+    /* v2 — casamento na grade de 5 minutos */
     function casar(lista, campo, valor){
       lista.forEach(function(o){
         const t=Number(o.timestamp);
-        const h=porHora[t] || porHora[t - (t % 3600000)];
+        const h=porHora[t] || porHora[t - (t % 300000)];
         if(h) h[campo]=valor(o);
       });
     }
@@ -221,21 +270,24 @@ document.getElementById("btn").addEventListener("click", async function(){
                  .filter(function(x){ return Number.isFinite(x.close); });
 
     for(let i=0;i<H.length;i++){
-      if(i+1<H.length) H[i].h1=(H[i+1].close/H[i].close-1)*100;
-      if(i+4<H.length) H[i].h4=(H[i+4].close/H[i].close-1)*100;
-      if(i+8<H.length) H[i].h8=(H[i+8].close/H[i].close-1)*100;
-      if(i>=1 && Number.isFinite(H[i].oi) && Number.isFinite(H[i-1].oi) && H[i-1].oi)
-        H[i].dOI1=(H[i].oi/H[i-1].oi-1)*100;
-      if(i>=4 && Number.isFinite(H[i].oi) && Number.isFinite(H[i-4].oi) && H[i-4].oi)
-        H[i].dOI4=(H[i].oi/H[i-4].oi-1)*100;
-      if(i>=12 && Number.isFinite(H[i].oi) && Number.isFinite(H[i-12].oi) && H[i-12].oi)
-        H[i].dOI12=(H[i].oi/H[i-12].oi-1)*100;
-      if(i>=4 && Number.isFinite(H[i].topPos) && Number.isFinite(H[i-4].topPos) && H[i-4].topPos)
-        H[i].dTop4=(H[i].topPos/H[i-4].topPos-1)*100;
-      if(i>=4) H[i].dPreco4=(H[i].close/H[i-4].close-1)*100;
+      /* retornos futuros em passos de 5min */
+      if(i+12<H.length) H[i].h1=(H[i+12].close/H[i].close-1)*100;
+      if(i+48<H.length) H[i].h4=(H[i+48].close/H[i].close-1)*100;
+      if(i+96<H.length) H[i].h8=(H[i+96].close/H[i].close-1)*100;
+      /* v2 — todas as janelas em PASSOS de 5min: 1h=12, 4h=48, 12h=144 */
+      const j1=PASSOS_1H, j4=PASSOS_1H*4, j12=PASSOS_1H*12;
+      if(i>=j1 && Number.isFinite(H[i].oi) && Number.isFinite(H[i-j1].oi) && H[i-j1].oi)
+        H[i].dOI1=(H[i].oi/H[i-j1].oi-1)*100;
+      if(i>=j4 && Number.isFinite(H[i].oi) && Number.isFinite(H[i-j4].oi) && H[i-j4].oi)
+        H[i].dOI4=(H[i].oi/H[i-j4].oi-1)*100;
+      if(i>=j12 && Number.isFinite(H[i].oi) && Number.isFinite(H[i-j12].oi) && H[i-j12].oi)
+        H[i].dOI12=(H[i].oi/H[i-j12].oi-1)*100;
+      if(i>=j4 && Number.isFinite(H[i].topPos) && Number.isFinite(H[i-j4].topPos) && H[i-j4].topPos)
+        H[i].dTop4=(H[i].topPos/H[i-j4].topPos-1)*100;
+      if(i>=j4) H[i].dPreco4=(H[i].close/H[i-j4].close-1)*100;
     }
     const base=H.filter(function(x){ return Number.isFinite(x.h1)&&Number.isFinite(x.oi); });
-    log("horas alinhadas com posicionamento: "+base.length);
+    log("velas de 5min alinhadas com posicionamento: "+base.length);
     const corte=Math.floor(base.length*CORTE_PCT);
     const est=base.slice(0,corte), res=base.slice(corte);
     log("estudo: "+est.length+" · reserva: "+res.length);

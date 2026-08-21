@@ -189,6 +189,34 @@ t("com menos de dois componentes não há leitura", ()=>{
     throw new Error("dois componentes deveriam bastar");
 });
 
+console.log("\nBLOCO D2 — A BASE DO PERCENTIL (defeito da v125, corrigido na v126)");
+
+t("as velas são PAGINADAS até 30 dias", ()=>{
+  /* MEDIDO em 21/08 com o BTC a 78.042: o CVD bruto de +3,11% (percentil ~88
+     na distribuição de 8.976 janelas) apareceu como 53 — "normal" — porque a
+     base tinha 711 pontos, 2,5 dias, QUE ERAM A PRÓPRIA ALTA.
+     Uma chamada só de 1.000 velas não basta: depois da janela de 24h sobram
+     ~700. O open interest eu paginei; as velas, esqueci. */
+  const f = semComentarios(declDe("coletarApetite"));
+  if(!/endTime=/.test(f))
+    throw new Error("as velas não são paginadas — a base do CVD fica em ~2,5 dias");
+  if(!/8700|30 dias/.test(f))
+    throw new Error("a paginação não declara o alvo de 30 dias");
+});
+
+t("a base é declarada, e base curta é sinalizada", ()=>{
+  const f = semComentarios(declDe("coletarApetite"));
+  if(!/baseCurta/.test(f)) throw new Error("não marca quando a base é curta");
+  if(!/base:\s*\{/.test(f)) throw new Error("não grava o tamanho da base");
+});
+
+t("o painel AVISA quando a base é curta", ()=>{
+  /* sem o aviso, uma leitura calculada contra 2 dias pareceria igual a uma
+     calculada contra 30 — e foi exatamente assim que o defeito passou. */
+  const f = semComentarios(declDe("blocoApetite"));
+  if(!/baseCurta/.test(f)) throw new Error("o painel não avisa sobre base curta");
+});
+
 console.log("\nBLOCO E — o painel, a série e a NÃO contaminação");
 
 t("o painel existe e é próprio", ()=>{

@@ -4501,9 +4501,36 @@ function registrarObservacao(motorKey, indKey, score, meta){
 async function coletarApetite(){
   try{
     const PASSO=12;                     /* 12 velas de 5min = 1 hora */
-    const r = await smartFetch("https://api.binance.com/api/v3/klines?symbol=BTCUSDT&interval=5m&limit=1000");
-    if(!r.ok) throw new Error("klines " + r.status);
-    const kl = await r.json();
+    /* =================================================================
+       v126 — A BASE DO PERCENTIL ESTAVA CURTA, E ISSO INVERTIA A LEITURA
+       MEDIDO em 21/08, BTC a 78.042 (+8,17% em 24h): o CVD bruto era +3,11%
+       de compra líquida — percentil ~88 na distribuição de 8.976 janelas
+       medida em 20/08. O painel mostrou 53, "normal".
+       A causa: uma chamada só de 1.000 velas de 5min = 3,5 dias, e depois da
+       janela de 24h sobravam 711 pontos. O percentil comparava com os últimos
+       2,5 dias — QUE ERAM A PRÓPRIA ALTA. Num rali sustentado, todo mundo
+       comprando parece normal, porque a referência é o rali.
+       O termômetro respondia "isto é incomum comparado às últimas 48h?" em vez
+       de "isto é incomum PARA O BITCOIN?".
+       O erro foi específico: paginei o open interest para trás (2.952 pontos,
+       10 dias) e ESQUECI de paginar as velas. O funding tinha 166 dias porque
+       a fonte já entrega assim. Só o CVD ficou curto — e é o componente mais
+       importante dos três.
+       Agora: paginação até 30 dias, ~8.600 velas.
+       ================================================================= */
+    const kl=[]; let fimK=Date.now();
+    for(let v=0; v<10; v++){
+      const rk = await smartFetch("https://api.binance.com/api/v3/klines" +
+                                  "?symbol=BTCUSDT&interval=5m&limit=1000&endTime="+fimK);
+      if(!rk.ok){ if(!kl.length) throw new Error("klines " + rk.status); break; }
+      const d = await rk.json();
+      if(!d.length) break;
+      kl.unshift.apply(kl, d);
+      fimK = d[0][0] - 1;
+      if(d.length < 1000) break;
+      if(kl.length >= 8700) break;      /* 30 dias em velas de 5 minutos */
+    }
+    if(!kl.length) throw new Error("sem velas");
     kl.pop();                           /* vela em formação fora */
 
     /* 1 · CVD de 24h, janela deslizante */
@@ -4561,7 +4588,10 @@ async function coletarApetite(){
     const a = calcularApetite(pct);
     S.market.apetite = { valor:a.valor, estado:a.estado.nome, componentes:a.componentes,
                          pct:pct, bruto:bruto, em:Date.now(),
-                         base:{ cvd:cvdSerie.length, oi:oiSerie.length, funding:fdSerie.length } };
+                         base:{ cvd:cvdSerie.length, oi:oiSerie.length, funding:fdSerie.length },
+                         /* v126 — se a base for curta, o percentil compara o presente com o
+                            passado recente, que pode ser o próprio movimento. A tela avisa. */
+                         baseCurta: (cvdSerie.length < 3000) };
   }catch(e){ /* silencioso: exibição não derruba coleta */ }
 }
 
@@ -4865,6 +4895,9 @@ function montarSnapshot(results){
       if(!A || A.valor === null || A.valor === undefined) return null;
       return { valor: Math.round(A.valor*10)/10, estado: A.estado,
                componentes: A.componentes,
+               /* v126 — a base é gravada: sem ela, não dá para saber depois se
+                  um percentil foi calculado contra história suficiente. */
+               base: A.base || null, baseCurta: !!A.baseCurta,
                pct: { cvd: A.pct && A.pct.cvd !== null ? Math.round(A.pct.cvd) : null,
                       oi:  A.pct && A.pct.oi  !== null ? Math.round(A.pct.oi)  : null,
                       funding: A.pct && A.pct.funding !== null ? Math.round(A.pct.funding) : null } };
@@ -6395,6 +6428,7 @@ function blocoApetite(){
         <th style="padding:5px 8px;">leitura</th>
       </tr></thead><tbody>${linhas}</tbody>
     </table>
+    ${A.baseCurta ? '<div style="border:1px solid var(--brick);background:#FF8A8014;padding:10px 12px;margin:10px 0;font-size:12px;color:var(--text-dim);"><strong style="color:var(--brick);">Base curta.</strong> O percentil está comparando com menos de ~10 dias de história — durante um movimento sustentado, isso faz o próprio movimento virar a referência e a leitura tende ao normal. Foi o defeito da v125, corrigido na v126: se este aviso aparecer, a coleta das velas falhou parcialmente.</div>' : ''}
     <div style="font-size:12px;color:var(--text-dim);margin-top:10px;line-height:1.6;">
       <strong>Só fluxo, e só acumulado.</strong> Nada de macro, nada de on-chain, e
       <strong>nada derivado do preço</strong> — momentum, RSI e médias diriam apenas que o

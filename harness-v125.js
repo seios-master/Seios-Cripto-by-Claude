@@ -68,7 +68,8 @@ let API;
 try{
   API = new Function([
     declDe("percentilDeApetite"), declDe("estadoDeApetite"), declDe("calcularApetite"),
-    "return { percentilDeApetite, estadoDeApetite, calcularApetite };"
+    declDe("estadoDeRegime"), declDe("estadoDeFluxo"), declDe("defaultState"), declDe("ind"),
+    "return { percentilDeApetite, estadoDeApetite, calcularApetite, estadoDeRegime, estadoDeFluxo, defaultState };"
   ].join("\n"))();
 }catch(e){ console.error("FALHA AO MONTAR:", e.message); process.exit(1); }
 
@@ -215,6 +216,112 @@ t("o painel AVISA quando a base é curta", ()=>{
      calculada contra 30 — e foi exatamente assim que o defeito passou. */
   const f = semComentarios(declDe("blocoApetite"));
   if(!/baseCurta/.test(f)) throw new Error("o painel não avisa sobre base curta");
+});
+
+console.log("\nBLOCO D3 — v127: duas perguntas, dois medidores");
+
+t("o FLUXO deixou de usar escala comprador/vendedor", ()=>{
+  /* MEDIDO em 21/08: BTC a 77.810, +8,37% em 24h, 21% acima da média de 200
+     semanas — e o painel dizia "VENDEDOR". Os números estavam certos; o
+     rótulo, errado. Fluxo de derivativos não é direção de mercado. */
+  eq(API.estadoDeFluxo(80).nome, "MUITO FORTE", "80:");
+  eq(API.estadoDeFluxo(65).nome, "FORTE", "65:");
+  eq(API.estadoDeFluxo(50).nome, "NORMAL", "50:");
+  eq(API.estadoDeFluxo(30).nome, "FRACO", "30:");
+  eq(API.estadoDeFluxo(10).nome, "MUITO FRACO", "10:");
+  ["COMPRADOR","VENDEDOR"].forEach(function(p){
+    [10,30,50,65,80].forEach(function(v){
+      if(API.estadoDeFluxo(v).nome.indexOf(p) !== -1)
+        throw new Error("o fluxo ainda diz " + p);
+    });
+  });
+});
+
+t("o REGIME responde a pergunta sobre o mercado", ()=>{
+  eq(API.estadoDeRegime(100).nome, "ALTA", "todos apontando alta:");
+  eq(API.estadoDeRegime(70).nome, "ALTA PARCIAL", "maioria:");
+  eq(API.estadoDeRegime(50).nome, "SEM DEFINIÇÃO", "dividido:");
+  eq(API.estadoDeRegime(10).nome, "BAIXA", "todos apontando baixa:");
+  eq(API.estadoDeRegime(null).nome, "SEM DADO", "nulo:");
+});
+
+t("O CASO DE 21/08: regime de ALTA com fluxo FRACO", ()=>{
+  /* BTC 21% acima da MM200, 12% abaixo da MM100, 5% abaixo da MM50,
+     tendência +10,8, MVRV 1,32 → 3 de 5 apontando alta.
+     Fluxo: CVD 63, OI 33, funding 24 → 40. */
+  const fluxo = API.calcularApetite({ cvd:63, oi:33, funding:24 });
+  perto(fluxo.valor, 40, "fluxo:", 1);
+  eq(API.estadoDeFluxo(fluxo.valor).nome, "FRACO", "estado do fluxo:");
+  /* 3 alta, 2 baixa em 5 itens → (1/5+1)/2*100 = 60 */
+  eq(API.estadoDeRegime(60).nome, "ALTA PARCIAL", "regime com 3 de 5:");
+});
+
+t("o regime NÃO entra no fluxo, e vice-versa", ()=>{
+  /* misturar os dois recria exatamente o problema que a v127 conserta */
+  const f = semComentarios(declDe("calcularApetite"));
+  ["weeklyMAs","tendencia","mvrv"].forEach(function(k){
+    if(f.indexOf(k) !== -1) throw new Error("o fluxo passou a usar " + k);
+  });
+  const r = semComentarios(declDe("calcularRegime"));
+  ["cvd","funding"].forEach(function(k){
+    if(r.indexOf(k) !== -1) throw new Error("o regime passou a usar " + k);
+  });
+});
+
+t("o regime é gravado na série", ()=>{
+  const f = semComentarios(declDe("montarSnapshot"));
+  if(!/regime:/.test(f)) throw new Error("o snapshot não grava o regime");
+});
+
+console.log("\nBLOCO D4 — v128: o regime na manchete, e a saturação visível");
+
+t("o topo mostra o REGIME, não o score", ()=>{
+  /* MEDIDO: de 19 a 21/08 o BTC foi de 64.904 a 77.810 (+20%) e o veredito do
+     topo ficou "Neutro · Observar" o tempo todo. Causa aritmética, na última
+     leitura: motores rápidos 20,1% do peso, lentos 53,9%. Mais da metade do
+     peso está em janelas de 90 dias que NÃO TÊM COMO se mover em dois dias. */
+  const f = semComentarios(declDe("renderHero"));
+  if(!/calcularRegime\(\)/.test(f)) throw new Error("o topo não calcula o regime");
+  if(!/estadoDeRegime\(/.test(f)) throw new Error("o topo não usa o rótulo do regime");
+});
+
+t("o score continua visível, como linha secundária", ()=>{
+  /* rebaixar não é apagar: ele continua alimentando a série das 777 */
+  const f = semComentarios(declDe("renderHero"));
+  if(!/ms\.score/.test(f)) throw new Error("o score sumiu do topo");
+  if(!/secund/i.test(f)) throw new Error("o score não é apresentado como secundário");
+});
+
+t("A SATURAÇÃO É DECLARADA — teto não é medida", ()=>{
+  /* a média móvel bateu 100 e ficou: não distingue 7% de 14% acima da MM50.
+     O teto apaga a magnitude justamente quando o movimento é grande. */
+  const f = semComentarios(declDe("marcarSaturacao"));
+  if(!/TETO/.test(f)) throw new Error("a saturação não é marcada na nota");
+  if(!/parou de medir/i.test(f))
+    throw new Error("a nota não explica que o número deixou de crescer");
+});
+
+t("marcar saturação NÃO altera o valor nem o score", ()=>{
+  const f = semComentarios(declDe("marcarSaturacao"));
+  if(/ind\.value\s*=/.test(f)) throw new Error("a função mexe no valor do indicador");
+  if(/excludeFromScore/.test(f)) throw new Error("a função mexe no direito de voto");
+});
+
+t("NENHUM peso foi mexido — a correção não é reponderar", ()=>{
+  /* reponderar olhando o resultado é o encaixe no passado que este projeto
+     passou três dias combatendo. O m12 continua intacto. */
+  const S = API.defaultState();
+  eq(S.motors.macro.weight, 0.15, "macro:");
+  eq(S.motors.ativosGlobais.weight, 0.21, "ativosGlobais:");
+  eq(S.motors.tecnico.weight, 0.04, "tecnico:");
+  eq(S.motors.derivativos.weight, 0.15, "derivativos:");
+});
+
+t("o momentum continua sensor — não foi promovido de volta", ()=>{
+  /* ele foi o que mais reagiu (saturou em +100) e fui eu que o rebaixei no
+     m12. Promover agora seria escolher olhando o resultado. */
+  const S = API.defaultState();
+  eq(S.motors.tecnico.indicators.momentum.excludeFromScore, true, "momentum:");
 });
 
 console.log("\nBLOCO E — o painel, a série e a NÃO contaminação");

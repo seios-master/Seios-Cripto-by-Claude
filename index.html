@@ -1181,7 +1181,7 @@ const STORAGE_KEY = "seios_btc_v2";
 // fonte única da versão — usada no rodapé, no histórico e nos exports.
 // Muda toda vez que a fórmula de score/pesos muda, pra nunca misturar
 // decisões de regras diferentes como se fossem comparáveis.
-const BUILD_VERSION = "2026-08-20.125-apetite";
+const BUILD_VERSION = "2026-08-21.128-regime-na-manchete";
 /* v78: versão do MODELO separada da versão do BUILD. Mudança visual não é
    mudança de semântica: só sobe quando peso, fórmula, corte ou trava mudam.
    Toda observação gravada carrega as duas, pra que seis meses depois dê pra
@@ -2717,8 +2717,17 @@ function aplicarTeto(motorKey, valor){
 }
 
 // um indicador em ±99.5 ou além está no limite da escala: registra para a tela
+/* v128 — SATURAR É PARAR DE MEDIR, e a tela precisa dizer isso.
+   MEDIDO em 21/08: a média móvel bateu 100 e ficou lá. Ela não consegue
+   distinguir "7% acima da MM50" de "14% acima" — o teto apaga a magnitude
+   justamente quando o movimento é grande. O momentum fez o mesmo.
+   Isto não altera o valor nem o score: só torna a saturação visível, para
+   que ninguém leia 100 como uma medida quando é um limite. */
 function marcarSaturacao(ind, valor){
   ind.saturado = (valor !== null && Math.abs(valor) >= 99.5);
+  if(ind.saturado && ind.note && ind.note.indexOf("[TETO]") === -1)
+    ind.note = "[TETO] " + ind.note + " — a escala parou de medir aqui: valores maiores " +
+               "não aumentam mais o número";
 }
 
 /* meta (v78, opcional): { bruto, referenceAt, qualidade }
@@ -4890,10 +4899,20 @@ function montarSnapshot(results){
                           catch(eC){ return {}; } })(),
     /* v125 — o apetite vai junto na série. Em try porque o snapshot alimenta
        as 777: um erro no termômetro não pode impedir a gravação do score. */
+    /* v127 — o regime vai junto: sem ele, a série guarda o fluxo e perde a
+       resposta para "o mercado estava altista?" */
+    regime: (function(){ try{
+      const R = calcularRegime();
+      if(!R || R.valor === null) return null;
+      return { valor: Math.round(R.valor*10)/10, estado: estadoDeRegime(R.valor).nome,
+               alta:R.alta, baixa:R.baixa, neutro:R.neutro, itens:R.itens.length };
+    }catch(eR){ return null; } })(),
     apetite: (function(){ try{
       const A = S.market && S.market.apetite;
       if(!A || A.valor === null || A.valor === undefined) return null;
-      return { valor: Math.round(A.valor*10)/10, estado: A.estado,
+      return { valor: Math.round(A.valor*10)/10,
+               /* v127 — o estado do fluxo passa a ser força, não direção */
+               estado: estadoDeFluxo(A.valor).nome,
                componentes: A.componentes,
                /* v126 — a base é gravada: sem ela, não dá para saber depois se
                   um percentil foi calculado contra história suficiente. */
@@ -6274,6 +6293,79 @@ function estadoDeApetite(n){
 
 /* recebe os percentis já calculados. Precisa de 2 dos 3 — com um só, a média
    seria o próprio componente com cara de índice. */
+/* =====================================================================
+   v127 — DUAS PERGUNTAS DIFERENTES, DOIS MEDIDORES
+   =====================================================================
+   O DEFEITO DA v125/v126 era de ROTULAGEM, não de aritmética.
+   Em 21/08, BTC a 77.810 (+8,37% em 24h, 21% acima da média de 200 semanas),
+   o painel marcava "40 — VENDEDOR". Os números estavam certos; o rótulo,
+   errado.
+   O termômetro mede FLUXO DE DERIVATIVOS: quem agride o livro, quem monta
+   posição alavancada, quanto custa ficar comprado. Chamar isso de "apetite"
+   com escala comprador/vendedor faz parecer veredito sobre o MERCADO quando é
+   veredito sobre o fluxo.
+   "O mercado está altista?" é OUTRA pergunta — respondida pelo preço contra
+   as próprias médias, pela tendência e pelo MVRV. Eu excluí tudo isso com o
+   argumento de que "é o preço com outro nome". O argumento vale para PREVISÃO
+   e NÃO vale para descrição de regime: se a pergunta é se o mercado está
+   altista, o preço É a resposta.
+
+   AGORA SÃO DOIS, e podem divergir — a divergência é a informação:
+   · REGIME — o mercado está altista?    (preço vs. médias, tendência, MVRV)
+   · FLUXO  — o que sustenta o movimento? (CVD, open interest, funding)
+   Em 21/08 o regime é claramente de alta e o fluxo está fraco: o open
+   interest CAIU 0,34% em 4h durante uma alta de 8%, compatível com
+   fechamento de posições vendidas e não com dinheiro novo entrando. */
+
+function calcularRegime(){
+  const itens = [];
+  const P = S.market && S.market.price;
+  const MM = S.market && S.market.weeklyMAs;
+  if(Number.isFinite(P) && MM){
+    [["ma200","200 semanas"],["ma100","100 semanas"],["ma50","50 semanas"]].forEach(function(m){
+      const v = MM[m[0]];
+      if(Number.isFinite(v) && v>0)
+        itens.push({ rot:"Preço vs. média de "+m[1], v:((P/v)-1)*100 });
+    });
+  }
+  const tend = valorVigente("tecnico","tendencia");
+  if(Number.isFinite(tend)) itens.push({ rot:"Tendência de 30 dias", v:tend });
+  const mvrv = valorVigente("onchain","mvrv");
+  if(Number.isFinite(mvrv)) itens.push({ rot:"MVRV — preço vs. custo da rede", v:mvrv });
+
+  if(itens.length < 2) return { valor:null, itens:itens, alta:0, baixa:0, neutro:0 };
+  /* cada item vira +1, 0 ou −1; a faixa morta de ±2 evita que ruído vire voto */
+  const votos = itens.map(function(i){ return i.v > 2 ? 1 : (i.v < -2 ? -1 : 0); });
+  itens.forEach(function(i,k){ i.voto = votos[k]; });
+  const soma = votos.reduce(function(a,b){ return a+b; }, 0);
+  return { valor: ((soma/votos.length)+1)/2*100, itens:itens,
+           alta: votos.filter(function(v){ return v>0; }).length,
+           baixa: votos.filter(function(v){ return v<0; }).length,
+           neutro: votos.filter(function(v){ return v===0; }).length };
+}
+function estadoDeRegime(n){
+  if(n === null || n === undefined || !Number.isFinite(Number(n)))
+    return { nome:"SEM DADO", cor:"var(--text-faint)" };
+  const v = Number(n);
+  if(v >= 80) return { nome:"ALTA",          cor:"var(--teal)" };
+  if(v >= 60) return { nome:"ALTA PARCIAL",  cor:"var(--teal)" };
+  if(v >= 40) return { nome:"SEM DEFINIÇÃO", cor:"var(--gold)" };
+  if(v >= 20) return { nome:"BAIXA PARCIAL", cor:"var(--brick)" };
+  return             { nome:"BAIXA",         cor:"var(--brick)" };
+}
+
+/* FLUXO — a escala deixa de ser comprador/vendedor: passa a ser FORÇA */
+function estadoDeFluxo(n){
+  if(n === null || n === undefined || !Number.isFinite(Number(n)))
+    return { nome:"SEM DADO", cor:"var(--text-faint)" };
+  const v = Number(n);
+  if(v >= 75) return { nome:"MUITO FORTE", cor:"var(--teal)" };
+  if(v >= 58) return { nome:"FORTE",       cor:"var(--teal)" };
+  if(v >= 42) return { nome:"NORMAL",      cor:"var(--gold)" };
+  if(v >= 25) return { nome:"FRACO",       cor:"var(--brick)" };
+  return             { nome:"MUITO FRACO", cor:"var(--brick)" };
+}
+
 function calcularApetite(p){
   const vs = ["cvd","oi","funding"]
     .map(function(k){ return p && Number.isFinite(Number(p[k])) ? Number(p[k]) : null; })
@@ -6382,8 +6474,12 @@ function leituraPorCadencia(){
    é uma leitura de FLUXO, não uma agregação de motores. */
 function blocoApetite(){
   const A = S.market && S.market.apetite;
-  if(!A || A.valor === null || A.valor === undefined) return "";
-  const e = estadoDeApetite(A.valor);
+  const R = (function(){ try{ return calcularRegime(); }catch(e){ return null; } })();
+  if((!A || A.valor === null || A.valor === undefined) && (!R || R.valor === null)) return "";
+  /* v127 — o FLUXO deixa de usar a escala comprador/vendedor: ele mede força
+     do fluxo de derivativos, não a direção do mercado. */
+  const e = estadoDeFluxo(A ? A.valor : null);
+  const eR = estadoDeRegime(R ? R.valor : null);
   const COMP = [
     ["cvd","CVD 24h","compra líquida acumulada — quanto do volume foi compra a mercado"],
     ["oi","Open interest 4h","posição sendo montada ou desmontada"],
@@ -6408,18 +6504,44 @@ function blocoApetite(){
 
   return `
     <div style="font-family:var(--font-mono);font-size:10px;letter-spacing:.06em;
-                text-transform:uppercase;color:var(--text-faint);margin-bottom:4px;">
-      Apetite — o fluxo, agora
+                text-transform:uppercase;color:var(--text-faint);margin-bottom:10px;">
+      Duas perguntas diferentes
     </div>
-    <div style="display:flex;align-items:baseline;gap:14px;flex-wrap:wrap;margin:8px 0;">
-      <span style="font-family:var(--font-mono);font-size:44px;line-height:1;color:${e.cor};">${Math.round(A.valor)}</span>
+
+    ${R && R.valor !== null ? `
+    <div style="border-bottom:1px solid var(--line-soft);padding-bottom:14px;margin-bottom:14px;">
+      <div style="font-size:11px;color:var(--text-faint);letter-spacing:.06em;">
+        O MERCADO ESTÁ ALTISTA? — regime, pelo preço e pela estrutura</div>
+      <div style="display:flex;align-items:baseline;gap:14px;flex-wrap:wrap;margin:6px 0;">
+        <span style="font-family:var(--font-mono);font-size:40px;line-height:1;color:${eR.cor};">${Math.round(R.valor)}</span>
+        <span style="font-family:var(--font-mono);font-size:17px;letter-spacing:.08em;color:${eR.cor};">${esc(eR.nome)}</span>
+        <span style="font-size:11px;color:var(--text-faint);">${R.alta} de ${R.itens.length} apontando alta</span>
+      </div>
+      <div style="display:flex;height:8px;border-radius:4px;overflow:hidden;margin:6px 0 10px;">
+        <div style="width:${Math.round(R.valor)}%;background:${eR.cor};"></div>
+        <div style="flex:1;background:var(--line-soft);"></div>
+      </div>
+      <div style="font-family:var(--font-mono);font-size:10.5px;line-height:1.9;">
+        ${R.itens.map(function(i){
+          const c = i.voto>0 ? "var(--teal)" : (i.voto<0 ? "var(--brick)" : "var(--text-faint)");
+          return '<span style="color:'+c+';white-space:nowrap;">'+esc(i.rot)+' '+
+                 (i.v>0?"+":"")+i.v.toFixed(1)+'</span>';
+        }).join('<span style="color:var(--line);"> · </span>')}
+      </div>
+    </div>` : ""}
+
+    ${A && A.valor !== null ? `
+    <div style="font-size:11px;color:var(--text-faint);letter-spacing:.06em;">
+      O QUE SUSTENTA O MOVIMENTO? — fluxo de derivativos</div>
+    <div style="display:flex;align-items:baseline;gap:14px;flex-wrap:wrap;margin:6px 0;">
+      <span style="font-family:var(--font-mono);font-size:40px;line-height:1;color:${e.cor};">${Math.round(A.valor)}</span>
       <span style="font-family:var(--font-mono);font-size:17px;letter-spacing:.08em;color:${e.cor};">${esc(e.nome)}</span>
       <span style="font-size:11px;color:var(--text-faint);">${A.componentes} de 3 componentes</span>
     </div>
     <div style="display:flex;height:8px;border-radius:4px;overflow:hidden;margin:6px 0 12px;">
       <div style="width:${Math.round(A.valor)}%;background:${e.cor};"></div>
       <div style="flex:1;background:var(--line-soft);"></div>
-    </div>
+    </div>` : ""}
     <table style="width:100%;border-collapse:collapse;font-family:var(--font-mono);font-size:11px;">
       <thead><tr style="color:var(--text-faint);text-align:left;">
         <th style="padding:5px 8px;">Componente</th>
@@ -6430,9 +6552,15 @@ function blocoApetite(){
     </table>
     ${A.baseCurta ? '<div style="border:1px solid var(--brick);background:#FF8A8014;padding:10px 12px;margin:10px 0;font-size:12px;color:var(--text-dim);"><strong style="color:var(--brick);">Base curta.</strong> O percentil está comparando com menos de ~10 dias de história — durante um movimento sustentado, isso faz o próprio movimento virar a referência e a leitura tende ao normal. Foi o defeito da v125, corrigido na v126: se este aviso aparecer, a coleta das velas falhou parcialmente.</div>' : ''}
     <div style="font-size:12px;color:var(--text-dim);margin-top:10px;line-height:1.6;">
-      <strong>Só fluxo, e só acumulado.</strong> Nada de macro, nada de on-chain, e
-      <strong>nada derivado do preço</strong> — momentum, RSI e médias diriam apenas que o
-      preço subiu. Cada componente é lido em <strong>percentil contra a própria história</strong>,
+      <strong>Por que dois números.</strong> O <strong>regime</strong> responde "o mercado
+      está altista?" — e para isso o preço contra as próprias médias É a resposta, não uma
+      contaminação. O <strong>fluxo</strong> responde outra coisa: "o que sustenta o
+      movimento?" — e usa só derivativos, sem nada derivado do preço.
+      <strong>Eles podem divergir, e a divergência é a informação.</strong> Um regime de alta
+      com fluxo fraco descreve preço subindo sem dinheiro novo alavancado entrando — o que
+      acontece, por exemplo, quando posições vendidas são fechadas.
+      <br><br>
+      <strong>O fluxo é só acumulado.</strong> Cada componente é lido em <strong>percentil contra a própria história</strong>,
       não em escala fixa: o corte de ±15 que o resto do sistema usa cruza em 0% dos dias no
       funding e em 86% no hash rate, e em percentil todos falam a mesma língua.
       <br><br>
@@ -10320,9 +10448,35 @@ function renderHero(){
      informação. Abaixo da cobertura mínima o veredito passa a dizer o que é. */
   const motivoTrava = motivoSemLeitura(ms);
   const semLeitura = motivoTrava !== null;
-  const rotulo = semLeitura ? "Sem leitura" : scoreLabel(ms.score);
+  /* =====================================================================
+     v128 — O REGIME VIRA A MANCHETE; O SCORE VIRA LINHA SECUNDÁRIA
+     =====================================================================
+     MEDIDO: entre 19 e 21/08 o BTC foi de 64.904 a 77.810 (+20%) e o veredito
+     do topo ficou "Neutro · Observar" o tempo inteiro. Não foi cegueira — foi
+     ARITMÉTICA. Na última leitura:
+        motores rápidos (Técnico + Derivativos):    20,1% do peso efetivo
+        motores lentos (Macro + On-chain + Ativos): 53,9%
+     Mais da metade do peso está em janelas de 90 dias e séries mensais, que
+     NÃO TÊM COMO se mover em dois dias. Numa alta de 20%, esses 53,9% votam
+     "nada aconteceu" e vencem por construção. Fui eu que pus 21% em Ativos
+     Globais no m12.
+     O que reagiu, reagiu: tendência −0,4 → +71, média móvel → 100 (saturada),
+     RSI → −68, Fear & Greed → Greed, Técnico −0,95 → +25. Tudo apareceu na
+     tela. O que falhou foi a MÉDIA, não a medição.
+     A correção NÃO é reponderar — isso seria escolher os pesos olhando o
+     resultado, o encaixe que este projeto passou três dias combatendo. A
+     correção é parar de fazer o score responder o que ele não pode responder:
+     "o mercado está altista?" é pergunta de REGIME, e o regime mostra preço
+     contra as próprias médias, item a item.
+     O score continua existindo, continua sendo gravado e continua alimentando
+     a série das 777. Ele só deixa de ser a manchete. */
+  const REG = (function(){ try{ return calcularRegime(); }catch(e){ return null; } })();
+  const temRegime = REG && REG.valor !== null && REG.valor !== undefined;
+  const eReg = temRegime ? estadoDeRegime(REG.valor) : null;
+  const rotulo = semLeitura ? "Sem leitura" : (temRegime ? eReg.nome : scoreLabel(ms.score));
   const cor = semLeitura ? COLOR.faint
-    : (ms.score >= 15 ? COLOR.teal : (ms.score <= -15 ? COLOR.brick : COLOR.gold));
+    : (temRegime ? eReg.cor
+                 : (ms.score >= 15 ? COLOR.teal : (ms.score <= -15 ? COLOR.brick : COLOR.gold)));
   const fmt = v => "$" + Math.round(v).toLocaleString("en-US");
 
   const mas = S.market.weeklyMAs || {};
@@ -10345,8 +10499,18 @@ function renderHero(){
   wrap.innerHTML = `
     <div class="hero-grid">
       <div>
-        <div class="hero-eyebrow">Estado do mercado — BTC</div>
+        <div class="hero-eyebrow">${temRegime ? "O mercado está altista? — regime" : "Estado do mercado — BTC"}</div>
         <h2 class="hero-verdict" style="color:${cor};">${esc(rotulo)}</h2>
+        ${temRegime ? `<div style="font-family:var(--font-mono);font-size:12.5px;color:var(--text-dim);margin-top:8px;line-height:1.9;">
+          <span style="color:var(--text-faint);">${REG.alta} de ${REG.itens.length} apontando alta ·
+          score ${ms.score.toFixed(1)} (média ponderada, secundária)</span><br>
+          ${REG.itens.map(function(i){
+            const c = i.voto>0 ? COLOR.teal : (i.voto<0 ? COLOR.brick : COLOR.faint);
+            return '<span style="color:'+c+';white-space:nowrap;">'+
+                   (i.voto>0?"↑":(i.voto<0?"↓":"·"))+" "+esc(i.rot)+" "+
+                   (i.v>0?"+":"")+i.v.toFixed(1)+'</span>';
+          }).join('<span style="color:var(--line);"> · </span>')}
+        </div>` : ""}
         <div class="hero-action" style="color:${cor};">${esc(d.action)}</div>
         <p class="hero-line">${semLeitura
           ? esc(motivoTrava) + ' Os motores continuam abaixo, mas o sistema não converte isto num veredito. Atualize os dados para tentar de novo.'

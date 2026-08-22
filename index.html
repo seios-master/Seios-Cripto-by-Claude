@@ -1181,7 +1181,7 @@ const STORAGE_KEY = "seios_btc_v2";
 // fonte única da versão — usada no rodapé, no histórico e nos exports.
 // Muda toda vez que a fórmula de score/pesos muda, pra nunca misturar
 // decisões de regras diferentes como se fossem comparáveis.
-const BUILD_VERSION = "2026-08-21.128-regime-na-manchete";
+const BUILD_VERSION = "2026-08-21.129-gdelt-resiliente";
 /* v78: versão do MODELO separada da versão do BUILD. Mudança visual não é
    mudança de semântica: só sobe quando peso, fórmula, corte ou trava mudam.
    Toda observação gravada carrega as duas, pra que seis meses depois dê pra
@@ -2044,6 +2044,68 @@ function tomDoUltimoFechado(pontos){
   if(v === undefined || v === null || !Number.isFinite(Number(v)))
     throw new Error("GDELT tom: formato inesperado no bucket fechado");
   return Number(v);
+}
+
+/* =====================================================================
+   v129 — O GDELT PARA DE DERRUBAR A COBERTURA
+   =====================================================================
+   O DIAGNÓSTICO, medido em 21/08 direto na rota:
+     {"error":"GDELT limitou a taxa (429) nas 2 tentativas",
+      "tentativas":["1:429@10627ms","2:429@10299ms"]}
+   É limite POR IP — e o IP não é o do Jorge: é da Vercel, compartilhado com
+   milhares de projetos. Não importa quantas vezes NÓS chamamos; importa
+   quantas vezes o datacenter inteiro chama. Foi por isso que o cache de 4h da
+   v125 não resolveu, e por isso que o ULTIMO_BOM em memória do servidor quase
+   nunca serve: cada requisição pode cair numa instância nova.
+
+   POR QUE IMPORTA ALÉM DO INCÔMODO: quando o GDELT cai, dois indicadores saem
+   da conta e a cobertura vai de ~73% para ~67%. O modelo deixa a ausência no
+   denominador e amortece o score na direção de zero. O MESMO mercado produz
+   scores diferentes conforme a fonte responde — e se as falhas tiverem
+   horário, isso vira viés, não ruído.
+
+   TRÊS CORREÇÕES, e a primeira é a que resolve:
+
+   1. GUARDA NO CLIENTE. O último valor bom fica no localStorage do aparelho,
+      onde os dados já vivem. Sobrevive a instância nova, a deploy e à borda.
+      Se a rota falhar e houver valor de menos de 12h, ele é usado COM A IDADE
+      DECLARADA. A janela do tom é de 3 dias: 12h são 17% dela.
+
+   2. A FALHA CONTINUA CONTANDO COMO FALHA. Jorge foi explícito: usar dado
+      velho em silêncio esconderia a informação de que a fonte está ruim. A
+      lista de falhas continua recebendo o GDELT e a tela continua mostrando.
+
+   3. MENOS PEDIDOS. Tom e volume são consultas diferentes (timelinetone 3d
+      "geo" e timelinevolraw 14d "crise") e não podem virar uma. Mas o volume
+      compara os últimos dias contra 14: buscá-lo a cada rodada é desperdício.
+      Passa a 1x por dia — de 6 pedidos diários para 4.
+
+   O QUE ISTO NÃO FAZ: zerar as falhas. O limite é de um IP que não
+   controlamos. Reduz, e para de contaminar a série. */
+const GDELT_GUARDA_MS = 12 * 3600 * 1000;
+
+function guardarGdelt(chave, valor){
+  try{
+    localStorage.setItem("seios_gdelt_" + chave,
+      JSON.stringify({ v: valor, em: Date.now() }));
+  }catch(e){ /* armazenamento cheio ou bloqueado: seguir sem guardar */ }
+}
+function lerGuardaGdelt(chave){
+  try{
+    const bruto = localStorage.getItem("seios_gdelt_" + chave);
+    if(!bruto) return null;
+    const o = JSON.parse(bruto);
+    /* Number(null) é ZERO, não NaN — segunda vez que isto aparece no projeto
+       (a primeira foi no percentil do apetite, v125). Um valor nulo guardado
+       viraria "tom neutro" onde há silêncio. Verificação explícita de tipo. */
+    if(!o || typeof o.v !== "number" || !Number.isFinite(o.v)
+         || typeof o.em !== "number" || !Number.isFinite(o.em)) return null;
+    const idadeMs = Date.now() - o.em;
+    if(idadeMs > GDELT_GUARDA_MS) return null;   /* velho demais: falha honesta */
+    return { valor: Number(o.v), idadeMs: idadeMs,
+             idadeTexto: idadeMs < 3600000 ? Math.round(idadeMs/60000) + "min"
+                                           : (idadeMs/3600000).toFixed(1) + "h" };
+  }catch(e){ return null; }
 }
 
 async function fetchGdeltTone(){
@@ -3687,21 +3749,65 @@ async function refreshMarketData(){
          espera de verdade. A segunda chance do cliente dobrava os pedidos
          numa fonte cujo problema É o número de pedidos. */
       const tone = await fetchGdeltTone();
+      guardarGdelt("tom", tone);                      /* v129 — guarda o bom */
       setAuto("geopolitico","gdelt", norm("geopolitico.gdelt", tone), `tom médio: ${tone.toFixed(2)}`, { bruto: tone });
       results.ok.push("gdelt");
       logDone(line, true, tone.toFixed(2) + textoCacheGdelt());
-    }catch(e){ setFailed("geopolitico","gdelt", e && e.message); results.fail.push("gdelt"); logDone(line, false, (e && e.message) + textoCacheGdelt()); }
+    }catch(e){
+      /* v129 — a falha CONTINUA sendo falha: entra em results.fail e aparece
+         na tela. O que muda é que o indicador não fica sem valor, para a
+         cobertura parar de oscilar entre leituras do mesmo mercado. */
+      const g = lerGuardaGdelt("tom");
+      if(g){
+        setAuto("geopolitico","gdelt", norm("geopolitico.gdelt", g.valor),
+          `tom médio: ${g.valor.toFixed(2)} — GUARDADO de ${g.idadeTexto} atrás (a fonte falhou nesta rodada)`,
+          { bruto: g.valor });
+        results.fail.push("gdelt");
+        logDone(line, false, (e && e.message) + " · usando guardado de " + g.idadeTexto + textoCacheGdelt());
+      }else{
+        setFailed("geopolitico","gdelt", e && e.message);
+        results.fail.push("gdelt");
+        logDone(line, false, (e && e.message) + textoCacheGdelt());
+      }
+    }
   }
 
   await sleep(5500); // GDELT limita a 1 consulta a cada 5s por IP — sem essa
   // pausa, a segunda chamada quase sempre esbarra no limite da primeira
   { const line = logStep("consultando pico de volume de notícias de crise (GDELT)");
     try{
-      const spike = await fetchGdeltVolumeSpike();
-      setAuto("eventos","volumeSpike", volumeSpikeToScore(spike), `volume ${spike>=0?"+":""}${spike.toFixed(0)}% vs. normal`, { bruto: spike });
-      results.ok.push("gdelt volume");
-      logDone(line, true, `${spike>=0?"+":""}${spike.toFixed(0)}%` + textoCacheGdelt());
-    }catch(e){ setFailed("eventos","volumeSpike", e && e.message); results.fail.push("gdelt volume"); logDone(line, false, (e && e.message) + textoCacheGdelt()); }
+      /* v129 — o volume compara os últimos dias contra uma janela de 14. Buscá-lo
+         a cada rodada é desperdício num limite que é POR IP compartilhado: passa
+         a 1x por dia. De 6 pedidos diários ao GDELT para 4. */
+      const guardadoVol = lerGuardaGdelt("volume");
+      const recente = guardadoVol && guardadoVol.idadeMs < 20*3600*1000;
+      if(recente){
+        setAuto("eventos","volumeSpike", volumeSpikeToScore(guardadoVol.valor),
+          `volume ${guardadoVol.valor>=0?"+":""}${guardadoVol.valor.toFixed(0)}% vs. normal — janela de 14 dias, buscado ${guardadoVol.idadeTexto} atrás`,
+          { bruto: guardadoVol.valor });
+        results.ok.push("gdelt volume");
+        logDone(line, true, `${guardadoVol.valor>=0?"+":""}${guardadoVol.valor.toFixed(0)}% · do dia (1x/dia)`);
+      }else{
+        const spike = await fetchGdeltVolumeSpike();
+        guardarGdelt("volume", spike);
+        setAuto("eventos","volumeSpike", volumeSpikeToScore(spike), `volume ${spike>=0?"+":""}${spike.toFixed(0)}% vs. normal`, { bruto: spike });
+        results.ok.push("gdelt volume");
+        logDone(line, true, `${spike>=0?"+":""}${spike.toFixed(0)}%` + textoCacheGdelt());
+      }
+    }catch(e){
+      const g = lerGuardaGdelt("volume");
+      if(g){
+        setAuto("eventos","volumeSpike", volumeSpikeToScore(g.valor),
+          `volume ${g.valor>=0?"+":""}${g.valor.toFixed(0)}% vs. normal — GUARDADO de ${g.idadeTexto} atrás (a fonte falhou)`,
+          { bruto: g.valor });
+        results.fail.push("gdelt volume");
+        logDone(line, false, (e && e.message) + " · usando guardado de " + g.idadeTexto);
+      }else{
+        setFailed("eventos","volumeSpike", e && e.message);
+        results.fail.push("gdelt volume");
+        logDone(line, false, (e && e.message) + textoCacheGdelt());
+      }
+    }
   }
 
   await sleep(200);

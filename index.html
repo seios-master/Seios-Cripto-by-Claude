@@ -521,6 +521,9 @@
   .hero-side{display:flex;flex-direction:column;gap:10px;}
   .hero-price{font-family:var(--font-mono);font-size:38px;font-weight:700;line-height:1;}
   .hero-price-sub{font-family:var(--font-mono);font-size:13px;color:var(--text-faint);margin-top:2px;}
+  /* v137 — score e cobertura numa linha só: o score continua visível sem abrir
+     nada, porque é ele que está sendo acumulado nas 777. */
+  .hero-meta{font-family:var(--font-mono);font-size:12px;color:var(--text-faint);margin-top:6px;}
   .ma-row{display:flex;justify-content:space-between;align-items:baseline;gap:10px;
           font-family:var(--font-mono);font-size:14px;padding:7px 0;border-top:1px solid var(--line-soft);}
   .ma-row .ma-name{color:var(--text-faint);font-size:12.5px;}
@@ -605,6 +608,36 @@
     .card-cols{grid-template-columns:1fr;}
     .premise-row{grid-template-columns:1fr;}
   }
+    /* v132 — dobras: uma linha por leitura, detalhe sob demanda */
+    .dobra{border-top:1px solid var(--line-soft);}
+    .dobra:first-of-type{border-top:none;}
+    .dobra-linha{display:flex;align-items:baseline;gap:12px;cursor:pointer;
+      padding:11px 0;list-style:none;user-select:none;}
+    .dobra-linha::-webkit-details-marker{display:none;}
+    .dobra-linha:focus-visible{outline:1px solid var(--teal);outline-offset:3px;}
+    .dobra-olho{font-family:var(--font-mono);font-size:10px;letter-spacing:.1em;
+      text-transform:uppercase;color:var(--text-faint);white-space:nowrap;min-width:96px;}
+    .dobra-resumo{flex:1;font-family:var(--font-mono);font-size:13px;line-height:1.45;}
+    .dobra-seta{color:var(--text-faint);font-size:11px;transition:transform .15s ease;}
+    .dobra[open] .dobra-seta{transform:rotate(90deg);}
+    .dobra-corpo{padding:2px 0 16px;}
+    @media (prefers-reduced-motion:reduce){ .dobra-seta{transition:none;} }
+    @media (max-width:640px){
+      .dobra-linha{flex-wrap:wrap;gap:4px 10px;}
+      .dobra-olho{min-width:0;flex-basis:100%;}
+    }
+    /* v134 — cinco linhas, e nada mais: o painel encolhe para o essencial */
+    .dobra-fechar{display:block;margin:14px 0 2px;padding:6px 14px;background:transparent;
+      border:1px solid var(--line);color:var(--text-faint);font-family:var(--font-mono);
+      font-size:11px;letter-spacing:.06em;cursor:pointer;border-radius:2px;}
+    .dobra-fechar:hover{color:var(--text-dim);border-color:var(--line-soft);}
+    .dobra-fechar:focus-visible{outline:1px solid var(--teal);outline-offset:2px;}
+    .prazo-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:12px;}
+    @media (max-width:640px){ .prazo-grid{grid-template-columns:1fr;} }
+    /* as linhas ficam mais apertadas: o painel inteiro cabe numa tela */
+    .dobra-linha{padding:9px 0;}
+    .dobra-olho{min-width:86px;font-size:9.5px;}
+    .dobra-resumo{font-size:12.5px;}
 </style>
 <script>
 /* v114 — A PELE É APLICADA ANTES DO <body>.
@@ -684,9 +717,17 @@ var PELE_ATUAL = "padrao";
        no meio do desenho. Aqui ela sobrevive a qualquer render. -->
   <!-- v121 — leitura em três camadas, na tela principal. Fica FORA do #heroWrap
        pelo mesmo motivo da faixa ao vivo: renderHero() reescreve aquele bloco. -->
-  <section class="panel" id="painelApetite" style="margin:18px 0;"></section>
-
-  <section class="panel" id="painelCadencia" style="margin:18px 0;"></section>
+  <!-- v133 — quatro leituras independentes, quatro linhas, num container só.
+       Antes eram dois painéis com molduras separadas e três telas de texto. -->
+  <!-- v134 — CINCO leituras independentes, cinco linhas, um container só.
+       Regime · Fluxo · Liquidações · Cadência · Prazos. Cada uma abre inteira
+       ao toque e tem botão de fechar. -->
+  <section class="panel" id="painelLeituras" style="margin:18px 0;padding:4px 18px;">
+    <div id="painelApetite"></div>
+    <div id="painelCadencia"></div>
+    <div id="prazoBar"></div>
+    <div id="contextoBar"></div>
+  </section>
 
   <div class="live-strip" id="liveTickWrap">
     <div class="live-left">
@@ -698,21 +739,16 @@ var PELE_ATUAL = "padrao";
     <svg id="liveChart" class="live-chart" viewBox="0 0 600 40" preserveAspectRatio="none"></svg>
   </div>
 
-  <div class="prazo-bar" id="prazoBar"></div>
 </div>
 
 <div class="wrap" id="app">
 
   <!-- § MARKET STATE -->
-  <section class="panel" id="panelState">
-    <div class="panel-head">
-      <div>
-        <div class="panel-mark">§ Market State Engine</div>
-        <h2 class="panel-title">Estado de mercado — BTC</h2>
-      </div>
-      <div class="panel-desc">Síntese ponderada das dimensões abaixo. Não é recomendação — é leitura de contexto.</div>
-    </div>
-    <div id="summaryDash"></div>
+  <!-- v135 — o Market State vira a SEXTA linha: MOTORES. Os mostradores dos
+       nove motores só aparecem quando a linha é aberta. -->
+  <section class="panel" id="panelState" style="padding:4px 18px;">
+    <div id="dobraMotores"></div>
+    <div id="summaryDash" hidden></div>
 
     <details id="detailsToggle" style="margin-top:20px;display:none;">
       <summary style="cursor:pointer;font-family:var(--font-mono);font-size:11px;color:var(--copper);text-transform:uppercase;letter-spacing:.08em;padding:10px 0;border-top:1px solid var(--line-soft);">▸ Ajustar manualmente / conectar APIs</summary>
@@ -1196,7 +1232,7 @@ const STORAGE_KEY = "seios_btc_v2";
 // fonte única da versão — usada no rodapé, no histórico e nos exports.
 // Muda toda vez que a fórmula de score/pesos muda, pra nunca misturar
 // decisões de regras diferentes como se fossem comparáveis.
-const BUILD_VERSION = "2026-08-23.131-liquidacoes-visiveis";
+const BUILD_VERSION = "2026-08-23.138-tabela-solta";
 /* v78: versão do MODELO separada da versão do BUILD. Mudança visual não é
    mudança de semântica: só sobe quando peso, fórmula, corte ou trava mudam.
    Toda observação gravada carrega as duas, pra que seis meses depois dê pra
@@ -6696,6 +6732,66 @@ function leituraPorCadencia(){
    mesma pergunta ("o que sustenta o movimento?") — mas com as variáveis que
    PASSARAM no teste de descrição, e o fluxo atual usa duas que reprovaram
    (funding r=0,004 e a versão de 4h do OI). */
+/* =====================================================================
+   v132 — DOBRAS: o resultado à vista, a explicação sob demanda
+   =====================================================================
+   Os painéis cresceram build a build e cada um ganhou o parágrafo que
+   justificava a decisão daquele dia. Somados, viraram três telas de texto
+   antes do primeiro número — e num iPhone isso é rolagem sem fim.
+
+   O texto não some, porque ele é o que impede o instrumento de mentir:
+   é onde está escrito que nada aqui prevê, que o corte de ±15 é herdado,
+   que a correlação é de defasagem zero. Ele passa a ficar DOBRADO.
+
+   A regra da dobra: o resumo tem que carregar a resposta. Uma linha fechada
+   que diz só "Regime ▸" obriga a abrir para saber de que se trata — pior que
+   o texto longo. A linha fechada diz "REGIME · ALTA PARCIAL 60 · 3 de 5".
+
+   Usa <details> nativo: funciona sem JavaScript, responde ao teclado e ao
+   leitor de tela, e não inventa estado que possa dessincronizar. O aberto /
+   fechado fica no localStorage, em chave própria, separada do estado do
+   sistema. */
+function dobra(id, olho, resumo, corpo, abertoPorPadrao){
+  let aberto = abertoPorPadrao !== false;
+  try{
+    const g = localStorage.getItem("seios_dobra_" + id);
+    if(g === "1") aberto = true;
+    else if(g === "0") aberto = false;
+  }catch(e){ /* armazenamento bloqueado: usa o padrão */ }
+  return `
+  <details class="dobra" data-dobra="${esc(id)}"${aberto ? " open" : ""}>
+    <summary class="dobra-linha">
+      <span class="dobra-olho">${esc(olho)}</span>
+      <span class="dobra-resumo">${resumo}</span>
+      <span class="dobra-seta" aria-hidden="true">▸</span>
+    </summary>
+    <div class="dobra-corpo">${corpo}
+      <button type="button" class="dobra-fechar" data-fecha="${esc(id)}">fechar</button>
+    </div>
+  </details>`;
+}
+
+/* um ouvinte só, no documento, em vez de um por dobra */
+function ligarDobras(){
+  if(window.__dobrasLigadas) return;
+  window.__dobrasLigadas = true;
+  document.addEventListener("toggle", function(ev){
+    const d = ev.target;
+    if(!d || d.tagName !== "DETAILS" || !d.dataset || !d.dataset.dobra) return;
+    try{ localStorage.setItem("seios_dobra_" + d.dataset.dobra, d.open ? "1" : "0"); }
+    catch(e){ /* sem armazenamento: a dobra funciona, só não lembra */ }
+  }, true);
+  /* v134 — o botão fechar: num painel aberto e longo, rolar de volta até o
+     título para fechar é pior que não ter fechado. */
+  document.addEventListener("click", function(ev){
+    const b = ev.target && ev.target.closest && ev.target.closest(".dobra-fechar");
+    if(!b) return;
+    const d = b.closest("details");
+    if(d){ d.open = false; d.scrollIntoView({ block:"nearest",
+      behavior: window.matchMedia("(prefers-reduced-motion:reduce)").matches ? "auto" : "smooth" }); }
+  });
+}
+
 function blocoLiquidacoes(){
   const L = S.market && S.market.liquidacoes;
   if(!L || L.proporcaoVendidos === null || L.proporcaoVendidos === undefined) return "";
@@ -6707,18 +6803,12 @@ function blocoLiquidacoes(){
              : (p <= 40 ? "COMPRADOS SENDO ESTOURADOS" : "EQUILIBRADO");
   const mi = function(v){ return Math.abs(v) >= 1e6 ? (v/1e6).toFixed(1)+"M"
                                                     : Math.round(v/1e3)+"k"; };
-  return `
-    <div style="border-top:1px solid var(--line-soft);margin-top:14px;padding-top:14px;">
-      <div style="font-size:11px;color:var(--text-faint);letter-spacing:.06em;">
-        QUEM ESTÁ APANHANDO — liquidações da última hora</div>
-      <div style="display:flex;align-items:baseline;gap:14px;flex-wrap:wrap;margin:6px 0;">
-        <span style="font-family:var(--font-mono);font-size:40px;line-height:1;color:${cor};">${Math.round(p)}%</span>
-        <span style="font-family:var(--font-mono);font-size:15px;letter-spacing:.06em;color:${cor};">${esc(nome)}</span>
-        ${L.pctProporcao !== null && L.pctProporcao !== undefined
-          ? '<span style="font-size:11px;color:var(--text-faint);">percentil ' + Math.round(L.pctProporcao) + ' dos últimos 7 dias</span>'
-          : ''}
-      </div>
-      <div style="display:flex;height:8px;border-radius:4px;overflow:hidden;margin:6px 0 10px;">
+  return dobra("liquidacoes", "Live",
+    '<span style="color:'+cor+';font-size:15px;">'+Math.round(p)+'% '+esc(nome)+'</span>'+
+    (L.pctProporcao !== null && L.pctProporcao !== undefined
+      ? '<span style="color:var(--text-faint);"> · percentil '+Math.round(L.pctProporcao)+'</span>' : ''),
+    `
+      <div style="display:flex;height:8px;border-radius:4px;overflow:hidden;margin:0 0 10px;">
         <div style="width:${Math.round(p)}%;background:var(--teal);"></div>
         <div style="flex:1;background:var(--brick);"></div>
       </div>
@@ -6736,8 +6826,7 @@ function blocoLiquidacoes(){
         projeto antecede o preço, e correlação contemporânea de 0,66 é compatível com previsão
         zero. <span style="color:var(--text-faint);">A proporção é usada em vez do valor bruto
         porque em dia calmo o total é de dezenas de milhões e em dia de pânico, bilhões.</span>
-      </div>
-    </div>`;
+      </div>`, false);
 }
 
 function blocoApetite(){
@@ -6760,7 +6849,13 @@ function blocoApetite(){
     ["oi","Open interest 4h","posição sendo montada ou desmontada"],
     ["funding","Funding invertido","taxa alta = manada comprada = risco (leitura contrária)"]
   ];
-  const linhas = COMP.map(function(c){
+  /* v138 — A GUARDA QUE FALTAVA. A da v131 deixa passar o caso "apetite
+     ausente, regime presente" — e três linhas depois `A.pct` estoura num
+     objeto nulo. O try/catch do renderAll então zera o painel INTEIRO: Ciclo,
+     Pressão e Live somem juntos, em silêncio, e da cadeira do Jorge isso é
+     "o painel desapareceu". Um render isolado que engole o erro é pior que um
+     que quebra à vista quando a guarda está errada. */
+  const linhas = !A ? "" : COMP.map(function(c){
     const p = A.pct ? A.pct[c[0]] : null;
     const b = A.bruto ? A.bruto[c[0]] : null;
     const cor = p === null ? "var(--text-faint)"
@@ -6778,73 +6873,54 @@ function blocoApetite(){
   }).join("");
 
   return `
-    <div style="font-family:var(--font-mono);font-size:10px;letter-spacing:.06em;
-                text-transform:uppercase;color:var(--text-faint);margin-bottom:10px;">
-      Duas perguntas diferentes
-    </div>
-
     ${R && R.valor !== null ? `
-    <div style="border-bottom:1px solid var(--line-soft);padding-bottom:14px;margin-bottom:14px;">
-      <div style="font-size:11px;color:var(--text-faint);letter-spacing:.06em;">
-        O MERCADO ESTÁ ALTISTA? — regime, pelo preço e pela estrutura</div>
-      <div style="display:flex;align-items:baseline;gap:14px;flex-wrap:wrap;margin:6px 0;">
-        <span style="font-family:var(--font-mono);font-size:40px;line-height:1;color:${eR.cor};">${Math.round(R.valor)}</span>
-        <span style="font-family:var(--font-mono);font-size:17px;letter-spacing:.08em;color:${eR.cor};">${esc(eR.nome)}</span>
-        <span style="font-size:11px;color:var(--text-faint);">${R.alta} de ${R.itens.length} apontando alta</span>
-      </div>
-      <div style="display:flex;height:8px;border-radius:4px;overflow:hidden;margin:6px 0 10px;">
-        <div style="width:${Math.round(R.valor)}%;background:${eR.cor};"></div>
-        <div style="flex:1;background:var(--line-soft);"></div>
-      </div>
-      <div style="font-family:var(--font-mono);font-size:10.5px;line-height:1.9;">
-        ${R.itens.map(function(i){
+    ${dobra("regime", "Ciclo",
+      '<span style="color:'+eR.cor+';font-size:15px;">'+esc(eR.nome)+' '+Math.round(R.valor)+'</span>'+
+      '<span style="color:var(--text-faint);"> · '+R.alta+' de '+R.itens.length+' apontando alta</span>',
+      '<div style="display:flex;height:8px;border-radius:4px;overflow:hidden;margin:0 0 10px;">'+
+        '<div style="width:'+Math.round(R.valor)+'%;background:'+eR.cor+';"></div>'+
+        '<div style="flex:1;background:var(--line-soft);"></div></div>'+
+      '<div style="font-family:var(--font-mono);font-size:10.5px;line-height:1.9;">'+
+        R.itens.map(function(i){
           const c = i.voto>0 ? "var(--teal)" : (i.voto<0 ? "var(--brick)" : "var(--text-faint)");
-          return '<span style="color:'+c+';white-space:nowrap;">'+esc(i.rot)+' '+
+          return '<span style="color:'+c+';white-space:nowrap;">'+
+                 (i.voto>0?"↑":(i.voto<0?"↓":"·"))+' '+esc(i.rot)+' '+
                  (i.v>0?"+":"")+i.v.toFixed(1)+'</span>';
-        }).join('<span style="color:var(--line);"> · </span>')}
-      </div>
-    </div>` : ""}
+        }).join('<span style="color:var(--line);"> · </span>')+'</div>'+
+      '<div style="font-size:11.5px;color:var(--text-faint);margin-top:10px;">'+
+        'Responde "o mercado está altista?". Aqui o preço contra as próprias médias É a '+
+        'resposta, não uma contaminação.</div>', false)}` : ""}
 
-    ${A && A.valor !== null ? `
-    <div style="font-size:11px;color:var(--text-faint);letter-spacing:.06em;">
-      O QUE SUSTENTA O MOVIMENTO? — fluxo de derivativos</div>
-    <div style="display:flex;align-items:baseline;gap:14px;flex-wrap:wrap;margin:6px 0;">
-      <span style="font-family:var(--font-mono);font-size:40px;line-height:1;color:${e.cor};">${Math.round(A.valor)}</span>
-      <span style="font-family:var(--font-mono);font-size:17px;letter-spacing:.08em;color:${e.cor};">${esc(e.nome)}</span>
-      <span style="font-size:11px;color:var(--text-faint);">${A.componentes} de 3 componentes</span>
-    </div>
-    <div style="display:flex;height:8px;border-radius:4px;overflow:hidden;margin:6px 0 12px;">
-      <div style="width:${Math.round(A.valor)}%;background:${e.cor};"></div>
-      <div style="flex:1;background:var(--line-soft);"></div>
-    </div>` : ""}
-    <table style="width:100%;border-collapse:collapse;font-family:var(--font-mono);font-size:11px;">
-      <thead><tr style="color:var(--text-faint);text-align:left;">
-        <th style="padding:5px 8px;">Componente</th>
-        <th style="padding:5px 8px;text-align:right;">bruto</th>
-        <th style="padding:5px 8px;text-align:right;">percentil</th>
-        <th style="padding:5px 8px;">leitura</th>
-      </tr></thead><tbody>${linhas}</tbody>
-    </table>
-    ${A.baseCurta ? '<div style="border:1px solid var(--brick);background:#FF8A8014;padding:10px 12px;margin:10px 0;font-size:12px;color:var(--text-dim);"><strong style="color:var(--brick);">Base curta.</strong> O percentil está comparando com menos de ~10 dias de história — durante um movimento sustentado, isso faz o próprio movimento virar a referência e a leitura tende ao normal. Foi o defeito da v125, corrigido na v126: se este aviso aparecer, a coleta das velas falhou parcialmente.</div>' : ''}
-    <div style="font-size:12px;color:var(--text-dim);margin-top:10px;line-height:1.6;">
-      <strong>Por que dois números.</strong> O <strong>regime</strong> responde "o mercado
-      está altista?" — e para isso o preço contra as próprias médias É a resposta, não uma
-      contaminação. O <strong>fluxo</strong> responde outra coisa: "o que sustenta o
-      movimento?" — e usa só derivativos, sem nada derivado do preço.
-      <strong>Eles podem divergir, e a divergência é a informação.</strong> Um regime de alta
-      com fluxo fraco descreve preço subindo sem dinheiro novo alavancado entrando — o que
-      acontece, por exemplo, quando posições vendidas são fechadas.
-      <br><br>
-      <strong>O fluxo é só acumulado.</strong> Cada componente é lido em <strong>percentil contra a própria história</strong>,
-      não em escala fixa: o corte de ±15 que o resto do sistema usa cruza em 0% dos dias no
-      funding e em 86% no hash rate, e em percentil todos falam a mesma língua.
-      <br><br>
-      <strong>Isto descreve o presente — não é previsão.</strong> Em ~150 medições, nada neste
-      projeto antecede o preço. O melhor resultado que apareceu — variação do open interest,
-      r = +0,355 — caiu para r = +0,013 quando removemos as 48 horas do episódio que o gerou.
-      <span style="color:var(--text-faint);">Score, pesos, camadas e a série das 777 não são
-      afetados por este painel.</span>
-    </div>
+    ${A && A.valor !== null ? dobra("fluxo", "Pressão",
+      '<span style="color:'+e.cor+';font-size:15px;">'+esc(e.nome)+' '+Math.round(A.valor)+'</span>'+
+      '<span style="color:var(--text-faint);"> · '+A.componentes+' de 3</span>',
+      '<div style="display:flex;height:8px;border-radius:4px;overflow:hidden;margin:0 0 12px;">'+
+        '<div style="width:'+Math.round(A.valor)+'%;background:'+e.cor+';"></div>'+
+        '<div style="flex:1;background:var(--line-soft);"></div></div>'+
+      '<table style="width:100%;border-collapse:collapse;font-family:var(--font-mono);font-size:11px;">'+
+      /* v138 — o cabeçalho da tabela vem para CÁ. Ele existia só na cópia
+         solta lá embaixo: dentro da dobra, as quatro colunas estavam sem
+         rótulo e o número do meio não dizia que era percentil. */
+      '<thead><tr style="color:var(--text-faint);text-align:left;">'+
+        '<th style="padding:5px 8px;">Componente</th>'+
+        '<th style="padding:5px 8px;text-align:right;">bruto</th>'+
+        '<th style="padding:5px 8px;text-align:right;">percentil</th>'+
+        '<th style="padding:5px 8px;">leitura</th>'+
+      '</tr></thead>'+
+      '<tbody>'+linhas+'</tbody></table>'+
+      /* v138 — o aviso de base curta também vem para cá: ele fala DESTES
+         percentis e não fazia sentido flutuando fora da dobra que os mostra. */
+      (A.baseCurta ? '<div style="border:1px solid var(--brick);background:#FF8A8014;padding:10px 12px;margin:10px 0;font-size:12px;color:var(--text-dim);"><strong style="color:var(--brick);">Base curta.</strong> O percentil está comparando com menos de ~10 dias de história — durante um movimento sustentado, isso faz o próprio movimento virar a referência e a leitura tende ao normal. Foi o defeito da v125, corrigido na v126: se este aviso aparecer, a coleta das velas falhou parcialmente.</div>' : '')+
+      '<div style="font-size:11.5px;color:var(--text-faint);margin-top:10px;line-height:1.6;">'+
+        'Responde "o que sustenta o movimento?". Só fluxo acumulado, nada derivado do preço — '+
+        'momentum, RSI e médias diriam apenas que o preço subiu. Cada componente é lido em '+
+        'percentil contra a própria história, não em escala fixa: o corte de ±15 que o resto do '+
+        'sistema usa cruza em 0% dos dias no funding e em 86% no hash rate.<br><br>'+
+        '<strong>Descreve o presente — não é previsão.</strong> Em ~170 medições nada neste '+
+        'projeto antecede o preço: as relações reais têm pico em defasagem zero. O melhor '+
+        'resultado que apareceu — open interest, r = +0,355 — caiu para +0,013 quando removemos '+
+        'as 48h do episódio que o gerou. <span style="color:var(--text-faint);">Score, pesos, '+
+        'camadas e a série das 777 não são afetados por este painel.</span></div>', false) : ""}
     ${(function(){ try{ return blocoLiquidacoes(); }catch(eL){ return ""; } })()}`;
 }
 
@@ -6854,6 +6930,18 @@ function blocoCadencia(){
   const cor = { ALTA:"var(--teal)", "ALTA PARCIAL":"var(--teal)",
                 BAIXA:"var(--brick)", "BAIXA PARCIAL":"var(--brick)",
                 DIVIDIDO:"var(--gold)", PARADO:"var(--text-faint)", "SEM DADO":"var(--text-faint)" };
+  /* v133 — a linha fechada da cadência carrega os TRÊS rótulos: fechada, ela
+     ainda responde "como está cada relógio?" sem precisar abrir. */
+  const setaDe = { ALTA:"↑", "ALTA PARCIAL":"↗", DIVIDIDO:"↔",
+                   PARADO:"⊙", "BAIXA PARCIAL":"↘", BAIXA:"↓" };
+  const corDe = { ALTA:"var(--teal)", "ALTA PARCIAL":"var(--teal)",
+                  BAIXA:"var(--brick)", "BAIXA PARCIAL":"var(--brick)",
+                  DIVIDIDO:"var(--gold)", PARADO:"var(--text-faint)" };
+  const resumoCadencia = leituras.map(function(r){
+    return '<span style="color:'+(corDe[r.rotulo]||"var(--text-faint)")+';white-space:nowrap;">'+
+           (setaDe[r.rotulo]||"·")+' '+esc(r.nome)+'</span>';
+  }).join('<span style="color:var(--line);"> · </span>');
+
   const velas = (S.market && S.market.velasCamadas) || null;
   const SERIE = { agora:"h1", semana:"d7", terreno:"d30" };
   const blocos = leituras.map(function(r){
@@ -6871,25 +6959,17 @@ function blocoCadencia(){
         return '<span style="color:' + c + ';white-space:nowrap;">' + esc(x.label.slice(0,22)) +
                ' ' + (x.valor > 0 ? "+" : "") + x.valor.toFixed(0) + '</span>';
       }).join('<span style="color:var(--line);"> · </span>');
-    return `
-      <div style="border-top:1px solid var(--line-soft);padding:12px 0;">
-        <div style="display:flex;justify-content:space-between;align-items:baseline;flex-wrap:wrap;gap:8px;">
-          <div>
-            <span style="font-family:var(--font-mono);font-size:13px;letter-spacing:.08em;">${esc(r.nome)}</span>
-            <span style="font-size:11px;color:var(--text-faint);margin-left:10px;">${esc(r.desc)}</span>
-          </div>
-          <div style="display:flex;align-items:center;gap:10px;">
-            ${g ? `<svg width="150" height="26" viewBox="0 0 150 26" aria-hidden="true" style="opacity:.85;">
-                     <path d="${g.d}" fill="none" stroke="${g.subiu ? "var(--teal)" : "var(--brick)"}" stroke-width="1.5"/>
-                   </svg>
-                   <span style="font-family:var(--font-mono);font-size:10px;color:var(--text-faint);"
-                     title="preço do BTC nesta janela — contexto, não o que a camada afirma">preço ${
-                     esc(r.janela || "")} ${g.variacao >= 0 ? "+" : ""}${g.variacao.toFixed(1)}%</span>` : ""}
-            <div style="font-family:var(--font-mono);font-size:15px;color:${cor[r.rotulo] || "var(--text)"};">
-              ${seta} ${esc(r.rotulo)}
-            </div>
-          </div>
-        </div>
+    return dobra("camada-"+r.id, r.nome,
+      '<span style="color:'+(cor[r.rotulo] || "var(--text)")+';font-size:14px;">'+seta+' '+esc(r.rotulo)+'</span>'+
+      '<span style="color:var(--text-faint);"> · '+r.pctAlta.toFixed(0)+'/'+r.pctBaixa.toFixed(0)+'/'+
+        r.pctNeutro.toFixed(0)+' · '+r.medidos+' de '+r.total+'</span>'+
+      (g ? '<span style="color:var(--text-faint);"> · preço '+esc(r.janela||"")+' '+
+           (g.variacao>=0?"+":"")+g.variacao.toFixed(1)+'%</span>' : ''),
+      `
+        <div style="font-size:11px;color:var(--text-faint);margin-bottom:8px;">${esc(r.desc)}</div>
+        ${g ? `<svg width="150" height="26" viewBox="0 0 150 26" aria-hidden="true" style="opacity:.85;">
+                 <path d="${g.d}" fill="none" stroke="${g.subiu ? "var(--teal)" : "var(--brick)"}" stroke-width="1.5"/>
+               </svg>` : ""}
         <div style="font-family:var(--font-mono);font-size:11.5px;color:var(--text-dim);margin:6px 0;">
           ${r.pctAlta.toFixed(0)}% alta · ${r.pctBaixa.toFixed(0)}% baixa · ${r.pctNeutro.toFixed(0)}% neutro
           <span style="color:var(--line);"> | </span>
@@ -6902,16 +6982,13 @@ function blocoCadencia(){
           <div style="width:${bar.pctNeutro}%;background:var(--line);"></div>
           <div style="width:${bar.pctBaixa}%;background:var(--brick);"></div>
         </div>`}
-        <div style="font-family:var(--font-mono);font-size:10.5px;line-height:1.9;">${itens}</div>
-      </div>`;
+        <div style="font-family:var(--font-mono);font-size:10.5px;line-height:1.9;">${itens}</div>`,
+      false);
   }).join("");
 
   return `
-    <div style="font-family:var(--font-mono);font-size:10px;letter-spacing:.06em;
-                text-transform:uppercase;color:var(--text-faint);margin-bottom:4px;">
-      Leitura por cadência — cada relógio com o seu
-    </div>
-    <div style="font-size:12.5px;color:var(--text-dim);margin-bottom:6px;">
+    ${dobra("cadencia", "Velocidades", resumoCadencia, `
+      <div style="font-size:12.5px;color:var(--text-dim);margin-bottom:12px;">
       Três leituras separadas, <strong>sem média entre elas</strong>. Cada indicador entra na
       camada da cadência da própria fonte: o que muda por minuto não é somado com o que muda
       por mês. <strong>Isto descreve o presente em três velocidades — não é previsão.</strong>
@@ -6923,9 +7000,8 @@ function blocoCadencia(){
       fora da conta e a cobertura é declarada. Score, pesos e a série das 777 não são afetados.
       <br>O gráfico ao lado de cada rótulo é <strong>o preço no relógio daquela camada</strong>
       — 1h, 7 dias, 30 dias. É <strong>contexto</strong>, não afirmação: serve para você ver se
-      o que a camada diz combina com o que aconteceu naquela escala.</span>
-    </div>
-    ${blocos}`;
+      o que a camada diz combina com o que aconteceu naquela escala.</span></div>
+      ${blocos}`, false)}`;
 }
 
 function computeMarketState(){
@@ -9898,6 +9974,46 @@ function renderState(){
   const ms = computeMarketState();
   const dash = document.getElementById("summaryDash");
   if(!dash) return;
+  /* v135 — MOTORES vira a sexta linha. O resumo fechado carrega o veredito e
+     os dois motores de maior contribuição; os nove mostradores só aparecem
+     quando a linha é aberta. */
+  { const alvoM = document.getElementById("dobraMotores");
+    if(alvoM){
+      const semScore = !ms || ms.score === null || ms.score === undefined
+                       || !Number.isFinite(ms.score);
+      const corM = semScore ? COLOR.faint
+        : (ms.score >= 15 ? COLOR.teal : (ms.score <= -15 ? COLOR.brick : COLOR.gold));
+      const nomeM = semScore ? "SEM LEITURA" : scoreLabel(ms.score);
+      let top = "";
+      try{
+        top = Object.keys(ms.composites || {})
+          .map(function(k){
+            const c = ms.composites[k];
+            const p = (ms.pesosEfetivos && ms.pesosEfetivos[k]) || 0;
+            return { nome: S.motors[k] ? S.motors[k].label : k,
+                     c: (Number.isFinite(c) ? c : 0) * p };
+          })
+          .filter(function(x){ return Number.isFinite(x.c) && x.c !== 0; })
+          .sort(function(a,b){ return Math.abs(b.c)-Math.abs(a.c); })
+          .slice(0,2)
+          .map(function(x){
+            const c = x.c > 0 ? COLOR.teal : COLOR.brick;
+            return '<span style="color:'+c+';white-space:nowrap;">'+esc(x.nome.split(" ")[0])+
+                   ' '+(x.c>0?"+":"")+x.c.toFixed(1)+'</span>';
+          }).join('<span style="color:var(--line);"> · </span>');
+      }catch(eT){ top = ""; }
+      alvoM.innerHTML = dobra("motores", "Motores",
+        '<span style="color:'+corM+';font-size:14px;">'+esc(nomeM)+
+        (semScore ? "" : " "+ms.score.toFixed(1))+'</span>'+
+        (top ? '<span style="color:var(--text-faint);"> · maior peso: </span>'+top : ''),
+        '<div id="motoresCorpo"></div>'+
+        '<div style="font-size:11.5px;color:var(--text-faint);margin-top:10px;line-height:1.6;">'+
+        'Síntese ponderada dos nove motores. <strong>Não é recomendação — é leitura de '+
+        'contexto</strong>, e é a que menos se move: mais da metade do peso está em janelas '+
+        'de 90 dias e séries mensais, que não mudam em dois dias.</div>', false);
+      const corpo = document.getElementById("motoresCorpo");
+      if(corpo){ corpo.appendChild(dash); dash.hidden = false; }
+    } }
 
   const motorDials = Object.entries(S.motors).map(([key,motor])=>{
     const c = ms.composites[key];
@@ -10772,45 +10888,106 @@ function renderHero(){
   const delta = S.market.change24h;
   const corDelta = delta === null || delta === undefined ? COLOR.faint : (delta >= 0 ? COLOR.teal : COLOR.brick);
 
+  /* =====================================================================
+     v137 — O HERÓI PERDE TUDO QUE NÃO É "E AÍ?"
+     =====================================================================
+     MEDIDO antes de mexer, a 390px de largura — e é esta medição que faltou
+     nas três tentativas anteriores, quando dobrei painéis que já nasciam
+     `hidden` e a tela não encolheu um pixel:
+
+        herói ................ ~666px   (uma tela inteira, sozinho)
+        cabeçalho ............ ~440px
+        painel das dobras .... ~380px
+        faixa ao vivo ......... ~60px
+
+     Dentro do herói, o que custava altura NÃO era o veredito:
+        lista de itens do regime  ~128px  — cópia literal da dobra Ciclo
+        frase do cenário          ~150px  — 6 linhas a 15px
+        três linhas de média       ~90px
+
+     Os itens do regime estavam DUAS VEZES na mesma tela: aqui e no corpo da
+     dobra "Ciclo", com as mesmas setas e as mesmas cores. Some daqui, e não
+     se perde nada — é o único lugar onde apagar é de graça.
+
+     A frase e as médias não são duplicatas: viram a sétima linha, `Contexto`,
+     logo abaixo. Dobrado não é apagado.
+
+     O que fica: pergunta, veredito, ação, preço. Uma linha secundária com
+     score e cobertura, porque o score é o que está sendo acumulado nas 777 e
+     precisa estar visível sem abrir nada.
+
+     A EXCEÇÃO, e ela é deliberada: quando NÃO HÁ leitura, o motivo continua
+     no herói. Sem isso a tela diria "Sem leitura" e esconderia o porquê atrás
+     de um toque — que é exatamente o erro que o veredito travado existe para
+     não cometer. */
   wrap.innerHTML = `
     <div class="hero-grid">
       <div>
         <div class="hero-eyebrow">${temRegime ? "O mercado está altista? — regime" : "Estado do mercado — BTC"}</div>
         <h2 class="hero-verdict" style="color:${cor};">${esc(rotulo)}</h2>
-        ${temRegime ? `<div style="font-family:var(--font-mono);font-size:12.5px;color:var(--text-dim);margin-top:8px;line-height:1.9;">
-          <span style="color:var(--text-faint);">${REG.alta} de ${REG.itens.length} apontando alta ·
-          score ${ms.score.toFixed(1)} (média ponderada, secundária)</span><br>
-          ${REG.itens.map(function(i){
-            const c = i.voto>0 ? COLOR.teal : (i.voto<0 ? COLOR.brick : COLOR.faint);
-            return '<span style="color:'+c+';white-space:nowrap;">'+
-                   (i.voto>0?"↑":(i.voto<0?"↓":"·"))+" "+esc(i.rot)+" "+
-                   (i.v>0?"+":"")+i.v.toFixed(1)+'</span>';
-          }).join('<span style="color:var(--line);"> · </span>')}
-        </div>` : ""}
         <div class="hero-action" style="color:${cor};">${esc(d.action)}</div>
-        <p class="hero-line">${semLeitura
-          ? esc(motivoTrava) + ' Os motores continuam abaixo, mas o sistema não converte isto num veredito. Atualize os dados para tentar de novo.'
-          : esc(fraseDoEstado(ms, hs))}</p>
+        ${semLeitura ? `<p class="hero-line">${esc(motivoTrava)} Os motores continuam abaixo, mas o sistema não converte isto num veredito. Atualize os dados para tentar de novo.</p>` : ""}
       </div>
       <div class="hero-side">
         <div>
           <div class="hero-price">${p ? fmt(p) : "—"}</div>
           <div class="hero-price-sub" style="color:${corDelta};">
             ${delta === null || delta === undefined ? "sem variação" : `${delta>=0?"+":""}${delta.toFixed(2)}% em 24h`}
-            <span style="color:var(--text-faint);"> · cobertura ${(ms.cobertura*100).toFixed(0)}%</span>
           </div>
           <div class="dash-sparkline" style="margin:8px 0 2px;max-width:none;">${sparklineSVG(S.market.priceHistory)}</div>
+          <div class="hero-meta">score ${semLeitura ? "—" : (ms.score>=0?"+":"")+ms.score.toFixed(1)} · cobertura ${(ms.cobertura*100).toFixed(0)}%</div>
         </div>
-        <div>${linhasMA}</div>
       </div>
     </div>
   `;
+
+  /* v137 — CONTEXTO: a sétima linha.
+     Fechada, ela carrega a resposta — "acima de 3 de 3 médias · MA200 +42%" —
+     e não um rótulo mudo. Aberta, traz a frase do cenário e as três médias com
+     o valor em dólar. */
+  const alvoCtx = document.getElementById("contextoBar");
+  if(alvoCtx){
+    const defsMA = [["ma200"],["ma100"],["ma50"]];
+    const comValor = defsMA.filter(function(d){
+      const v = mas[d[0]]; return v !== null && v !== undefined && !!p; });
+    const acima = comValor.filter(function(d){ return p > mas[d[0]]; }).length;
+    const rel200 = (mas.ma200 && p) ? ((p - mas.ma200)/mas.ma200)*100 : null;
+    const corCtx = !comValor.length ? COLOR.faint
+      : (acima === comValor.length ? COLOR.teal
+      : (acima === 0 ? COLOR.brick : COLOR.gold));
+    const resumoCtx = !comValor.length
+      ? '<span style="color:'+COLOR.faint+';">sem médias semanais</span>'
+      : '<span style="color:'+corCtx+';">acima de '+acima+' de '+comValor.length+' médias</span>'+
+        (rel200 === null ? "" : '<span style="color:var(--text-faint);"> · MA200 '+
+          (rel200>=0?"+":"")+rel200.toFixed(0)+'%</span>');
+    alvoCtx.innerHTML = dobra("contexto", "Contexto", resumoCtx,
+      (semLeitura ? "" :
+        '<p style="font-size:13.5px;line-height:1.6;color:var(--text-dim);margin:0 0 12px;max-width:60ch;">'+
+        esc(fraseDoEstado(ms, hs))+'</p>') +
+      '<div>'+linhasMA+'</div>'+
+      '<div style="font-size:11.5px;color:var(--text-faint);margin-top:10px;line-height:1.6;">'+
+        'A frase acima é o estado descrito em português, montado a partir do score e dos três '+
+        'prazos. <strong>Descreve o presente — não é previsão.</strong> Em ~170 medições nada '+
+        'neste projeto antecede o preço.<br>As médias de 200/100/50 semanas vêm da Binance e '+
+        'entram no <strong>Ciclo</strong> como itens de voto; aqui elas aparecem com o valor em '+
+        'dólar e a distância do preço, que é contexto e não voto.</div>', false);
+  }
 
   // barra de prazos — palavra + número, não número solto
   const barra = document.getElementById("prazoBar");
   if(barra){
     const defs = [["curto","Curto prazo","24–72 horas"],["medio","Médio prazo","1–4 semanas"],["longo","Longo prazo","2–6 meses"]];
-    barra.innerHTML = defs.map(([k,nome,janela])=>{
+    /* v134 — os três cartões de prazo viram a QUINTA linha. Fechados, o resumo
+       carrega os três rótulos; o detalhe abre os cartões inteiros. */
+    const resumoPrazos = defs.map(function(d){
+      const hh = hs[d[0]];
+      const tem = hh && hh.score !== null;
+      const c = !tem ? COLOR.faint
+        : (hh.score >= 15 ? COLOR.teal : (hh.score <= -15 ? COLOR.brick : COLOR.gold));
+      return '<span style="color:'+c+';white-space:nowrap;">'+esc(d[1].split(" ")[0])+
+             ' '+(tem ? esc(scoreLabel(hh.score)) : "—")+'</span>';
+    }).join('<span style="color:var(--line);"> · </span>');
+    const cartoes = defs.map(([k,nome,janela])=>{
       const h = hs[k];
       const temValor = h && h.score !== null;
       const val = temValor ? h.score : null;
@@ -10821,6 +10998,12 @@ function renderHero(){
         <div class="p-sub">${temValor ? `score ${val>=0?"+":""}${val.toFixed(0)}` : "—"}</div>
       </div>`;
     }).join("");
+    barra.innerHTML = dobra("prazos", "Prazos", resumoPrazos,
+      '<div class="prazo-grid">' + cartoes + '</div>' +
+      '<div style="font-size:11.5px;color:var(--text-faint);margin-top:10px;line-height:1.6;">' +
+      'O mesmo score, recortado por horizonte. <strong>É a leitura mais antiga do sistema e a ' +
+      'que menos se move</strong>: mais da metade do peso está em janelas de 90 dias e séries ' +
+      'mensais, que não mudam em dois dias.</div>', false);
   }
 }
 
@@ -10845,6 +11028,7 @@ function renderAll(){
     if(alvoC){ try{ alvoC.innerHTML = blocoCadencia(); }
                catch(eC){ alvoC.innerHTML = ""; } } }
   /* v125 — o termômetro é exibição: se falhar, não derruba a tela */
+  ligarDobras();   /* v132 — um ouvinte só, no documento */
   { const alvoA = document.getElementById("painelApetite");
     if(alvoA){ try{ alvoA.innerHTML = blocoApetite(); }
                catch(eA){ alvoA.innerHTML = ""; } } }

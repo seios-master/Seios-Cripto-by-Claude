@@ -1,5 +1,5 @@
 # RESULTADOS DAS MEDIÇÕES — 18/19 de agosto de 2026
-## Anexo ao SEIOS-MEMORIA · sete laboratórios isolados · ~110 testes · nenhum aprovado
+## Anexo ao SEIOS-MEMORIA · oito laboratórios isolados · ~110 testes · nenhum aprovado
 
 > **Leia antes de propor qualquer coisa desta lista.** O que está aqui já foi medido,
 > com regra declarada antes e reserva temporal separada. Repropor sem dado novo é
@@ -262,6 +262,125 @@ seria prova de erro no alinhamento temporal de todo o teste.
 lindo e monotônico no estudo, achatado na reserva. Endereços ativos têm a mesma
 assinatura. **É reflexividade: no bull de 2017–2021, tudo que sobe junto com o preço
 "prevê" o preço.**
+
+---
+
+## RODADA 9 — a distribuição do CVD de 24h (`medicao-cvd.html`)
+
+Feita logo depois de o CVD nascer sensor (v124), para responder o que a primeira leitura
+ao vivo deixou em aberto: **+8,3% de compra líquida a mercado é muito, pouco ou normal?**
+
+**Amostra:** 8.976 janelas deslizantes de 24h · 374 dias · aritmética idêntica à do
+sistema (conferida em cinco casos antes de rodar).
+
+### Onde o CVD realmente vive
+
+| Faixa | CVD 24h (% do volume) |
+|---|---|
+| mínimo | −28,8% |
+| p05 | −11,4% |
+| p25 | −5,8% |
+| **mediana** | **−2,1%** |
+| p75 | +1,8% |
+| p95 | +7,1% |
+| máximo | +19,5% |
+
+### Três achados, em ordem de importância
+
+**1. O NORMAL DO BTC É VENDA LÍQUIDA A MERCADO.** A mediana é **−2,1%** e o p75 é apenas
++1,8% — em três quartos das janelas o fluxo agressor é neutro ou vendedor. Faz sentido
+estrutural: quem compra para segurar usa ordem limitada, quem vende com pressa usa ordem
+a mercado. **Não sabíamos disso, e agora sabemos.**
+
+**2. O dia 19/08 foi excepcional, e eu li errado ao vivo.** Os +8,3% medidos às 17:06
+estão no **percentil 97** — só 3% das janelas do ano tiveram compra líquida mais forte.
+Na leitura ao vivo eu disse que "8% é modesto para um dia de +6%". **Era o contrário: foi
+um dos dias de compra mais agressiva do ano.** Sem a distribuição, o número era literal e
+não era interpretável — que era exatamente a razão de medir.
+
+**3. O corte de ±15 é largo demais para este indicador.** Ele cruza em **1,8%** das
+janelas, e nunca chega a ±40. Não é o caso extremo do funding (0% em 167 dias), mas é
+perto: **o CVD será neutro em ~98% das leituras.** O corte que separaria os extremos
+seria ~±7 — e com ele o dia de hoje teria marcado ALTA em vez de neutro.
+
+### O que NÃO foi feito, e por quê
+
+**O corte não foi alterado.** Trocar régua com base na distribuição que acabou de revelar
+o problema é calibrar com o dado que apontou o defeito. É o que a v108 recusou fazer com
+os endereços ativos e o que a v109 estabeleceu como não justificável.
+
+**Pergunta registrada para a série:** *o CVD acima do percentil 90 (≈ +5%) antecede
+alguma coisa?* Se sim, ±7 vira decisão fundamentada numa próxima geração de modelo. Se
+não, o corte largo nunca importou.
+
+### O padrão que isto revela — e é maior que o CVD
+
+**Quatro indicadores do sistema têm escala mal dimensionada**, e o motivo é comum:
+
+| Indicador | Sintoma | Medido em |
+|---|---|---|
+| `funding` | 0% dos dias cruzam ±15 — a escala não sai do centro | v-anterior, 167 dias |
+| `activeAddresses` | 82% dos dias cruzam ±15 — ruído puro, satura em 200 pontos | v107, 409 dias |
+| `hashrate` | 86% dos dias cruzam ±15 | v107, 409 dias |
+| `cvd24h` | 1,8% dos dias cruzam ±15 | **v125, 8.976 janelas** |
+
+**Dois quase nunca saem do neutro; dois quase nunca ficam nele.** A causa é a mesma: o
+corte de ±15 foi herdado de um indicador para todos os outros, e **nunca foi medido por
+indicador**. Não é acaso — é uma decisão de projeto que nunca foi verificada.
+
+Isto **não autoriza** mexer em nada agora. Fica como o achado estrutural mais forte sobre
+a arquitetura de escalas, para uma eventual próxima geração.
+
+---
+
+## RODADA 10 — fluxo de ETF (`medicao-etf-liquidacoes.html`, teste 1)
+
+**Fonte:** `tftc.io/bitcoin-etf-flows/data.json` — CC BY 4.0, histórico completo desde
+11/01/2024, compilado de SoSoValue e Farside Investors. **Gratuita, sem chave.**
+
+**Amostra:** 669 dias casados com preço · estudo até 31/12/2025 (511) · reserva 2026 (158).
+
+| Horizonte | r estudo | t estudo | r reserva | t reserva | Veredito |
+|---|---|---|---|---|---|
+| 1 dia | +0,025 | 0,56 | +0,139 | 1,75 | não |
+| 3 dias | −0,050 | −0,66 | **+0,325** | 2,43 | **não — INVERTE** |
+| 7 dias | −0,118 | −1,00 | — | — | não |
+
+**Nenhum passou.** E o horizonte de 3 dias faz o movimento clássico do projeto: negativo
+no estudo, positivo na reserva. **Se a partição fosse aleatória em vez de temporal, o
++0,325 com t = 2,43 teria virado "descoberta".**
+
+### A leitura direta, que é mais informativa que os coeficientes
+
+| Quando o fluxo foi… | Dias | BTC no dia seguinte | Subiu em |
+|---|---|---|---|
+| **entrada** (positivo) | 387 | **+0,15%** | 51% |
+| **saída** (negativo) | 266 | **−0,23%** | 45% |
+
+A diferença existe, tem **o sinal certo** e vale 0,38 ponto percentual. É pequena demais
+para passar no corte e some quando se olha por horizonte — mas é a primeira relação do
+projeto cuja direção não inverteu na leitura simples.
+
+**Conclusão:** o fluxo de ETF **não antecede o preço**. Isso derruba a hipótese que eu
+classifiquei como a mais promissora de todas no inventário da CoinGlass — era fluxo de
+dinheiro real, diário, cobrindo exatamente o regime em que tudo parou de funcionar.
+
+**Mas vale coletar assim mesmo**, e por motivo que não é previsão: `institucional.etfFlow`
+está declarado e vazio desde sempre, e o motor pesa 15% rodando com **um único
+indicador**. Ter o dado é diferente de ter sinal.
+
+---
+
+## O que ficou pendente: liquidações
+
+A chave gratuita da Coinalyze foi recusada com **401 direto na fonte** — testada fora da
+nossa rota, então não é defeito do código. A rota `api/coinalyze.js` está escrita e
+funcional (o CORS foi resolvido; o Safari bloqueava a chamada direta, mesmo caso do FRED
+na v89 e do GDELT na v104).
+
+**Se a chave for regularizada, a medição é um clique.** O prior declarado antes continua:
+liquidação é **reativa por construção** — acontece porque o preço se moveu. É a hipótese
+com menor chance de anteceder de tudo que já listamos.
 
 ---
 

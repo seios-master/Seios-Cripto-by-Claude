@@ -1233,7 +1233,7 @@ const STORAGE_KEY = "seios_btc_v2";
 // fonte única da versão — usada no rodapé, no histórico e nos exports.
 // Muda toda vez que a fórmula de score/pesos muda, pra nunca misturar
 // decisões de regras diferentes como se fossem comparáveis.
-const BUILD_VERSION = "2026-08-23.142-cobertura-contada";
+const BUILD_VERSION = "2026-08-23.144-salvar-que-salva";
 /* v78: versão do MODELO separada da versão do BUILD. Mudança visual não é
    mudança de semântica: só sobe quando peso, fórmula, corte ou trava mudam.
    Toda observação gravada carrega as duas, pra que seis meses depois dê pra
@@ -5364,6 +5364,27 @@ function relatorioTexto(snap, snaps){
      "funcionou" E com "a chave nem estava lá" — e o Jorge perguntou, com razão,
      se a Coinalyze tinha trazido dado. Um diagnóstico que não distingue as duas
      coisas não é diagnóstico. */
+  /* v143 — QUAIS CHAVES EXISTEM, uma linha.
+     O diagnóstico da v142 respondeu "sem chave salva" e não disse o suficiente:
+     há TRÊS campos de senha na mesma tela, todos com o mesmo placeholder
+     ("cole sua chave aqui"), e chave colada no campo errado é indistinguível
+     de chave não colada. Esta linha separa os dois casos sem nunca imprimir a
+     chave — só se ela existe e quantos caracteres tem, que é o bastante para
+     saber se a colagem entrou inteira. */
+  {
+    const K = S.apiKeys || {};
+    const marca = function(nome, v){
+      const t = v ? String(v).trim() : "";
+      return nome + ": " + (t ? ("presente, " + t.length + " car.") : "ausente");
+    };
+    L.push("CHAVES NESTE NAVEGADOR — " +
+      [marca("coinalyze", K.coinalyze), marca("coingecko", K.coingecko),
+       marca("cryptoquant", K.cryptoquant)].join(" · "));
+    L.push("  (as chaves ficam no localStorage DESTE navegador e não entram no backup:" +
+           " salvar no iPad não salva no iPhone)");
+    L.push("");
+  }
+
   {
     const Lq = S.market && S.market.liquidacoes;
     const temChaveCz = !!(S.apiKeys && S.apiKeys.coinalyze &&
@@ -7017,7 +7038,15 @@ function blocoLiquidacoes(){
         ? 'Esta linha mostra <strong>quem está apanhando agora</strong>: a proporção entre ' +
           'liquidação de vendidos e de comprados, hora a hora. Ela precisa de uma chave ' +
           'gratuita da Coinalyze — conta sem cartão, em <code>coinalyze.net/account/api-key/</code>. ' +
-          'Cole em <strong>Relatórios ▸ Ajustar e conectar APIs</strong> e atualize os dados.' +
+          'Cole em <strong>Relatórios ▸ Ajustar e conectar APIs</strong>, aperte ' +
+          '<strong>Salvar</strong> e atualize os dados.' +
+          '<br><br><strong>Duas armadilhas, e as duas já aconteceram por aqui:</strong> ' +
+          'a chave vive no armazenamento <strong>deste navegador</strong> — salvar no iPad ' +
+          'não salva no iPhone, e ela não entra no backup .json de propósito. E há três ' +
+          'campos de senha nessa tela, todos com o mesmo texto de dica: o da Coinalyze é o ' +
+          'do meio, logo abaixo de "Integração Coinalyze (GRATUITA)". ' +
+          '<span style="color:var(--text-faint);">O ⧉ Diagnóstico agora traz uma linha ' +
+          '"CHAVES NESTE NAVEGADOR" que diz qual campo tem chave — sem imprimir a chave.</span>' +
           '<br><br><strong>São as únicas variáveis do projeto que comprovadamente descrevem ' +
           'alta e baixa:</strong> medido em 2.999 horas, a proporção de liquidação de vendidos ' +
           'fica em <strong>71,4% nas altas contra 32,6% nas baixas</strong> (t = 18,46), e ' +
@@ -11533,29 +11562,61 @@ document.getElementById("btnSaveCqKey").addEventListener("click", ()=>{
   S.apiKeys.cryptoquant = input.value.trim();
   saveState();
   renderCqKeyStatus();
-
-  /* v130 — chave da Coinalyze: gratuita, e habilita as liquidações */
-  function renderCzKeyStatus(){
-    const el = document.getElementById("czKeyStatus");
-    if(!el) return;
-    el.textContent = (S.apiKeys && S.apiKeys.coinalyze)
-      ? "✓ chave salva — liquidações ativas" : "sem chave — liquidações desligadas";
-  }
-  { const bt = document.getElementById("btnSaveCzKey");
-    if(bt) bt.addEventListener("click", ()=>{
-      const input = document.getElementById("czApiKeyInput");
-      S.apiKeys.coinalyze = input.value.trim();
-      saveState(); renderCzKeyStatus();
-      input.value = "";
-      input.placeholder = S.apiKeys.coinalyze ? "chave salva (oculta)" : "cole sua chave gratuita aqui";
-      if(S.apiKeys.coinalyze) refreshMarketData().catch(()=>{});
-    }); }
-  renderCzKeyStatus();
   input.value = "";
   input.placeholder = S.apiKeys.cryptoquant ? "chave salva (oculta)" : "cole sua chave de API aqui";
   if(S.apiKeys.cryptoquant) refreshMarketData().catch(()=>{});
 });
 renderCqKeyStatus();
+
+/* =====================================================================
+   v144 — O BOTÃO "SALVAR" DA COINALYZE ESTAVA MORTO
+   =====================================================================
+   O QUE ACONTECIA: todo este bloco — a função de status, o registro do
+   ouvinte e a primeira chamada de status — estava DENTRO do corpo do ouvinte
+   de clique do `btnSaveCqKey` (CryptoQuant). Uma chave de bloco a mais na
+   colagem da v130, e ninguém percebeu porque:
+
+     · o registro do ouvinte é `if(bt) bt.addEventListener(...)`, e o `if`
+       transforma "não achei o botão" em silêncio;
+     · o `renderCzKeyStatus()` inicial também estava lá dentro, então a
+       mensagem ao lado do campo ficava VAZIA — não dizia "sem chave", não
+       dizia nada. Sem texto, não havia o que estranhar;
+     · a bateria inteira passava verde: nenhum teste clicava no botão.
+
+   O EFEITO, exatamente o que o Jorge descreveu: cola a chave, aperta Salvar,
+   e não acontece nada. O `btnSaveCzKey` só ganhava ouvinte DEPOIS de alguém
+   clicar no Salvar do CryptoQuant — uma chave paga que ele não tem. Na
+   prática: nunca.
+
+   E a v139/v142/v143 estavam certas e inúteis ao mesmo tempo. "DESLIGADA —
+   sem chave salva" era verdade: a chave nunca chegou ao estado. Passei três
+   builds tornando visível um sintoma cuja causa estava a vinte linhas dali.
+
+   A LIÇÃO, que é a mesma de sempre neste projeto: eu li este trecho na v139
+   para escrever a mensagem "falta a chave", e li de novo na v143. Nas duas
+   vezes li o CONTEÚDO do bloco e não a INDENTAÇÃO dele. O defeito era de
+   posição, não de lógica — e posição não se confere lendo, se confere
+   executando. O harness da v144 clica no botão. */
+function renderCzKeyStatus(){
+  const el = document.getElementById("czKeyStatus");
+  if(!el) return;
+  el.textContent = (S.apiKeys && S.apiKeys.coinalyze)
+    ? "✓ chave salva — liquidações ativas" : "sem chave — liquidações desligadas";
+}
+{ const bt = document.getElementById("btnSaveCzKey");
+  /* o `if` de defesa fica, mas agora ele GRITA: botão que não existe é defeito
+     de montagem, e sumir em silêncio foi o que segurou este bug por builds. */
+  if(!bt) console.error("[SEIOS] btnSaveCzKey não existe — o Salvar da Coinalyze não vai funcionar");
+  if(bt) bt.addEventListener("click", ()=>{
+    const input = document.getElementById("czApiKeyInput");
+    if(!input) return;
+    S.apiKeys.coinalyze = input.value.trim();
+    saveState(); renderCzKeyStatus();
+    input.value = "";
+    input.placeholder = S.apiKeys.coinalyze ? "chave salva (oculta)" : "cole sua chave gratuita aqui";
+    if(S.apiKeys.coinalyze) refreshMarketData().catch(()=>{});
+  }); }
+renderCzKeyStatus();
 
 // consentimento explícito pro proxy CORS em chamadas que levam chave
 const chkProxyComChave = document.getElementById("chkProxyComChave");

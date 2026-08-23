@@ -1233,7 +1233,7 @@ const STORAGE_KEY = "seios_btc_v2";
 // fonte única da versão — usada no rodapé, no histórico e nos exports.
 // Muda toda vez que a fórmula de score/pesos muda, pra nunca misturar
 // decisões de regras diferentes como se fossem comparáveis.
-const BUILD_VERSION = "2026-08-23.148-live-no-agora";
+const BUILD_VERSION = "2026-08-23.149-massa-no-teto";
 /* v78: versão do MODELO separada da versão do BUILD. Mudança visual não é
    mudança de semântica: só sobe quando peso, fórmula, corte ou trava mudam.
    Toda observação gravada carrega as duas, pra que seis meses depois dê pra
@@ -5475,6 +5475,26 @@ function relatorioTexto(snap, snaps){
      de chave não colada. Esta linha separa os dois casos sem nunca imprimir a
      chave — só se ela existe e quantos caracteres tem, que é o bastante para
      saber se a colagem entrou inteira. */
+  /* v149 — MASSA NO TETO, no nível de cima e antes das chaves.
+     Na primeira tentativa este bloco caiu DENTRO do bloco das chaves: rodava e
+     imprimia certo, mas ficava aninhado onde não pertence — e quebrou a fatia
+     do harness da v143, que corta do `const K` até o primeiro `L.push("")`.
+     Sintaticamente válido não é o mesmo que no lugar certo. */
+  try{
+    const vetD = contribuicoesCanonicas();
+    if(vetD && vetD.massaObservada > 0){
+      L.push("MASSA NO TETO: " + (vetD.fracaoClipada*100).toFixed(1) +
+             "% da massa observada" +
+             (vetD.clipados.length
+               ? " — " + vetD.clipados.map(function(c){
+                   return c.motor + "." + c.indicador + " " +
+                          (c.valor>0?"+":"") + Math.round(c.valor) +
+                          " (" + (c.peso*100).toFixed(1) + "%)"; }).join(" · ")
+               : " — nenhum indicador no teto"));
+      L.push("");
+    }
+  }catch(eD){}
+
   {
     const K = S.apiKeys || {};
     const marca = function(nome, v){
@@ -6169,7 +6189,47 @@ function contribuicoesCanonicas(){
 
   const massaTotal = nominais.reduce(function(a,n){ return a + n.peso; }, 0);
   const massaObservada = itens.reduce(function(a,i){ return a + i.peso; }, 0);
-  return { itens, nominais, massaTotal, massaObservada, massaFamilia, fatorFamilia: fator };
+
+  /* =====================================================================
+     v149 — MASSA CLIPADA: quanto do score vem de escala que parou de medir
+     =====================================================================
+     MEDIDO nas leituras m12 acumuladas: `tecnico.mediaMovel` saturou em ~76%
+     delas, `onchain.activeAddresses` e `onchain.hashrate` em ~35% cada. Um
+     indicador saturado não é leitura forte — é uma régua que acabou. A nota
+     do próprio indicador já diz "[TETO] a escala parou de medir aqui", mas
+     isso some no meio de 46 linhas e não existe em lugar nenhum somado.
+
+     O CASO QUE ESTÁ ACONTECENDO AGORA, e é pior que a soma: o On-chain tem
+     três votantes presentes — MVRV +21,69, endereços ativos +100 e hash rate
+     −100. Os dois saturados se cancelam EXATAMENTE, e o composto do motor sai
+     21,69 ÷ 3 = 7,23, que é o número no diagnóstico. O On-chain de hoje é o
+     MVRV dividido por três. Isso não é "dois sinais moderados discordando":
+     são duas escalas cegas se anulando, e a tela não tem como distinguir uma
+     coisa da outra.
+
+     COMO É CALCULADO, e por que aqui: a massa clipada é a soma dos PESOS do
+     próprio vetor canônico para os itens saturados, sobre a massa observada.
+     Calcular em outro lugar significaria refazer a aritmética de peso por
+     indicador, teto de família e translação de motor — que é exatamente a
+     segunda régua que a v92 existiu para eliminar. Um número, um lugar.
+
+     NÃO MUDA NADA DO QUE DECIDE: `itens`, `nominais`, `massaTotal` e
+     `massaObservada` saem idênticos. O que entra é um campo a mais no retorno.
+     Score, pesos, cobertura e a série das 777 não encostam nisto. */
+  const clipados = itens.filter(function(i){
+    const m = S.motors[i.motor];
+    const ind = m && m.indicators && m.indicators[i.indicador];
+    return !!(ind && ind.saturado);
+  });
+  const massaClipada = clipados.reduce(function(a,i){ return a + i.peso; }, 0);
+
+  return { itens, nominais, massaTotal, massaObservada, massaFamilia, fatorFamilia: fator,
+           massaClipada: massaClipada,
+           fracaoClipada: massaObservada > 0 ? massaClipada / massaObservada : 0,
+           clipados: clipados.map(function(i){
+             return { id:i.id, motor:i.motor, indicador:i.indicador,
+                      valor:i.valor, peso:i.peso };
+           }) };
 }
 
 /* =====================================================================
@@ -10501,6 +10561,18 @@ function renderState(){
          POR QUE O TRY/CATCH ESCONDIA: `top = ""` no catch é indistinguível de
          "não há motor com contribuição". A linha ficava certa por fora e vazia
          por dentro, e o único jeito de perceber era olhar a tela. */
+      /* v149 — a massa clipada entra no resumo dos Motores: é lá que o score
+         é explicado, e é o lugar onde "de onde vêm os pontos" já é a pergunta. */
+      let clip = "", vetClip = null;
+      try{
+        vetClip = contribuicoesCanonicas();
+        if(vetClip && vetClip.massaObservada > 0 && vetClip.massaClipada > 0){
+          const pctClip = vetClip.fracaoClipada * 100;
+          const corC = pctClip >= 25 ? COLOR.brick : (pctClip >= 10 ? COLOR.gold : COLOR.faint);
+          clip = '<span style="color:'+corC+';"> · '+pctClip.toFixed(0)+'% no teto</span>';
+        }
+      }catch(eC){ clip = ""; }
+
       let top = "";
       try{
         const pe = ms.pesos || {};
@@ -10518,11 +10590,54 @@ function renderState(){
                    ' '+(x.c>0?"+":"")+x.c.toFixed(1)+'</span>';
           }).join('<span style="color:var(--line);"> · </span>');
       }catch(eT){ top = ""; }
+      /* v149 — o corpo detalhado: quais indicadores estão no teto, com que
+         peso, e o aviso de CANCELAMENTO quando dois saturados apontam para
+         lados opostos dentro do mesmo motor — o caso do On-chain hoje. */
+      let clipCorpo = "";
+      try{
+        if(vetClip && vetClip.clipados && vetClip.clipados.length){
+          const porMotor = {};
+          vetClip.clipados.forEach(function(c){
+            (porMotor[c.motor] = porMotor[c.motor] || []).push(c); });
+          const cancelando = Object.keys(porMotor).filter(function(mk){
+            const l = porMotor[mk];
+            return l.length > 1 && l.some(function(x){ return x.valor > 0; })
+                                && l.some(function(x){ return x.valor < 0; }); });
+          const corC2 = vetClip.fracaoClipada >= 0.25 ? "var(--brick)" : "var(--gold)";
+          clipCorpo =
+            '<div style="border:1px solid '+corC2+';background:#FFC53D14;padding:10px 12px;'+
+            'margin:0 0 12px;font-size:12px;color:var(--text-dim);">'+
+            '<strong style="color:'+corC2+';">'+(vetClip.fracaoClipada*100).toFixed(0)+
+            '% da massa observada está no teto.</strong> Um indicador saturado não é leitura '+
+            'forte: é uma escala que parou de medir. +19% e +60% acima da média móvel valem '+
+            'o mesmo 100.'+
+            '<div style="font-family:var(--font-mono);font-size:11px;margin-top:8px;line-height:1.8;">'+
+            vetClip.clipados.map(function(c){
+              const mm = S.motors[c.motor], ii = mm && mm.indicators[c.indicador];
+              return '<span style="color:'+(c.valor>0?COLOR.teal:COLOR.brick)+';">'+
+                     (c.valor>0?"+":"")+Math.round(c.valor)+'</span> '+
+                     esc(ii && ii.label ? String(ii.label).split(" · ")[0] : c.indicador)+
+                     '<span style="color:var(--text-faint);"> · '+(c.peso*100).toFixed(1)+
+                     '% do score</span>';
+            }).join("<br>")+'</div>'+
+            (cancelando.length
+              ? '<div style="margin-top:10px;color:var(--brick);"><strong>Dois tetos opostos no '+
+                'mesmo motor: '+cancelando.map(function(mk){ return esc(S.motors[mk].label); }).join(", ")+
+                '.</strong> Eles se anulam e o composto sai moderado — mas isso NÃO é discordância '+
+                'entre dois sinais medidos: são duas réguas cegas se cancelando.</div>'
+              : "")+
+            '<div style="margin-top:10px;color:var(--text-faint);">Nada foi filtrado e a fórmula '+
+            'do m12 não mudou: este painel só declara quanto do número vem de régua no fim. '+
+            'Transformação robusta é assunto de m13, em laboratório e fora da amostra.</div>'+
+            '</div>';
+        }
+      }catch(eCC){ clipCorpo = ""; }
+
       alvoM.innerHTML = dobra("motores", "Motores",
         '<span style="color:'+corM+';font-size:14px;">'+esc(nomeM)+
         (semScore ? "" : " "+ms.score.toFixed(1))+'</span>'+
-        (top ? '<span style="color:var(--text-faint);"> · maior peso: </span>'+top : ''),
-        '<div id="motoresCorpo"></div>'+
+        (top ? '<span style="color:var(--text-faint);"> · maior peso: </span>'+top : '')+clip,
+        clipCorpo+'<div id="motoresCorpo"></div>'+
         '<div style="font-size:11.5px;color:var(--text-faint);margin-top:10px;line-height:1.6;">'+
         'Síntese ponderada dos nove motores. <strong>Não é recomendação — é leitura de '+
         'contexto</strong>, e é a que menos se move: mais da metade do peso está em janelas '+

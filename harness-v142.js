@@ -85,25 +85,49 @@ t("só o modelo vigente entra na conta", ()=>{
     throw new Error("contou leituras de modelo anterior como progresso");
 });
 
-t("encontra QUATRO configurações na série real", ()=>{
+/* ---------------------------------------------------------------------
+   CORRIGIDO NA v149. Estes três testes travavam CONTAGENS — 4 configurações,
+   10 completas, 17 sem gdelt, maior grupo com 13. Eram verdade no export das
+   09:10 e passaram a falhar no export das 11:35, com seis leituras a mais.
+
+   É o meu erro recorrente número um, escrito na minha própria lista: FATO
+   DATADO ESCRITO COMO INVARIANTE. Já eram sete; este é o oitavo. Um teste que
+   quebra porque o Jorge coletou mais dados não está protegendo nada — está
+   me obrigando a editá-lo toda semana, e teste que se edita por rotina deixa
+   de ser teste.
+
+   O que é invariante de verdade: a partição soma o total, os grupos vêm
+   ordenados, o GDELT é a fonte dominante, e a chave "(nenhuma)" só contém
+   leituras sem falha. Isso vale com 29, com 36 e com 777.
+   --------------------------------------------------------------------- */
+t("a partição é completa e não perde leitura", ()=>{
   const cfg = API.configuracoesDeCobertura(SERIE);
-  eq(cfg.grupos.length, 4, "configurações:");
-  eq(cfg.completas, 10, "leituras completas:");
-  eq(cfg.incompletas, 19, "leituras incompletas:");
+  if(cfg.grupos.length < 2)
+    throw new Error("uma configuração só — a série ainda não viu falha de fonte");
+  eq(cfg.grupos.reduce(function(a,g){ return a+g.n; }, 0), cfg.total, "soma dos grupos:");
+  eq(cfg.completas + cfg.incompletas, cfg.total, "completas + incompletas:");
+  const soma = cfg.grupos.reduce(function(a,g){ return a+g.pct; }, 0);
+  if(Math.abs(soma - 100) > 0.01) throw new Error("as porcentagens não fecham: " + soma);
 });
 
-t("o GDELT é apontado como a causa", ()=>{
+t("o GDELT é a fonte que domina as configurações", ()=>{
+  /* a conclusão que importa — qual fonte quebra a comparabilidade — sem
+     travar em quantas vezes ela quebrou até hoje. */
   const cfg = API.configuracoesDeCobertura(SERIE);
-  eq(cfg.porFonte["gdelt"], 17, "leituras sem o tom do GDELT:");
-  eq(cfg.porFonte["gdelt volume"], 6, "leituras sem o volume do GDELT:");
+  const fontes = Object.keys(cfg.porFonte).sort(function(a,b){
+    return cfg.porFonte[b] - cfg.porFonte[a]; });
+  if(!/gdelt/.test(fontes[0]))
+    throw new Error("a fonte dominante deixou de ser o GDELT: " + fontes[0]);
+  if(cfg.porFonte[fontes[0]] > cfg.total)
+    throw new Error("uma fonte falhou mais vezes do que há leituras");
 });
 
-t("a configuração mais comum vem primeiro", ()=>{
+t("os grupos vêm do maior para o menor", ()=>{
   const cfg = API.configuracoesDeCobertura(SERIE);
-  eq(cfg.grupos[0].chave, "gdelt", "maior grupo:");
-  eq(cfg.grupos[0].n, 13, "tamanho:");
   for(let i=1;i<cfg.grupos.length;i++)
     if(cfg.grupos[i].n > cfg.grupos[i-1].n) throw new Error("fora de ordem");
+  const comp = cfg.grupos.filter(function(g){ return g.chave === "(nenhuma)"; })[0];
+  if(comp && comp.fora.length) throw new Error("o grupo das completas tem fonte fora");
 });
 
 t("a faixa de cobertura de cada grupo é a OBSERVADA", ()=>{
@@ -121,8 +145,13 @@ t("o score médio é por grupo, e não some quando falta", ()=>{
   const cfg = API.configuracoesDeCobertura(SERIE);
   const c = cfg.grupos.find(x=>x.chave === "(nenhuma)");
   if(c.scoreMedio === null) throw new Error("média perdida");
-  if(Math.abs(c.scoreMedio - 8.16) > 0.05)
-    throw new Error("média das completas mudou: " + c.scoreMedio.toFixed(2));
+  /* a média é conferida contra a conta feita AQUI, não contra um número de
+     um dia específico: o que se testa é a aritmética, não o mercado. */
+  const doGrupo = SERIE.filter(x=>x.modelo === MODELO && !(x.falhas||[]).length)
+                       .map(x=>x.score).filter(x=>typeof x === "number");
+  const esperada = doGrupo.reduce((a,b)=>a+b,0)/doGrupo.length;
+  if(Math.abs(c.scoreMedio - esperada) > 1e-9)
+    throw new Error("a média não bate com a conta: " + c.scoreMedio + " vs " + esperada);
   const semScore = API.configuracoesDeCobertura(
     [{modelo:MODELO, falhas:[], cobertura:0.7}]);
   eq(semScore.grupos[0].scoreMedio, null, "sem score:");
@@ -132,14 +161,17 @@ console.log("\nBLOCO B — a linha diz a resposta fechada");
 
 t("o resumo carrega quantas configurações e quantas completas", ()=>{
   const h = API.blocoCobertura(API.configuracoesDeCobertura(SERIE));
-  if(h.indexOf("4 configurações") === -1) throw new Error("não diz quantas configurações");
-  if(h.indexOf("10 de 29") === -1) throw new Error("não diz quantas completas");
-  if(h.indexOf("gdelt fora em 17") === -1) throw new Error("não aponta a fonte culpada");
+  const n = API.configuracoesDeCobertura(SERIE).grupos.length;
+  if(h.indexOf(n + " configuraç") === -1) throw new Error("não diz quantas configurações");
+  const cfg = API.configuracoesDeCobertura(SERIE);
+  if(h.indexOf(cfg.completas + " de " + cfg.total) === -1)
+    throw new Error("não diz quantas completas");
+  if(!/gdelt fora em \d+/.test(h)) throw new Error("não aponta a fonte culpada");
 });
 
 t("o resumo aparece FORA do corpo — fechada, informa", ()=>{
   const h = API.blocoCobertura(API.configuracoesDeCobertura(SERIE));
-  if(h.indexOf("4 configurações") > h.indexOf("dobra-corpo"))
+  if(h.indexOf(" configuraç") > h.indexOf("dobra-corpo"))
     throw new Error("o resumo está dentro do corpo");
 });
 

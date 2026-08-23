@@ -1233,7 +1233,7 @@ const STORAGE_KEY = "seios_btc_v2";
 // fonte única da versão — usada no rodapé, no histórico e nos exports.
 // Muda toda vez que a fórmula de score/pesos muda, pra nunca misturar
 // decisões de regras diferentes como se fossem comparáveis.
-const BUILD_VERSION = "2026-08-23.144-salvar-que-salva";
+const BUILD_VERSION = "2026-08-23.145-rodada-que-termina";
 /* v78: versão do MODELO separada da versão do BUILD. Mudança visual não é
    mudança de semântica: só sobe quando peso, fórmula, corte ou trava mudam.
    Toda observação gravada carrega as duas, pra que seis meses depois dê pra
@@ -3949,10 +3949,30 @@ async function refreshMarketData(){
   // v82: sensores exploratórios entram depois de tudo — não votam e não podem
   // atrasar nem quebrar o que decide
   try{ await coletarSensoresExploratorios(); }catch(e){ logFinal("sensores exploratórios: " + e.message); }
-  await coletarVelasCamadas();   // v122 — velas dos três relógios
-  await coletarCVD();            // v124 — execução acumulada, sensor
-  await coletarLiquidacoes();    // v130 — liquidações, as que descrevem
-  await coletarApetite();        // v125 — termômetro de apetite, painel próprio
+  /* v145 — SENSOR NÃO DERRUBA A RODADA, E ISSO PRECISA SER ESTRUTURAL.
+     Estes quatro são painel e sensor: nenhum deles vota no score. Estavam
+     chamados sem rede, e bastou UM ReferenceError dentro do de liquidações
+     para a rodada inteira morrer — sem apetite, sem velas e, o que custa
+     mais, sem gravar as observações point-in-time daquela leitura.
+
+     O `coletarSensoresExploratorios` logo acima já vinha protegido desde a
+     v82, com a justificativa escrita ao lado: "não votam e não podem atrasar
+     nem quebrar o que decide". A regra estava certa e valia para um só. */
+  const opcionais = [
+    ["velas das camadas", coletarVelasCamadas],
+    ["CVD",               coletarCVD],
+    ["liquidações",       function(){ return coletarLiquidacoes(results); }],
+    ["apetite",           coletarApetite]
+  ];
+  for(const par of opcionais){
+    try{ await par[1](); }
+    catch(e){
+      /* aparece no log e entra em FALHAS: some em silêncio foi o defeito da
+         v130, e não vamos trocar um por outro */
+      logFinal("⚠ " + par[0] + ": " + ((e && e.message) || e));
+      if(results.fail.indexOf(par[0]) === -1) results.fail.push(par[0]);
+    }
+  }
 
   gravarObservacoesDaRodada()
     .then(function(n){ if(n) logFinal(`📈 ${n} observações point-in-time gravadas`); })
@@ -4708,7 +4728,31 @@ function registrarObservacao(motorKey, indKey, score, meta){
    zero — e aqui SABEMOS que é zero, porque medimos.
 
    TUDO ENTRA COMO SENSOR: grava, não vota. Regra do m12. */
-async function coletarLiquidacoes(){
+/* =====================================================================
+   v145 — `results` ERA VARIÁVEL LIVRE
+   =====================================================================
+   `results` é declarado DENTRO de `refreshMarketData` (`const results =
+   { ok:[], fail:[] }`). Esta função é irmã, não filha: ler `results` aqui é
+   ReferenceError, sempre foi, desde a v130.
+
+   POR QUE SÓ APARECEU HOJE: a primeira linha era `if(!chave) return;`. Sem
+   chave da Coinalyze salva — e ela nunca chegou a ser salva, por causa do
+   botão morto da v144 — a função saía antes de tocar em `results`. O defeito
+   existia havia catorze builds e estava atrás de um `return`.
+
+   E ELE ERA PIOR DO QUE PARECIA: o `results.ok.push` estoura DENTRO do `try`,
+   o `catch` pega, e a primeira coisa que o `catch` faz é `results.fail.push`
+   — que estoura de novo, agora sem ninguém para pegar. A exceção sobe e
+   derruba `refreshMarketData` inteiro: "interrompido — Can't find variable:
+   results", com a rodada morrendo antes do apetite e antes de gravar as
+   observações point-in-time.
+
+   A CORREÇÃO EM DUAS PARTES, porque uma só não basta:
+   · `results` entra como PARÂMETRO — a função passa a dizer o que precisa;
+   · o padrão `{ok:[],fail:[]}` cobre quem chamar sem argumento, para que uma
+     chamada solta nunca mais possa derrubar a rodada por isto. */
+async function coletarLiquidacoes(results){
+  results = results || { ok:[], fail:[] };
   const chave = (S.apiKeys && S.apiKeys.coinalyze) ? String(S.apiKeys.coinalyze).trim() : "";
   if(!chave) return;                       /* sem chave: nem aparece no log */
   /* v131 — A COLETA ERA SILENCIOSA DEMAIS.

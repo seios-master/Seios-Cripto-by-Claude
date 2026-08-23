@@ -1,0 +1,328 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<title>SEIOS — quem descreve alta e baixa</title>
+<style>
+  :root{
+    --bg:#0E1A2B; --bg-alt:#132234; --panel:#132437; --line:#2F5478; --line-soft:#1E3A55;
+    --text:#E8F1F8; --text-dim:#9FBBD4; --text-faint:#6D8CA8;
+    --teal:#5FE3B0; --brick:#FF8A80; --gold:#FFD37E;
+    --mono:ui-monospace,"SF Mono",Menlo,monospace;
+  }
+  *{box-sizing:border-box;}
+  body{margin:0;background:var(--bg);color:var(--text);font-family:var(--mono);
+       font-size:13px;line-height:1.6;padding:0 0 60px;}
+  .wrap{max-width:1150px;margin:0 auto;padding:0 18px;}
+  header{border-bottom:1px solid var(--line);padding:22px 0;background:var(--bg-alt);}
+  h1{font-size:21px;margin:6px 0;}
+  .sub{color:var(--text-dim);font-size:12px;}
+  .nota{border:1px solid var(--teal);background:#5FE3B012;padding:16px 18px;margin:18px 0;
+        font-size:12.5px;color:var(--text-dim);}
+  .nota b{color:var(--teal);}
+  .aviso{border:1px solid var(--gold);background:#FFD37E14;padding:14px 16px;margin:18px 0;
+         color:var(--text-dim);font-size:12.5px;}
+  .aviso b{color:var(--gold);}
+  input{font-family:var(--mono);font-size:12px;padding:9px 11px;background:var(--panel);
+        color:var(--text);border:1px solid var(--line);width:360px;max-width:100%;}
+  button{font-family:var(--mono);font-size:13px;padding:12px 18px;margin:14px 0;
+         background:var(--teal);color:#08131f;border:1px solid var(--teal);cursor:pointer;}
+  button.ghost{background:transparent;color:var(--text-dim);border-color:var(--line);}
+  button:disabled{opacity:.45;cursor:default;}
+  #log{border:1px solid var(--line-soft);background:#0a1420;padding:11px;min-height:50px;
+       font-size:11px;color:var(--text-dim);white-space:pre-wrap;max-height:220px;overflow-y:auto;}
+  table{width:100%;border-collapse:collapse;font-size:11.5px;margin:12px 0;}
+  th{text-align:left;color:var(--text-faint);font-weight:400;padding:6px 8px;
+     border-bottom:1px solid var(--line);text-transform:uppercase;font-size:10px;}
+  td{padding:6px 8px;border-bottom:1px solid var(--line-soft);}
+  td.n{text-align:right;}
+  .sim{color:var(--teal);} .nao{color:var(--text-faint);} .alerta{color:var(--brick);}
+  .ouro{color:var(--gold);}
+  h2{font-size:16px;margin:28px 0 4px;}
+  p.explica{color:var(--text-dim);font-size:12.5px;margin:6px 0 12px;}
+  #saida{display:none;}
+  #veredito{border:1px solid var(--line);padding:18px;margin:16px 0;font-size:13.5px;}
+  textarea{width:100%;height:330px;background:#0a1420;color:var(--text-dim);
+           border:1px solid var(--line-soft);font-family:var(--mono);font-size:11px;padding:10px;}
+</style>
+</head>
+<body>
+<header><div class="wrap">
+  <div class="sub">SEIOS · medição isolada — não é o sistema, não grava nada, não muda nada</div>
+  <h1>Quem descreve alta e baixa — defasagem ZERO</h1>
+  <div class="sub">a pergunta que nunca fizemos para as variáveis de fluxo</div>
+</div></header>
+
+<div class="wrap">
+
+  <div class="nota">
+    <b>Esta é uma pergunta DIFERENTE de todas as treze rodadas anteriores.</b>
+    <br><br>
+    Até aqui, ~170 testes mediram se cada variável <b>PREVÊ</b> — sinal de agora contra
+    retorno futuro. Nenhuma passou. Aqui a pergunta é se ela <b>DESCREVE</b>: quando o BTC
+    está subindo, as liquidações de vendidos estão altas <u>ao mesmo tempo</u>?
+    <br><br>
+    <b>E há razão para esperar resposta.</b> Medimos em 19/08 que todas as relações reais
+    do projeto têm pico de correlação em <b>defasagem ZERO</b> — S&P com t = 12,44, VIX com
+    t = −10,82, ambos exatamente em zero. <b>O que mata a previsão é o que favorece a
+    descrição.</b>
+    <br><br>
+    Fizemos essa medição para as variáveis macro naquele dia. <b>Nunca fizemos para
+    liquidações, fluxo de ETF, open interest, funding, CVD e agressão</b> — que são
+    justamente as que alimentam os painéis novos.
+  </div>
+
+  <div class="aviso">
+    <b>O que um resultado aqui autoriza, e o que não autoriza.</b>
+    <br><br>
+    <b>Autoriza:</b> usar a variável para DESCREVER o estado — dizer "esta alta veio com
+    liquidação de vendidos" em vez de só "o preço subiu". É o que o painel de fluxo e a
+    camada AGORA fazem.
+    <br><br>
+    <b>NÃO autoriza:</b> nenhuma inferência sobre o futuro. Correlação contemporânea alta é
+    compatível com previsão zero — e no caso destas variáveis <u>já sabemos</u> que a
+    previsão é zero, porque testamos.
+    <br><br>
+    <b>E cuidado com o trivial.</b> Algumas variáveis são o preço com outro nome. Se a
+    agressão compradora aparecer com r = 0,9 contra o retorno da mesma hora, isso não é
+    descoberta: é a definição de compra a mercado empurrando preço. O que interessa são as
+    que descrevem <u>sem serem</u> o preço.
+  </div>
+
+  <div style="border:1px solid var(--teal);background:#5FE3B012;padding:14px 16px;margin:18px 0;font-size:12.5px;color:var(--text-dim);">
+    <b style="color:var(--teal);">REGRA DECLARADA ANTES DE MEDIR — 23/08/2026</b><br><br>
+    <b>Duas medidas por variável, ambas em defasagem zero:</b><br>
+    · <b>correlação</b> com o retorno do MESMO período<br>
+    · <b>separação</b>: média da variável nos períodos de alta menos a média nos de baixa<br><br>
+    <b>Partição temporal:</b> primeiros 60% estudam · últimos 40% confirmam.<br><br>
+    <b>Descreve se, e somente se:</b> |t| ≥ 2,576 nas duas fases, com o mesmo sinal.<br><br>
+    <b>E um teste de robustez obrigatório:</b> o mesmo cálculo SEM as últimas 72 horas. A
+    reserva contém a alta de 62k para 78k, e em 21/08 aprendemos que ela sozinha produz
+    r = +0,355 com t = 6,54 que vira <b>+0,013</b> quando o episódio sai. <b>O que não
+    sobreviver ao corte era o episódio, não a variável.</b>
+  </div>
+
+  <div>
+    <input id="chave" type="password" placeholder="chave da Coinalyze (fica só no navegador)">
+  </div>
+  <button id="btn">▶ Medir descrição — defasagem zero</button>
+  <div id="log">pronto.</div>
+
+  <div id="saida">
+    <div id="veredito"></div>
+
+    <h2>1 · Quem anda junto com o preço</h2>
+    <p class="explica">Correlação em defasagem zero, com o retorno do mesmo período.
+      A coluna que decide é a última: <b>sobreviveu ao corte das últimas 72 horas?</b></p>
+    <div id="tabela"></div>
+
+    <h2>2 · Alta contra baixa — quanto cada variável separa</h2>
+    <p class="explica">Média da variável nos períodos em que o BTC subiu, contra os
+      períodos em que caiu. É a leitura direta de "esta variável distingue alta de baixa".</p>
+    <div id="separacao"></div>
+
+    <h2>Copiar para o Claude</h2>
+    <button class="ghost" id="btnCopiar">⧉ Copiar</button>
+    <textarea id="texto" readonly></textarea>
+  </div>
+</div>
+
+<script>
+const MIN_OBS=100, CORTE_PCT=0.6, CORTE_EP_H=72;
+function media(a){ return a.length?a.reduce(function(x,y){return x+y;},0)/a.length:null; }
+function dp(a){ if(a.length<2) return null; const m=media(a);
+  return Math.sqrt(a.reduce(function(s,x){return s+(x-m)*(x-m);},0)/(a.length-1)); }
+function correlacao(x,y){
+  const mx=media(x),my=media(y); let n=0,dx=0,dy=0;
+  for(let i=0;i<x.length;i++){ const a=x[i]-mx,b=y[i]-my; n+=a*b; dx+=a*a; dy+=b*b; }
+  return (dx===0||dy===0)?0:n/Math.sqrt(dx*dy);
+}
+function tDeR(r,n){ return (n<3||Math.abs(r)>=1)?0:r*Math.sqrt((n-2)/(1-r*r)); }
+function f(x,d){ return (x===null||x===undefined||!Number.isFinite(x))?"—":x.toFixed(d); }
+const dorme=function(ms){ return new Promise(function(s){ setTimeout(s,ms); }); };
+const log=function(m){ const e=document.getElementById("log");
+  e.textContent=(e.textContent==="pronto.")?m:(e.textContent+"\n"+m); e.scrollTop=e.scrollHeight; };
+
+/* defasagem ZERO e períodos que NÃO se sobrepõem: sem correção de sobreposição
+   a fazer, e sem janela futura — cada hora entra uma vez só */
+function avaliar(pares){
+  const b=pares.filter(function(p){ return Number.isFinite(p.x)&&Number.isFinite(p.y); });
+  if(b.length<MIN_OBS) return null;
+  const r=correlacao(b.map(function(p){return p.x;}), b.map(function(p){return p.y;}));
+  return { n:b.length, r:r, t:tDeR(r,b.length) };
+}
+function separar(pares){
+  const b=pares.filter(function(p){ return Number.isFinite(p.x)&&Number.isFinite(p.y); });
+  const alta=b.filter(function(p){ return p.y>0; }).map(function(p){ return p.x; });
+  const baixa=b.filter(function(p){ return p.y<0; }).map(function(p){ return p.x; });
+  if(alta.length<MIN_OBS/2 || baixa.length<MIN_OBS/2) return null;
+  const d=media(alta)-media(baixa);
+  const se=Math.sqrt(Math.pow(dp(alta),2)/alta.length + Math.pow(dp(baixa),2)/baixa.length);
+  return { dif:d, t: se? d/se : 0, mA:media(alta), mB:media(baixa),
+           nA:alta.length, nB:baixa.length };
+}
+
+async function velas1h(){
+  const t=[]; let fim=Date.now();
+  for(let i=0;i<3;i++){
+    const r=await fetch("https://api.binance.com/api/v3/klines?symbol=BTCUSDT&interval=1h&limit=1000&endTime="+fim);
+    if(!r.ok) throw new Error("klines "+r.status);
+    const d=await r.json(); if(!d.length) break;
+    t.unshift.apply(t,d); fim=d[0][0]-1;
+    log("  velas: "+t.length);
+    if(d.length<1000) break; await dorme(280);
+  }
+  t.pop();
+  return t;
+}
+async function coinalyze(caminho, chave, extra){
+  const fim=Math.floor(Date.now()/1000), ini=fim-90*24*3600;
+  const url="/api/coinalyze?caminho="+caminho+"&symbols=BTCUSDT_PERP.A&interval=1hour"+
+            "&from="+ini+"&to="+fim+(extra||"")+"&api_key="+encodeURIComponent(chave);
+  const r=await fetch(url);
+  if(!r.ok){ let det=""; try{ const j=await r.json(); det=" — "+(j.error||""); }catch(e){}
+    throw new Error(caminho+" "+r.status+det); }
+  const d=await r.json();
+  return (d && d[0] && d[0].history) || [];
+}
+
+document.getElementById("btn").addEventListener("click", async function(){
+  const chave=document.getElementById("chave").value.trim();
+  if(!chave){ log("cole a chave da Coinalyze."); return; }
+  this.disabled=true; document.getElementById("log").textContent="";
+  try{
+    log("velas horárias…");
+    const kl=await velas1h();
+    log("  "+kl.length+" horas");
+
+    log("liquidações…");        const liq=await coinalyze("liquidation-history", chave, "&convert_to_usd=true");
+    log("  "+liq.length);       await dorme(400);
+    log("open interest…");      const oi=await coinalyze("open-interest-history", chave, "&convert_to_usd=true");
+    log("  "+oi.length);        await dorme(400);
+    log("funding…");            const fr=await coinalyze("funding-rate-history", chave);
+    log("  "+fr.length);        await dorme(400);
+    log("long/short…");         const ls=await coinalyze("long-short-ratio-history", chave);
+    log("  "+ls.length);
+
+    const M={};
+    kl.forEach(function(k){
+      const qv=Number(k[7]), tbq=Number(k[10]);
+      M[k[0]]={ t:k[0], close:Number(k[4]), open:Number(k[1]),
+                agr: (qv>0 && Number.isFinite(tbq)) ? ((2*tbq-qv)/qv)*100 : null,
+                vol: qv };
+    });
+    function casar(l, fn){ l.forEach(function(o){
+      const t=Number(o.t)*1000; const m=M[t]||M[t-(t%3600000)]; if(m) fn(m,o); }); }
+    casar(liq, function(m,o){ m.liqL=Number(o.l); m.liqS=Number(o.s); });
+    casar(oi,  function(m,o){ m.oi=Number(o.c); });
+    casar(fr,  function(m,o){ m.fund=Number(o.c); });
+    casar(ls,  function(m,o){ m.lsr=Number(o.r); });
+
+    const H=Object.keys(M).map(function(k){ return M[k]; })
+                  .sort(function(a,b){ return a.t-b.t; })
+                  .filter(function(x){ return Number.isFinite(x.close)&&Number.isFinite(x.open); });
+    for(let i=0;i<H.length;i++){
+      /* retorno do MESMO período — defasagem zero */
+      H[i].ret = (H[i].close/H[i].open - 1)*100;
+      if(i>=1 && Number.isFinite(H[i].oi) && Number.isFinite(H[i-1].oi) && H[i-1].oi)
+        H[i].dOI = (H[i].oi/H[i-1].oi-1)*100;
+      const tot = (H[i].liqL||0)+(H[i].liqS||0);
+      H[i].liqProp = tot>0 ? (H[i].liqS/tot)*100 : null;
+      H[i].liqDif  = (Number.isFinite(H[i].liqS)&&Number.isFinite(H[i].liqL)) ? H[i].liqS-H[i].liqL : null;
+      H[i].liqTot  = tot>0 ? tot : null;
+    }
+    const base=H.filter(function(x){ return Number.isFinite(x.ret); });
+    log("horas alinhadas: "+base.length);
+    const corte=Math.floor(base.length*CORTE_PCT);
+    const est=base.slice(0,corte), res=base.slice(corte);
+    const semEp=base.slice(0, Math.max(0, base.length-CORTE_EP_H));
+    const resSem=semEp.slice(Math.floor(semEp.length*CORTE_PCT));
+    log("estudo "+est.length+" · reserva "+res.length+" · reserva sem 72h "+resSem.length);
+
+    const VARS=[
+      ["liqS",    "Liquidação de VENDIDOS (US$)", "shorts estourados na hora"],
+      ["liqL",    "Liquidação de COMPRADOS (US$)", "longs estourados na hora"],
+      ["liqDif",  "Vendidos − Comprados", "quem apanhou mais"],
+      ["liqProp", "Proporção de vendidos (%)", "composição, sem o tamanho"],
+      ["liqTot",  "Liquidação TOTAL (US$)", "quanto de posição foi estourada"],
+      ["dOI",     "Open interest — variação 1h", "posição sendo montada"],
+      ["fund",    "Funding", "custo de ficar comprado"],
+      ["lsr",     "Long/short ratio", "posicionamento"],
+      ["agr",     "Agressão compradora (%)", "⚠ é quase a definição do preço subir"],
+      ["vol",     "Volume (US$)", "quanto foi negociado"]
+    ];
+
+    let h='<table><thead><tr><th>Variável</th><th class="n">r estudo</th><th class="n">t</th>'+
+      '<th class="n">r reserva</th><th class="n">t</th><th class="n">r sem 72h</th>'+
+      '<th class="n">t</th><th>Descreve?</th></tr></thead><tbody>';
+    const txt=[], aprovados=[];
+    VARS.forEach(function(V){
+      const a=avaliar(est.map(function(x){ return {x:x[V[0]], y:x.ret}; }));
+      const b=avaliar(res.map(function(x){ return {x:x[V[0]], y:x.ret}; }));
+      const c=avaliar(resSem.map(function(x){ return {x:x[V[0]], y:x.ret}; }));
+      if(!a||!b){ txt.push("  "+V[1]+": amostra insuficiente"); return; }
+      const passa = Math.abs(a.t)>=2.576 && Math.abs(b.t)>=2.576 && Math.sign(a.r)===Math.sign(b.r);
+      const sobrevive = passa && c && Math.abs(c.t)>=2.576 && Math.sign(c.r)===Math.sign(a.r);
+      if(sobrevive) aprovados.push(V[1]);
+      h+='<tr><td>'+V[1]+'<div style="font-size:10px;color:var(--text-faint);">'+V[2]+'</div></td>'+
+         '<td class="n">'+f(a.r,3)+'</td><td class="n">'+f(a.t,2)+'</td>'+
+         '<td class="n">'+f(b.r,3)+'</td><td class="n">'+f(b.t,2)+'</td>'+
+         '<td class="n '+(sobrevive?"sim":"alerta")+'">'+(c?f(c.r,3):"—")+'</td>'+
+         '<td class="n">'+(c?f(c.t,2):"—")+'</td>'+
+         '<td class="'+(sobrevive?"sim":"nao")+'">'+
+         (sobrevive?"SIM":(passa?"era o episódio":"não"))+'</td></tr>';
+      txt.push("  "+V[1]+": est r="+f(a.r,3)+" t="+f(a.t,2)+
+        " | res r="+f(b.r,3)+" t="+f(b.t,2)+
+        " | sem72h r="+(c?f(c.r,3):"—")+" t="+(c?f(c.t,2):"—")+
+        " | "+(sobrevive?"DESCREVE":(passa?"era o episódio":"não")));
+    });
+    document.getElementById("tabela").innerHTML=h+"</tbody></table>";
+
+    let hs='<table><thead><tr><th>Variável</th><th class="n">média nas ALTAS</th>'+
+      '<th class="n">média nas BAIXAS</th><th class="n">diferença</th><th class="n">t</th>'+
+      '<th>Separa?</th></tr></thead><tbody>';
+    txt.push(""); txt.push("=== ALTA CONTRA BAIXA ===");
+    VARS.forEach(function(V){
+      const a=separar(est.map(function(x){ return {x:x[V[0]], y:x.ret}; }));
+      const b=separar(res.map(function(x){ return {x:x[V[0]], y:x.ret}; }));
+      if(!a||!b) return;
+      const ok=Math.abs(a.t)>=2.576&&Math.abs(b.t)>=2.576&&Math.sign(a.dif)===Math.sign(b.dif);
+      const g=function(v){ return Math.abs(v)>=1e6 ? (v/1e6).toFixed(1)+"M" : f(v,3); };
+      hs+='<tr><td>'+V[1]+'</td><td class="n">'+g(b.mA)+'</td><td class="n">'+g(b.mB)+'</td>'+
+          '<td class="n '+(b.dif>0?"sim":"alerta")+'">'+g(b.dif)+'</td>'+
+          '<td class="n">'+f(b.t,2)+'</td>'+
+          '<td class="'+(ok?"sim":"nao")+'">'+(ok?"SIM":"não")+'</td></tr>';
+      txt.push("  "+V[1]+": altas "+g(b.mA)+" · baixas "+g(b.mB)+" · dif "+g(b.dif)+
+        " t="+f(b.t,2)+" | "+(ok?"SEPARA":"não"));
+    });
+    document.getElementById("separacao").innerHTML=hs+"</tbody></table>";
+
+    document.getElementById("veredito").innerHTML = aprovados.length
+      ? '<span class="sim"><strong>'+aprovados.length+' variável(is) descrevem alta e baixa e sobrevivem ao corte do episódio:</strong><br>'+
+        aprovados.join(" · ")+'</span><br><br>Isto autoriza usá-las para DESCREVER o estado nos painéis. '+
+        '<strong>Não autoriza nenhuma inferência sobre o futuro</strong> — a previsão já foi testada e é zero.'
+      : '<span class="alerta"><strong>Nenhuma variável descreve de forma estável.</strong></span><br><br>'+
+        'Se nem a correlação contemporânea sobrevive ao corte das últimas 72 horas, estas variáveis '+
+        'não distinguem alta de baixa nem no presente — e os painéis que as usam estão descrevendo ruído.';
+
+    const T=["SEIOS · QUEM DESCREVE ALTA E BAIXA (defasagem zero)",
+      "medido em "+new Date().toLocaleString("pt-BR"),
+      "horas: "+base.length+" · estudo "+est.length+" · reserva "+res.length+" · reserva sem 72h "+resSem.length,
+      "regra: |t| >= 2,576 nas duas fases, mesmo sinal, E sobreviver ao corte das últimas 72h","",
+      "=== DEFASAGEM ZERO ==="].concat(txt);
+    T.push(""); T.push("VEREDITO: "+(aprovados.length?aprovados.join(" · "):"nenhuma descreve de forma estável"));
+    document.getElementById("texto").value=T.join("\n");
+    document.getElementById("saida").style.display="block";
+    log("pronto.");
+  }catch(e){ log("FALHOU: "+e.message); this.disabled=false; }
+});
+
+document.getElementById("btnCopiar").addEventListener("click", async function(){
+  const t=document.getElementById("texto");
+  try{ await navigator.clipboard.writeText(t.value); this.textContent="✓ copiado"; }
+  catch(e){ t.focus(); t.select(); this.textContent="selecione e copie"; }
+});
+</script>
+</body>
+</html>

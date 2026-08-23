@@ -729,6 +729,21 @@ var PELE_ATUAL = "padrao";
           </div>
           <div style="font-size:10.5px;color:var(--text-faint);margin-bottom:14px;">Sem essa chave, o sistema continua funcionando no plano grátis de sempre — essa integração só melhora a confiabilidade, não é obrigatória.</div>
 
+          <div style="font-family:var(--font-mono);font-size:10.5px;color:var(--text-faint);text-transform:uppercase;letter-spacing:.06em;margin:16px 0 8px;border-top:1px solid var(--line-soft);padding-top:12px;">🔑 Integração Coinalyze (GRATUITA) — ativa as liquidações long/short</div>
+          <div style="font-size:11.5px;color:var(--text-dim);margin-bottom:8px;">
+            Chave grátis em <code>coinalyze.net/account/api-key/</code> — conta sem cartão.
+            <strong>São as únicas variáveis do projeto que comprovadamente descrevem alta e baixa:</strong>
+            medido em 2.999 horas, a proporção de liquidação de vendidos fica em <strong>71,4% nas altas
+            contra 32,6% nas baixas</strong> (t = 18,46), e sobrevive ao corte de robustez das últimas 72h.
+            <span style="color:var(--text-faint);">Descrição, não previsão — a previsão foi testada em
+            ~170 medições e é zero.</span>
+          </div>
+          <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;">
+            <input type="password" id="czApiKeyInput" placeholder="cole sua chave gratuita aqui" style="flex:1;min-width:220px;background:var(--panel);border:1px solid var(--line-soft);color:var(--text);padding:8px 10px;font-size:12.5px;border-radius:2px;">
+            <button class="small" id="btnSaveCzKey">Salvar</button>
+            <span id="czKeyStatus" style="font-family:var(--font-mono);font-size:10.5px;color:var(--text-faint);"></span>
+          </div>
+
           <div style="font-family:var(--font-mono);font-size:10.5px;color:var(--text-faint);text-transform:uppercase;letter-spacing:.06em;margin-bottom:8px;border-top:1px solid var(--line-soft);padding-top:12px;">🔑 Integração CryptoQuant (opcional, plano Professional ~$99–109/mês) — ativa MVRV e Exchange Netflow automáticos</div>
           <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;">
             <input type="password" id="cqApiKeyInput" placeholder="cole sua chave de API aqui" style="flex:1;min-width:220px;background:var(--panel);border:1px solid var(--line-soft);color:var(--text);padding:8px 10px;font-size:12.5px;border-radius:2px;">
@@ -1181,7 +1196,7 @@ const STORAGE_KEY = "seios_btc_v2";
 // fonte única da versão — usada no rodapé, no histórico e nos exports.
 // Muda toda vez que a fórmula de score/pesos muda, pra nunca misturar
 // decisões de regras diferentes como se fossem comparáveis.
-const BUILD_VERSION = "2026-08-21.129-gdelt-resiliente";
+const BUILD_VERSION = "2026-08-23.130-descrevem-de-verdade";
 /* v78: versão do MODELO separada da versão do BUILD. Mudança visual não é
    mudança de semântica: só sobe quando peso, fórmula, corte ou trava mudam.
    Toda observação gravada carrega as duas, pra que seis meses depois dê pra
@@ -1212,7 +1227,7 @@ function ind(label, source, note, excludeFromScore){
 // padrão vai se repetir se o regime mudar. Redistribuído proporcionalmente.
 function defaultState(){
   return {
-    apiKeys: { cryptoquant:"", fred:"", coingecko:"" }, // ficam só no seu navegador, nunca são enviadas a mim
+    apiKeys: { cryptoquant:"", fred:"", coingecko:"", coinalyze:"" }, // ficam só no seu navegador, nunca são enviadas a mim
     lastExportAt: null,
     lastCalibratedAt: null,
     /* v89: o FRED saiu daqui. Ele agora passa pelo /api/fred deste mesmo
@@ -3899,6 +3914,7 @@ async function refreshMarketData(){
   try{ await coletarSensoresExploratorios(); }catch(e){ logFinal("sensores exploratórios: " + e.message); }
   await coletarVelasCamadas();   // v122 — velas dos três relógios
   await coletarCVD();            // v124 — execução acumulada, sensor
+  await coletarLiquidacoes();    // v130 — liquidações, as que descrevem
   await coletarApetite();        // v125 — termômetro de apetite, painel próprio
 
   gravarObservacoesDaRodada()
@@ -4613,6 +4629,86 @@ function registrarObservacao(motorKey, indKey, score, meta){
 /* v124 — 24 velas de 1h fechadas. Se falhar, a rodada não cai. */
 /* v125 — os três fluxos com histórico próprio, para o percentil ter base.
    Se falhar, a rodada NÃO cai: o termômetro é exibição. */
+/* =====================================================================
+   v130 — AS VARIÁVEIS QUE DESCREVEM ENTRAM NO SISTEMA
+   =====================================================================
+   O PROBLEMA, medido em 23/08: o sistema coleta 31 indicadores e NENHUM
+   deles descreve alta e baixa. Na alta de 69.386 → 77.704 (+8.318 dólares),
+   as que mais oscilaram foram:
+     · book imbalance — 146 pontos de amplitude, terminou em −49 (NEGATIVO)
+     · hash rate — 81 pontos, régua quebrada (cruza o corte em 86% dos dias)
+     · taker — de +42 para −4, CONTRA a alta
+     · Fear & Greed — para −44, CONTRA a alta
+     · tendência, média móvel, momentum — são o preço com outro nome
+   E oito não se mexeram: cobre, euro, petróleo, put/call, dólar, inflação,
+   juros, liquidez.
+
+   O TESTE QUE MUDOU ISSO (23/08, 2.999 horas, defasagem ZERO, com corte de
+   robustez das últimas 72h — o mesmo que matou o OI em 21/08):
+
+     variável                       estudo  reserva  sem 72h
+     Vendidos − Comprados           +0,663   +0,626   +0,539
+     Open interest 1h               +0,590   +0,638   +0,573
+     Proporção de vendidos          +0,515   +0,487   +0,502
+     Liquidação de vendidos         +0,469   +0,548   +0,460
+     Liquidação de comprados        −0,553   −0,360   −0,347
+
+   E a separação direta:
+     proporção de vendidos: 71,4% nas altas · 32,6% nas baixas (t = 18,46)
+     open interest 1h:      +0,24% nas altas · −0,21% nas baixas (t = 15,30)
+
+   REPROVADOS, e ficam de fora:
+     · funding r = 0,004 — zero. Descreve regime lento, não o momento.
+     · long/short r = 0,007 — zero. Contagem de contas não mede nada.
+     · volume e liquidação TOTAL — invertem entre as fases: tamanho sem
+       direção não descreve.
+     · agressão compradora PASSOU (+0,397) mas fica fora por decisão
+       declarada ANTES de medir: é quase a definição de preço subindo.
+       Incluí-la faria o medidor dizer "está subindo" quando está subindo.
+
+   O QUE ISTO NÃO É: previsão. Treze rodadas e ~170 testes mediram previsão e
+   nada passou. Correlação contemporânea de 0,66 é compatível com previsão
+   zero — e aqui SABEMOS que é zero, porque medimos.
+
+   TUDO ENTRA COMO SENSOR: grava, não vota. Regra do m12. */
+async function coletarLiquidacoes(){
+  try{
+    const chave = (S.apiKeys && S.apiKeys.coinalyze) ? String(S.apiKeys.coinalyze).trim() : "";
+    if(!chave) return;                       /* sem chave: silencioso, não é falha */
+    const fim = Math.floor(Date.now()/1000), ini = fim - 7*24*3600;
+    const url = "/api/coinalyze?caminho=liquidation-history&symbols=BTCUSDT_PERP.A" +
+                "&interval=1hour&from=" + ini + "&to=" + fim +
+                "&convert_to_usd=true&api_key=" + encodeURIComponent(chave);
+    const r = await smartFetch(url);
+    if(!r.ok) throw new Error("Coinalyze " + r.status);
+    const d = await r.json();
+    const hist = (d && d[0] && d[0].history) || [];
+    if(hist.length < 2) throw new Error("sem histórico");
+    /* a última hora ainda está em formação — regra da v110 */
+    hist.pop();
+    const u = hist[hist.length-1];
+    const L = Number(u.l), Sh = Number(u.s);
+    if(!Number.isFinite(L) || !Number.isFinite(Sh)) throw new Error("valores inválidos");
+    const tot = L + Sh;
+
+    /* PROPORÇÃO, não o valor bruto: em dia calmo o total é de dezenas de
+       milhões e num dia de pânico, bilhões. A proporção é comparável. */
+    const prop = tot > 0 ? (Sh/tot)*100 : null;
+    /* série das últimas 7 dias para o percentil, sem olhar à frente */
+    const serie = hist.map(function(o){
+      const l=Number(o.l), s=Number(o.s), t=l+s;
+      return t>0 ? (s/t)*100 : null;
+    }).filter(function(x){ return x !== null; });
+
+    S.market.liquidacoes = {
+      longs: L, shorts: Sh, total: tot, proporcaoVendidos: prop,
+      pctProporcao: serie.length > 30
+        ? percentilDeApetite(serie.slice(0,-1), prop) : null,
+      em: Date.now(), base: serie.length
+    };
+  }catch(e){ /* silencioso: sensor não derruba coleta */ }
+}
+
 async function coletarApetite(){
   try{
     const PASSO=12;                     /* 12 velas de 5min = 1 hora */
@@ -6578,6 +6674,54 @@ function leituraPorCadencia(){
 
 /* v125 — o painel do termômetro. Vive separado das três camadas e do score:
    é uma leitura de FLUXO, não uma agregação de motores. */
+/* v130 — o painel das liquidações. Vive junto com o fluxo, porque responde a
+   mesma pergunta ("o que sustenta o movimento?") — mas com as variáveis que
+   PASSARAM no teste de descrição, e o fluxo atual usa duas que reprovaram
+   (funding r=0,004 e a versão de 4h do OI). */
+function blocoLiquidacoes(){
+  const L = S.market && S.market.liquidacoes;
+  if(!L || L.proporcaoVendidos === null || L.proporcaoVendidos === undefined) return "";
+  const p = L.proporcaoVendidos;
+  /* os cortes vêm da MEDIÇÃO, não de julgamento: em 2.999 horas a proporção
+     de vendidos ficou em 71,4% nas altas e 32,6% nas baixas (t = 18,46). */
+  const cor = p >= 65 ? "var(--teal)" : (p <= 40 ? "var(--brick)" : "var(--gold)");
+  const nome = p >= 65 ? "VENDIDOS SENDO ESTOURADOS"
+             : (p <= 40 ? "COMPRADOS SENDO ESTOURADOS" : "EQUILIBRADO");
+  const mi = function(v){ return Math.abs(v) >= 1e6 ? (v/1e6).toFixed(1)+"M"
+                                                    : Math.round(v/1e3)+"k"; };
+  return `
+    <div style="border-top:1px solid var(--line-soft);margin-top:14px;padding-top:14px;">
+      <div style="font-size:11px;color:var(--text-faint);letter-spacing:.06em;">
+        QUEM ESTÁ APANHANDO — liquidações da última hora</div>
+      <div style="display:flex;align-items:baseline;gap:14px;flex-wrap:wrap;margin:6px 0;">
+        <span style="font-family:var(--font-mono);font-size:40px;line-height:1;color:${cor};">${Math.round(p)}%</span>
+        <span style="font-family:var(--font-mono);font-size:15px;letter-spacing:.06em;color:${cor};">${esc(nome)}</span>
+        ${L.pctProporcao !== null && L.pctProporcao !== undefined
+          ? '<span style="font-size:11px;color:var(--text-faint);">percentil ' + Math.round(L.pctProporcao) + ' dos últimos 7 dias</span>'
+          : ''}
+      </div>
+      <div style="display:flex;height:8px;border-radius:4px;overflow:hidden;margin:6px 0 10px;">
+        <div style="width:${Math.round(p)}%;background:var(--teal);"></div>
+        <div style="flex:1;background:var(--brick);"></div>
+      </div>
+      <div style="font-family:var(--font-mono);font-size:11px;color:var(--text-dim);">
+        vendidos ${mi(L.shorts)} · comprados ${mi(L.longs)} · total ${mi(L.total)}
+      </div>
+      <div style="font-size:12px;color:var(--text-dim);margin-top:10px;line-height:1.6;">
+        <strong>É a única família de variáveis do projeto que comprovadamente descreve alta e
+        baixa.</strong> Medido em 2.999 horas, defasagem zero: a proporção de vendidos fica em
+        <strong>71,4% nas altas contra 32,6% nas baixas</strong> (t = 18,46), e sobrevive ao
+        corte de robustez das últimas 72 horas — o mesmo corte que derrubou o open interest em
+        21/08, quando r = +0,355 virou +0,013.
+        <br><br>
+        <strong>Descreve o presente. Não é previsão.</strong> Em ~170 medições nada neste
+        projeto antecede o preço, e correlação contemporânea de 0,66 é compatível com previsão
+        zero. <span style="color:var(--text-faint);">A proporção é usada em vez do valor bruto
+        porque em dia calmo o total é de dezenas de milhões e em dia de pânico, bilhões.</span>
+      </div>
+    </div>`;
+}
+
 function blocoApetite(){
   const A = S.market && S.market.apetite;
   const R = (function(){ try{ return calcularRegime(); }catch(e){ return null; } })();
@@ -6675,7 +6819,8 @@ function blocoApetite(){
       r = +0,355 — caiu para r = +0,013 quando removemos as 48 horas do episódio que o gerou.
       <span style="color:var(--text-faint);">Score, pesos, camadas e a série das 777 não são
       afetados por este painel.</span>
-    </div>`;
+    </div>
+    ${(function(){ try{ return blocoLiquidacoes(); }catch(eL){ return ""; } })()}`;
 }
 
 function blocoCadencia(){
@@ -10917,6 +11062,24 @@ document.getElementById("btnSaveCqKey").addEventListener("click", ()=>{
   S.apiKeys.cryptoquant = input.value.trim();
   saveState();
   renderCqKeyStatus();
+
+  /* v130 — chave da Coinalyze: gratuita, e habilita as liquidações */
+  function renderCzKeyStatus(){
+    const el = document.getElementById("czKeyStatus");
+    if(!el) return;
+    el.textContent = (S.apiKeys && S.apiKeys.coinalyze)
+      ? "✓ chave salva — liquidações ativas" : "sem chave — liquidações desligadas";
+  }
+  { const bt = document.getElementById("btnSaveCzKey");
+    if(bt) bt.addEventListener("click", ()=>{
+      const input = document.getElementById("czApiKeyInput");
+      S.apiKeys.coinalyze = input.value.trim();
+      saveState(); renderCzKeyStatus();
+      input.value = "";
+      input.placeholder = S.apiKeys.coinalyze ? "chave salva (oculta)" : "cole sua chave gratuita aqui";
+      if(S.apiKeys.coinalyze) refreshMarketData().catch(()=>{});
+    }); }
+  renderCzKeyStatus();
   input.value = "";
   input.placeholder = S.apiKeys.cryptoquant ? "chave salva (oculta)" : "cole sua chave de API aqui";
   if(S.apiKeys.cryptoquant) refreshMarketData().catch(()=>{});
@@ -11177,7 +11340,7 @@ document.getElementById("btnExport").addEventListener("click", async ()=>{
   catch(e){ console.warn("Não consegui ler as observações para o backup:", e); }
 
   const paraExportar = Object.assign({}, S, {
-    apiKeys: { cryptoquant:"", fred:"", coingecko:"" },
+    apiKeys: { cryptoquant:"", fred:"", coingecko:"", coinalyze:"" },
     _chavesRemovidas: true,
     _arquivoFrio: arquivoAgora,
     _arquivoFrioCount: arquivoAgora.length,

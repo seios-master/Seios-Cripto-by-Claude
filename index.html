@@ -1233,7 +1233,7 @@ const STORAGE_KEY = "seios_btc_v2";
 // fonte única da versão — usada no rodapé, no histórico e nos exports.
 // Muda toda vez que a fórmula de score/pesos muda, pra nunca misturar
 // decisões de regras diferentes como se fossem comparáveis.
-const BUILD_VERSION = "2026-08-23.146-volume-declarado";
+const BUILD_VERSION = "2026-08-23.147-faixa-da-semana";
 /* v78: versão do MODELO separada da versão do BUILD. Mudança visual não é
    mudança de semântica: só sobe quando peso, fórmula, corte ou trava mudam.
    Toda observação gravada carrega as duas, pra que seis meses depois dê pra
@@ -4823,6 +4823,36 @@ async function coletarLiquidacoes(results){
          punhado de pontos é número com cara de medida */
       pctVolume: totais.length > 30
         ? percentilDeApetite(totais.slice(0,-1), tot) : null,
+      /* =====================================================================
+         v147 — A DISTRIBUIÇÃO DA PRÓPRIA BASE
+         =====================================================================
+         MEDIDO em 23/08: duas leituras seguidas com 99% e 100% de vendidos,
+         percentis 90 e 92, com o preço parado em −0,22% em 24h. Numa alta
+         sustentada — o BTC está +20% em 30 dias — vendidos apanham hora após
+         hora, e a proporção pode viver colada no teto a semana inteira.
+
+         Se for esse o caso, "99%" não é notícia e o percentil 90 quer dizer
+         "um pouco acima de um monte de 98%". Os cortes de 65 e 40 nunca
+         cruzam, e o painel vira um mostrador travado no máximo com cara de
+         alarme — que é EXATAMENTE o padrão já medido em CVD, funding,
+         endereços ativos e hash rate: escala declarada que não cruza na
+         prática. Seria o quinto caso.
+
+         A DIFERENÇA é que aqui a resposta está na mão: as ~164 horas da base
+         já foram baixadas para calcular o percentil. Guardar mediana e faixa
+         custa três linhas e transforma "99%" em "99% numa semana cuja mediana
+         é 97%" — que é uma informação completamente diferente.
+
+         Continua sendo sensor: registra, não vota. */
+      dist: (function(){
+        if(serie.length <= 30) return null;
+        const base = serie.slice(0,-1).slice().sort(function(a,b){ return a-b; });
+        const q = function(f){
+          const i = Math.min(base.length-1, Math.max(0, Math.round(f*(base.length-1))));
+          return base[i];
+        };
+        return { p10:q(0.10), p50:q(0.50), p90:q(0.90), n:base.length };
+      })(),
       em: Date.now(), base: serie.length
     };
     results.ok.push("liquidações");
@@ -5477,6 +5507,11 @@ function relatorioTexto(snap, snaps){
              (Lq.pctVolume !== null && Lq.pctVolume !== undefined
                ? " (volume no percentil " + Math.round(Lq.pctVolume) +
                  (Lq.pctVolume < 25 ? " — VOLUME FINO, proporção extrema por construção" : "") + ")"
+               : "") +
+             (Lq.dist
+               ? " · a semana: p10 " + Math.round(Lq.dist.p10) + "% / mediana " +
+                 Math.round(Lq.dist.p50) + "% / p90 " + Math.round(Lq.dist.p90) + "%" +
+                 ((Lq.dist.p90 - Lq.dist.p10) < 20 ? " — FAIXA ESTREITA, os cortes 65/40 não cruzam nela" : "")
                : "") +
              " · " + (Lq.base || 0) + " horas de base · " + idadeH);
     } else if(!temChaveCz){
@@ -7155,6 +7190,12 @@ function blocoLiquidacoes(){
      passa a dizer, fechada, que havia pouco dinheiro em jogo. */
   const pv = L.pctVolume;
   const volumeFino = (pv !== null && pv !== undefined && pv < 25);
+  /* v147 — faixa estreita: quando os 80% do meio da semana cabem em menos de
+     20 pontos, os cortes de 65/40 não separam nada dentro dela, e o número de
+     agora está descrevendo a semana, não a hora. */
+  const D = L.dist;
+  const amplitude = D ? (D.p90 - D.p10) : null;
+  const faixaEstreita = (amplitude !== null && amplitude < 20);
   const mi = function(v){ return Math.abs(v) >= 1e6 ? (v/1e6).toFixed(1)+"M"
                                                     : Math.round(v/1e3)+"k"; };
   return dobra("liquidacoes", "Live",
@@ -7164,7 +7205,10 @@ function blocoLiquidacoes(){
     (volumeFino
       ? '<span style="color:var(--gold);"> · volume fino (percentil '+Math.round(pv)+')</span>'
       : (pv !== null && pv !== undefined
-          ? '<span style="color:var(--text-faint);"> · volume p'+Math.round(pv)+'</span>' : '')),
+          ? '<span style="color:var(--text-faint);"> · volume p'+Math.round(pv)+'</span>' : ''))+
+    (D ? '<span style="color:'+(faixaEstreita ? 'var(--gold)' : 'var(--text-faint)')+';">'+
+         ' · mediana da semana '+Math.round(D.p50)+'%'+
+         (faixaEstreita ? ' (faixa estreita)' : '')+'</span>' : ''),
     `
       <div style="display:flex;height:8px;border-radius:4px;overflow:hidden;margin:0 0 10px;">
         <div style="width:${Math.round(p)}%;background:var(--teal);"></div>
@@ -7174,6 +7218,20 @@ function blocoLiquidacoes(){
         vendidos ${mi(L.shorts)} · comprados ${mi(L.longs)} · total ${mi(L.total)}
         ${pv !== null && pv !== undefined ? `<span style="color:var(--text-faint);"> · volume da hora no percentil ${Math.round(pv)} de ${L.base||0}h</span>` : ""}
       </div>
+      ${D ? `<div style="font-family:var(--font-mono);font-size:11px;color:var(--text-faint);margin-top:6px;">
+        a semana: p10 ${Math.round(D.p10)}% · mediana ${Math.round(D.p50)}% · p90 ${Math.round(D.p90)}%
+        <span style="color:var(--line);"> | </span>amplitude ${Math.round(amplitude)} pontos em ${D.n}h
+      </div>` : ""}
+      ${faixaEstreita ? `<div style="border:1px solid var(--gold);background:#FFC53D14;padding:10px 12px;margin:10px 0;font-size:12px;color:var(--text-dim);">
+        <strong style="color:var(--gold);">Faixa estreita.</strong> Os 80% do meio das últimas
+        ${D.n} horas cabem em ${Math.round(amplitude)} pontos. Dentro dessa janela os cortes de
+        <strong>65 e 40 nunca cruzam</strong>, e o rótulo acima descreve a semana inteira, não
+        esta hora — um mostrador travado no máximo com cara de alarme.
+        <br><br>É o mesmo padrão já medido em CVD, funding, endereços ativos e hash rate: escala
+        declarada que não cruza na prática. <span style="color:var(--text-faint);">Nada foi
+        filtrado nem reescalado: a série decide se isto é um defeito de escala ou uma alta
+        sustentada fazendo o que uma alta sustentada faz.</span>
+      </div>` : ""}
       ${volumeFino ? `<div style="border:1px solid var(--gold);background:#FFC53D14;padding:10px 12px;margin:10px 0;font-size:12px;color:var(--text-dim);">
         <strong style="color:var(--gold);">Volume fino.</strong> O total desta hora está entre os
         25% menores das últimas ${L.base||0} horas. Com pouco dinheiro em jogo, a proporção fica

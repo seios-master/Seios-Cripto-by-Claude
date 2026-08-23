@@ -1232,7 +1232,7 @@ const STORAGE_KEY = "seios_btc_v2";
 // fonte única da versão — usada no rodapé, no histórico e nos exports.
 // Muda toda vez que a fórmula de score/pesos muda, pra nunca misturar
 // decisões de regras diferentes como se fossem comparáveis.
-const BUILD_VERSION = "2026-08-23.139-live-declarada";
+const BUILD_VERSION = "2026-08-23.141-sete-abertas";
 /* v78: versão do MODELO separada da versão do BUILD. Mudança visual não é
    mudança de semântica: só sobe quando peso, fórmula, corte ou trava mudam.
    Toda observação gravada carrega as duas, pra que seis meses depois dê pra
@@ -6752,9 +6752,26 @@ function leituraPorCadencia(){
    fechado fica no localStorage, em chave própria, separada do estado do
    sistema. */
 function dobra(id, olho, resumo, corpo, abertoPorPadrao){
+  /* =====================================================================
+     v141 — AS SETE NASCEM ABERTAS, E O PADRÃO NOVO PRECISA VALER
+     =====================================================================
+     A v134 fez todas nascerem fechadas porque a página estava longa. O efeito
+     colateral: a tela passou a abrir com sete rótulos e nenhum painel — o
+     Jorge subiu a build e não viu o sistema, viu o índice dele.
+
+     O QUE MUDA: as sete linhas do topo nascem ABERTAS. As três sub-dobras de
+     camada, dentro de Velocidades, continuam fechadas — elas não são linhas
+     do topo, e abrir as três somaria três telas de uma vez.
+
+     POR QUE A CHAVE MUDOU DE NOME: o estado guardado VENCE o padrão, por
+     desenho (v132). Quem abriu e fechou uma linha sob a v134 tem "0" gravado,
+     e essa linha continuaria fechada para sempre, contra o padrão novo — o
+     tipo de defeito que parece "não funcionou" e é só memória velha. Trocar o
+     prefixo faz o padrão novo valer uma vez; a partir daí a preferência volta
+     a mandar. Custo declarado: as escolhas feitas até aqui são descartadas. */
   let aberto = abertoPorPadrao !== false;
   try{
-    const g = localStorage.getItem("seios_dobra_" + id);
+    const g = localStorage.getItem("seios_dobra2_" + id);
     if(g === "1") aberto = true;
     else if(g === "0") aberto = false;
   }catch(e){ /* armazenamento bloqueado: usa o padrão */ }
@@ -6778,7 +6795,7 @@ function ligarDobras(){
   document.addEventListener("toggle", function(ev){
     const d = ev.target;
     if(!d || d.tagName !== "DETAILS" || !d.dataset || !d.dataset.dobra) return;
-    try{ localStorage.setItem("seios_dobra_" + d.dataset.dobra, d.open ? "1" : "0"); }
+    try{ localStorage.setItem("seios_dobra2_" + d.dataset.dobra, d.open ? "1" : "0"); }
     catch(e){ /* sem armazenamento: a dobra funciona, só não lembra */ }
   }, true);
   /* v134 — o botão fechar: num painel aberto e longo, rolar de volta até o
@@ -6843,7 +6860,7 @@ function blocoLiquidacoes(){
           'long/short (Coinalyze)". <span style="color:var(--text-faint);">Nenhum número ' +
           'velho é mostrado no lugar: dado de ontem com cara de agora seria pior que ' +
           'nenhum.</span>') +
-      '</div>', false);
+      '</div>', true);
   }
 
   const p = L.proporcaoVendidos;
@@ -6877,7 +6894,7 @@ function blocoLiquidacoes(){
         projeto antecede o preço, e correlação contemporânea de 0,66 é compatível com previsão
         zero. <span style="color:var(--text-faint);">A proporção é usada em vez do valor bruto
         porque em dia calmo o total é de dezenas de milhões e em dia de pânico, bilhões.</span>
-      </div>`, false);
+      </div>`, true);
 }
 
 function blocoApetite(){
@@ -6940,7 +6957,7 @@ function blocoApetite(){
         }).join('<span style="color:var(--line);"> · </span>')+'</div>'+
       '<div style="font-size:11.5px;color:var(--text-faint);margin-top:10px;">'+
         'Responde "o mercado está altista?". Aqui o preço contra as próprias médias É a '+
-        'resposta, não uma contaminação.</div>', false)}` : ""}
+        'resposta, não uma contaminação.</div>', true)}` : ""}
 
     ${A && A.valor !== null ? dobra("fluxo", "Pressão",
       '<span style="color:'+e.cor+';font-size:15px;">'+esc(e.nome)+' '+Math.round(A.valor)+'</span>'+
@@ -6971,7 +6988,7 @@ function blocoApetite(){
         'projeto antecede o preço: as relações reais têm pico em defasagem zero. O melhor '+
         'resultado que apareceu — open interest, r = +0,355 — caiu para +0,013 quando removemos '+
         'as 48h do episódio que o gerou. <span style="color:var(--text-faint);">Score, pesos, '+
-        'camadas e a série das 777 não são afetados por este painel.</span></div>', false) : ""}
+        'camadas e a série das 777 não são afetados por este painel.</span></div>', true) : ""}
     ${(function(){ try{ return blocoLiquidacoes(); }catch(eL){ return ""; } })()}`;
 }
 
@@ -7052,7 +7069,7 @@ function blocoCadencia(){
       <br>O gráfico ao lado de cada rótulo é <strong>o preço no relógio daquela camada</strong>
       — 1h, 7 dias, 30 dias. É <strong>contexto</strong>, não afirmação: serve para você ver se
       o que a camada diz combina com o que aconteceu naquela escala.</span></div>
-      ${blocos}`, false)}`;
+      ${blocos}`, true)}`;
 }
 
 function computeMarketState(){
@@ -10035,14 +10052,39 @@ function renderState(){
       const corM = semScore ? COLOR.faint
         : (ms.score >= 15 ? COLOR.teal : (ms.score <= -15 ? COLOR.brick : COLOR.gold));
       const nomeM = semScore ? "SEM LEITURA" : scoreLabel(ms.score);
+      /* =====================================================================
+         v140 — A LINHA MOTORES NUNCA MOSTROU OS DOIS MAIORES
+         =====================================================================
+         A v135 escreveu que "o resumo fechado carrega o veredito e os dois
+         motores de maior contribuição". Nunca carregou: na tela do Jorge em
+         23/08 a linha diz "Neutro 7.8" e mais nada.
+
+         DOIS ERROS EMPILHADOS, e os dois já estão na lista dos que eu repito:
+
+         1. CAMPO QUE NÃO EXISTE. `computeMarketState()` devolve `pesos`, não
+            `pesosEfetivos`. O código lia `ms.pesosEfetivos[k]`, recebia
+            `undefined`, e o `|| 0` transformava a ausência em zero — todos os
+            nove motores viravam contribuição 0, o `.filter` limpava a lista e
+            `top` saía vazio. É o mesmo defeito do `pe.fator` da v92, e a mesma
+            família do `Number(null)`: o valor ausente vira zero silencioso em
+            vez de erro à vista.
+
+         2. O ATALHO ERRADO. Mesmo com o campo certo, `composite × peso` NÃO é
+            a contribuição do motor: o agregador soma por INDICADOR, com teto
+            de família e translação por motor. O número certo já está pronto e
+            calculado no lugar certo — `ms.pesos[k].contribuicao`, em pontos
+            de score. Refazer a conta aqui seria manter duas aritméticas.
+
+         POR QUE O TRY/CATCH ESCONDIA: `top = ""` no catch é indistinguível de
+         "não há motor com contribuição". A linha ficava certa por fora e vazia
+         por dentro, e o único jeito de perceber era olhar a tela. */
       let top = "";
       try{
-        top = Object.keys(ms.composites || {})
+        const pe = ms.pesos || {};
+        top = Object.keys(pe)
+          .filter(function(k){ return k.charAt(0) !== "_" && S.motors[k]; })
           .map(function(k){
-            const c = ms.composites[k];
-            const p = (ms.pesosEfetivos && ms.pesosEfetivos[k]) || 0;
-            return { nome: S.motors[k] ? S.motors[k].label : k,
-                     c: (Number.isFinite(c) ? c : 0) * p };
+            return { nome: S.motors[k].label, c: Number(pe[k].contribuicao) };
           })
           .filter(function(x){ return Number.isFinite(x.c) && x.c !== 0; })
           .sort(function(a,b){ return Math.abs(b.c)-Math.abs(a.c); })
@@ -10061,7 +10103,7 @@ function renderState(){
         '<div style="font-size:11.5px;color:var(--text-faint);margin-top:10px;line-height:1.6;">'+
         'Síntese ponderada dos nove motores. <strong>Não é recomendação — é leitura de '+
         'contexto</strong>, e é a que menos se move: mais da metade do peso está em janelas '+
-        'de 90 dias e séries mensais, que não mudam em dois dias.</div>', false);
+        'de 90 dias e séries mensais, que não mudam em dois dias.</div>', true);
       const corpo = document.getElementById("motoresCorpo");
       if(corpo){ corpo.appendChild(dash); dash.hidden = false; }
     } }
@@ -11021,7 +11063,7 @@ function renderHero(){
         'prazos. <strong>Descreve o presente — não é previsão.</strong> Em ~170 medições nada '+
         'neste projeto antecede o preço.<br>As médias de 200/100/50 semanas vêm da Binance e '+
         'entram no <strong>Ciclo</strong> como itens de voto; aqui elas aparecem com o valor em '+
-        'dólar e a distância do preço, que é contexto e não voto.</div>', false);
+        'dólar e a distância do preço, que é contexto e não voto.</div>', true);
   }
 
   // barra de prazos — palavra + número, não número solto
@@ -11054,7 +11096,7 @@ function renderHero(){
       '<div style="font-size:11.5px;color:var(--text-faint);margin-top:10px;line-height:1.6;">' +
       'O mesmo score, recortado por horizonte. <strong>É a leitura mais antiga do sistema e a ' +
       'que menos se move</strong>: mais da metade do peso está em janelas de 90 dias e séries ' +
-      'mensais, que não mudam em dois dias.</div>', false);
+      'mensais, que não mudam em dois dias.</div>', true);
   }
 }
 

@@ -1233,7 +1233,7 @@ const STORAGE_KEY = "seios_btc_v2";
 // fonte única da versão — usada no rodapé, no histórico e nos exports.
 // Muda toda vez que a fórmula de score/pesos muda, pra nunca misturar
 // decisões de regras diferentes como se fossem comparáveis.
-const BUILD_VERSION = "2026-08-23.145-rodada-que-termina";
+const BUILD_VERSION = "2026-08-23.146-volume-declarado";
 /* v78: versão do MODELO separada da versão do BUILD. Mudança visual não é
    mudança de semântica: só sobe quando peso, fórmula, corte ou trava mudam.
    Toda observação gravada carrega as duas, pra que seis meses depois dê pra
@@ -4789,10 +4789,40 @@ async function coletarLiquidacoes(results){
       return t>0 ? (s/t)*100 : null;
     }).filter(function(x){ return x !== null; });
 
+    /* =====================================================================
+       v146 — A PROPORÇÃO PRECISA DO DENOMINADOR AO LADO
+       =====================================================================
+       MEDIDO em 23/08 08:41, na primeira coleta que funcionou: 100% vendidos,
+       percentil 92. Cem por cento quer dizer comprados = 0 naquela hora. Isso
+       é um aperto violento OU uma hora quase vazia em que o pouco que estourou
+       era tudo de um lado — e, do jeito que estava, não havia como distinguir
+       as duas coisas: o painel dizia "VENDIDOS SENDO ESTOURADOS" nos dois casos.
+
+       É a lição do CVD (v124) pelo avesso. Lá o defeito era usar o valor bruto,
+       porque a escala muda por ordem de grandeza entre dia calmo e dia de
+       pânico. A proporção corrigiu aquilo e abriu o buraco simétrico: com o
+       total perto de zero, ela vira ruído amplificado até o topo da escala.
+
+       A CORREÇÃO é declarar o volume da hora em percentil contra as mesmas
+       ~164 horas que já servem de base para a proporção. Nada é filtrado, nada
+       é descartado, nenhuma leitura é bloqueada: o número continua o mesmo, e
+       passa a vir acompanhado do quanto de dinheiro havia por trás dele.
+
+       NÃO É MUDANÇA DE MODELO: as liquidações são sensor desde a v130 — gravam
+       e não votam. Score, pesos e a contagem das 777 não encostam nisto. */
+    const totais = hist.map(function(o){
+      const l=Number(o.l), s=Number(o.s);
+      return (Number.isFinite(l) && Number.isFinite(s)) ? l+s : null;
+    }).filter(function(x){ return x !== null; });
+
     S.market.liquidacoes = {
       longs: L, shorts: Sh, total: tot, proporcaoVendidos: prop,
       pctProporcao: serie.length > 30
         ? percentilDeApetite(serie.slice(0,-1), prop) : null,
+      /* mesmo corte de base da proporção, pelo mesmo motivo: percentil sobre
+         punhado de pontos é número com cara de medida */
+      pctVolume: totais.length > 30
+        ? percentilDeApetite(totais.slice(0,-1), tot) : null,
       em: Date.now(), base: serie.length
     };
     results.ok.push("liquidações");
@@ -5435,9 +5465,19 @@ function relatorioTexto(snap, snaps){
                           String(S.apiKeys.coinalyze).trim());
     if(Lq && Lq.proporcaoVendidos !== null && Lq.proporcaoVendidos !== undefined){
       const idadeH = Lq.em ? ((Date.now() - Lq.em)/3600000).toFixed(1) + "h atrás" : "sem hora";
+      /* v146 — o TOTAL vai junto. Sem ele, "100% vendidos" no diagnóstico é
+         indistinguível entre aperto e hora quase vazia — foi o que aconteceu
+         na primeira coleta boa, em 23/08 08:41. */
+      const mi = function(v){ return Math.abs(v) >= 1e6 ? (v/1e6).toFixed(1)+"M"
+                                                        : Math.round(v/1e3)+"k"; };
       L.push("LIQUIDAÇÕES (Coinalyze): " + Math.round(Lq.proporcaoVendidos) + "% vendidos" +
              (Lq.pctProporcao !== null && Lq.pctProporcao !== undefined
                ? " · percentil " + Math.round(Lq.pctProporcao) : "") +
+             " · total " + mi(Lq.total) +
+             (Lq.pctVolume !== null && Lq.pctVolume !== undefined
+               ? " (volume no percentil " + Math.round(Lq.pctVolume) +
+                 (Lq.pctVolume < 25 ? " — VOLUME FINO, proporção extrema por construção" : "") + ")"
+               : "") +
              " · " + (Lq.base || 0) + " horas de base · " + idadeH);
     } else if(!temChaveCz){
       L.push("LIQUIDAÇÕES (Coinalyze): DESLIGADA — sem chave salva neste navegador");
@@ -7110,12 +7150,21 @@ function blocoLiquidacoes(){
   const cor = p >= 65 ? "var(--teal)" : (p <= 40 ? "var(--brick)" : "var(--gold)");
   const nome = p >= 65 ? "VENDIDOS SENDO ESTOURADOS"
              : (p <= 40 ? "COMPRADOS SENDO ESTOURADOS" : "EQUILIBRADO");
+  /* v146 — hora de volume baixo produz proporção extrema por construção.
+     O rótulo não muda e o número não é filtrado: o que muda é que a linha
+     passa a dizer, fechada, que havia pouco dinheiro em jogo. */
+  const pv = L.pctVolume;
+  const volumeFino = (pv !== null && pv !== undefined && pv < 25);
   const mi = function(v){ return Math.abs(v) >= 1e6 ? (v/1e6).toFixed(1)+"M"
                                                     : Math.round(v/1e3)+"k"; };
   return dobra("liquidacoes", "Live",
     '<span style="color:'+cor+';font-size:15px;">'+Math.round(p)+'% '+esc(nome)+'</span>'+
     (L.pctProporcao !== null && L.pctProporcao !== undefined
-      ? '<span style="color:var(--text-faint);"> · percentil '+Math.round(L.pctProporcao)+'</span>' : ''),
+      ? '<span style="color:var(--text-faint);"> · percentil '+Math.round(L.pctProporcao)+'</span>' : '')+
+    (volumeFino
+      ? '<span style="color:var(--gold);"> · volume fino (percentil '+Math.round(pv)+')</span>'
+      : (pv !== null && pv !== undefined
+          ? '<span style="color:var(--text-faint);"> · volume p'+Math.round(pv)+'</span>' : '')),
     `
       <div style="display:flex;height:8px;border-radius:4px;overflow:hidden;margin:0 0 10px;">
         <div style="width:${Math.round(p)}%;background:var(--teal);"></div>
@@ -7123,7 +7172,15 @@ function blocoLiquidacoes(){
       </div>
       <div style="font-family:var(--font-mono);font-size:11px;color:var(--text-dim);">
         vendidos ${mi(L.shorts)} · comprados ${mi(L.longs)} · total ${mi(L.total)}
+        ${pv !== null && pv !== undefined ? `<span style="color:var(--text-faint);"> · volume da hora no percentil ${Math.round(pv)} de ${L.base||0}h</span>` : ""}
       </div>
+      ${volumeFino ? `<div style="border:1px solid var(--gold);background:#FFC53D14;padding:10px 12px;margin:10px 0;font-size:12px;color:var(--text-dim);">
+        <strong style="color:var(--gold);">Volume fino.</strong> O total desta hora está entre os
+        25% menores das últimas ${L.base||0} horas. Com pouco dinheiro em jogo, a proporção fica
+        extrema por construção — <strong>100% de vendidos numa hora de US$ 20 mil não é a mesma
+        coisa que 100% numa hora de US$ 200 milhões</strong>, e a proporção sozinha não distingue.
+        O número não foi filtrado nem ajustado: só está declarado o denominador.
+      </div>` : ""}
       <div style="font-size:12px;color:var(--text-dim);margin-top:10px;line-height:1.6;">
         <strong>É a única família de variáveis do projeto que comprovadamente descreve alta e
         baixa.</strong> Medido em 2.999 horas, defasagem zero: a proporção de vendidos fica em

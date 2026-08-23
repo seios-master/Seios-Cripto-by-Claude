@@ -1232,7 +1232,7 @@ const STORAGE_KEY = "seios_btc_v2";
 // fonte única da versão — usada no rodapé, no histórico e nos exports.
 // Muda toda vez que a fórmula de score/pesos muda, pra nunca misturar
 // decisões de regras diferentes como se fossem comparáveis.
-const BUILD_VERSION = "2026-08-23.138-tabela-solta";
+const BUILD_VERSION = "2026-08-23.139-live-declarada";
 /* v78: versão do MODELO separada da versão do BUILD. Mudança visual não é
    mudança de semântica: só sobe quando peso, fórmula, corte ou trava mudam.
    Toda observação gravada carrega as duas, pra que seis meses depois dê pra
@@ -6794,7 +6794,58 @@ function ligarDobras(){
 
 function blocoLiquidacoes(){
   const L = S.market && S.market.liquidacoes;
-  if(!L || L.proporcaoVendidos === null || L.proporcaoVendidos === undefined) return "";
+
+  /* =====================================================================
+     v139 — A LINHA EXISTE MESMO SEM NÚMERO, E DIZ POR QUÊ
+     =====================================================================
+     MEDIDO no estado real de 23/08, 06:10: dos sete painéis, seis desenham e
+     `Live` não. Não é defeito de layout — `coletarLiquidacoes` começa com
+     `if(!chave) return;` e o comentário ao lado diz "sem chave: nem aparece
+     no log". O campo `S.market.liquidacoes` nunca chega a existir, e esta
+     função devolvia string vazia.
+
+     Resultado: o painel some sem deixar rastro. Não há linha no log, não há
+     entrada em FALHAS, não há nada no diagnóstico. Da cadeira do Jorge,
+     "sumiu um painel" é indistinguível de "a build quebrou" — e ele passou a
+     sessão inteira achando que era a build.
+
+     A v131 consertou o caso da chave ERRADA (que agora aparece no log). Nunca
+     tratou o caso da chave AUSENTE, que é o caso comum. Mesma regra da v129 e
+     da v125: a ausência tem que ser visível para poder ser cobrada. Uma linha
+     que diz "desligada — falta a chave" custa 40px e responde a pergunta;
+     um painel que evapora custa uma sessão.
+
+     O QUE NÃO MUDA: sem número, não há número inventado. A linha declara o
+     estado, não simula leitura. Score, pesos e a série das 777 não encostam
+     nisto — as liquidações são sensor desde a v130. */
+  const temNumero = !!(L && L.proporcaoVendidos !== null && L.proporcaoVendidos !== undefined);
+  if(!temNumero){
+    const chave = (S.apiKeys && S.apiKeys.coinalyze)
+                    ? String(S.apiKeys.coinalyze).trim() : "";
+    const semChave = !chave;
+    return dobra("liquidacoes", "Live",
+      '<span style="color:var(--text-faint);">' +
+        (semChave ? "desligada — falta a chave gratuita da Coinalyze"
+                  : "a coleta falhou nesta rodada") + '</span>',
+      '<div style="font-size:12px;color:var(--text-dim);line-height:1.6;">' +
+      (semChave
+        ? 'Esta linha mostra <strong>quem está apanhando agora</strong>: a proporção entre ' +
+          'liquidação de vendidos e de comprados, hora a hora. Ela precisa de uma chave ' +
+          'gratuita da Coinalyze — conta sem cartão, em <code>coinalyze.net/account/api-key/</code>. ' +
+          'Cole em <strong>Relatórios ▸ Ajustar e conectar APIs</strong> e atualize os dados.' +
+          '<br><br><strong>São as únicas variáveis do projeto que comprovadamente descrevem ' +
+          'alta e baixa:</strong> medido em 2.999 horas, a proporção de liquidação de vendidos ' +
+          'fica em <strong>71,4% nas altas contra 32,6% nas baixas</strong> (t = 18,46), e ' +
+          'sobrevive ao corte de robustez das últimas 72h. ' +
+          '<span style="color:var(--text-faint);">Descrição, não previsão.</span>'
+        : 'A chave está salva, mas a coleta não devolveu hora fechada utilizável nesta ' +
+          'rodada. O motivo aparece no log de atualização, linha "consultando liquidações ' +
+          'long/short (Coinalyze)". <span style="color:var(--text-faint);">Nenhum número ' +
+          'velho é mostrado no lugar: dado de ontem com cara de agora seria pior que ' +
+          'nenhum.</span>') +
+      '</div>', false);
+  }
+
   const p = L.proporcaoVendidos;
   /* os cortes vêm da MEDIÇÃO, não de julgamento: em 2.999 horas a proporção
      de vendidos ficou em 71,4% nas altas e 32,6% nas baixas (t = 18,46). */

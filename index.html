@@ -1233,7 +1233,7 @@ const STORAGE_KEY = "seios_btc_v2";
 // fonte única da versão — usada no rodapé, no histórico e nos exports.
 // Muda toda vez que a fórmula de score/pesos muda, pra nunca misturar
 // decisões de regras diferentes como se fossem comparáveis.
-const BUILD_VERSION = "2026-08-23.147-faixa-da-semana";
+const BUILD_VERSION = "2026-08-23.148-live-no-agora";
 /* v78: versão do MODELO separada da versão do BUILD. Mudança visual não é
    mudança de semântica: só sobe quando peso, fórmula, corte ou trava mudam.
    Toda observação gravada carrega as duas, pra que seis meses depois dê pra
@@ -6697,6 +6697,59 @@ function blocoForaDoScore(){
    · exchangeFlow — tem setAuto no código, mas depende de chave paga do
      CryptoQuant e nunca preenche na prática. Se um dia preencher, entra no
      TERRENO (janela de 90 dias) e o teste da bateria vai cobrar. */
+/* =====================================================================
+   v148 — A LIQUIDAÇÃO ENTRA NO AGORA, COM A RÉGUA QUE JÁ EXISTIA
+   =====================================================================
+   O QUE ESTAVA ERRADO, e é do Jorge o achado: a camada AGORA reunia oito
+   indicadores, entre eles funding (r = 0,004) e long/short (0,007) — os dois
+   que REPROVARAM na medição. E a proporção de liquidação, a única variável do
+   projeto que comprovadamente descreve alta e baixa (71,4% nas altas contra
+   32,6% nas baixas, t = 18,46, em 2.999 horas), estava FORA de todas as
+   camadas. A que passou não participava do único lugar onde as coisas se
+   combinam sem passar pelo score.
+
+   POR QUE PODE ENTRAR SEM QUEBRAR O CONGELAMENTO: as camadas alimentam a tela
+   e o campo `camadas` do snapshot. Não tocam em score, peso, cobertura nem na
+   contagem das 777. Verificado no código antes de escrever isto.
+
+   O PERIGO, e é o defeito que a v90 tinha: converter a proporção para a escala
+   −100/+100 exigiria declarar cortes novos, e o painel Live JÁ declara os
+   dele — 65 e 40, vindos da medição. Duas réguas para a mesma variável é
+   exatamente a inconsistência que este projeto passou builds removendo.
+
+   A SAÍDA é uma régua só. O mapa abaixo é linear por trechos, ancorado nos
+   cortes que já existem:
+        prop 100 → +100      (extremo)
+        prop  65 → +15       (o corte de alta do painel = o corte de alta da camada)
+        prop  50 →   0       (equilíbrio)
+        prop  40 → −15       (o corte de baixa do painel = o da camada)
+        prop   0 → −100
+   Assim a camada NUNCA discorda do rótulo do painel: quando o painel diz
+   "vendidos sendo estourados", a camada classifica "alta", pelo mesmo número.
+
+   O QUE O APETITE NÃO PODE FAZER: entrar aqui. A escala dele é MUITO FORTE /
+   FORTE / NORMAL / FRACO — força do fluxo, não direção, e a v127 mudou isso de
+   propósito. Numa camada que classifica alta/baixa/neutro, "FORTE" não é alta.
+
+   CUSTO DECLARADO: o campo `camadas` do snapshot passa de 8 para 9 itens no
+   AGORA. A série DAS CAMADAS ganha uma quebra aqui; a série do score, não. */
+function proporcaoParaEscala(prop){
+  if(prop === null || prop === undefined || !Number.isFinite(Number(prop))) return null;
+  const p = Math.max(0, Math.min(100, Number(prop)));
+  if(p >= 65) return 15 + (p - 65) * (85/35);      // 65→+15 · 100→+100
+  if(p >= 50) return (p - 50);                      // 50→0   ·  65→+15
+  if(p >= 40) return (p - 50) * 1.5;                // 50→0   ·  40→−15
+  return -15 + (p - 40) * (85/40);                  // 40→−15 ·   0→−100
+}
+
+/* o valor da liquidação como item de camada. Devolve null quando não há
+   número — ausência fica FORA DA CONTA, como todo indicador ausente. */
+function valorLiquidacaoNaCamada(){
+  const L = S.market && S.market.liquidacoes;
+  if(!L || L.proporcaoVendidos === null || L.proporcaoVendidos === undefined) return null;
+  return proporcaoParaEscala(L.proporcaoVendidos);
+}
+
 const CAMADAS = [
   { id:"agora", nome:"AGORA", janela: "24h",   /* 24 velas de 1h — a extensão do gráfico, não a cadência da fonte */
     desc:"o que está acontecendo neste instante — fonte muda a cada minuto ou hora",
@@ -6708,7 +6761,12 @@ const CAMADAS = [
       "derivativos.funding",     // a cada 8h
       "derivativos.openInterest",// contínuo
       "derivativos.putCall",     // Deribit, contínuo
-      "derivativos.cvd24h"       // v124 — execução acumulada de 24h
+      "derivativos.cvd24h",      // v124 — execução acumulada de 24h
+      /* v148 — a única que passou no teste de descrição, e a única que estava
+         fora. Não é indicador de motor: vive em S.market.liquidacoes, por isso
+         entra como objeto com leitor próprio. */
+      { id:"live.liquidacoes", label:"Liquidações — proporção de vendidos",
+        motor:"Live", leitor: valorLiquidacaoNaCamada }
     ] },
   { id:"semana", nome:"A SEMANA", janela: "7d",
     desc:"o que se formou nos últimos dias — fonte fecha uma vez por dia",
@@ -6960,7 +7018,16 @@ function lerCamada(camadaId, valores){
     const c = CAMADAS.filter(function(x){ return x.id === camadaId; })[0];
     if(!c) return null;
     nome = c.nome; desc = c.desc; janela = c.janela || "";
-    lista = c.indicadores.map(function(id){
+    lista = c.indicadores.map(function(entrada){
+      /* v148 — a entrada pode ser o texto "motor.indicador" (o caso de sempre)
+         ou um objeto com leitor próprio, para o que não vive em S.motors. */
+      if(entrada && typeof entrada === "object"){
+        let v = null;
+        try{ v = entrada.leitor(); }catch(e){ v = null; }
+        return { id: entrada.id, label: entrada.label,
+                 motor: entrada.motor || "?", valor: v };
+      }
+      const id = entrada;
       const p = id.split(".");
       const motor = S.motors[p[0]], ind = motor && motor.indicators[p[1]];
       return { id:id, label: ind && ind.label ? String(ind.label).split(" · ")[0] : p[1],

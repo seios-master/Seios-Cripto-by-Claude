@@ -727,6 +727,7 @@ var PELE_ATUAL = "padrao";
     <div id="painelCadencia"></div>
     <div id="prazoBar"></div>
     <div id="contextoBar"></div>
+    <div id="coberturaBar"></div>
   </section>
 
   <div class="live-strip" id="liveTickWrap">
@@ -1232,7 +1233,7 @@ const STORAGE_KEY = "seios_btc_v2";
 // fonte única da versão — usada no rodapé, no histórico e nos exports.
 // Muda toda vez que a fórmula de score/pesos muda, pra nunca misturar
 // decisões de regras diferentes como se fossem comparáveis.
-const BUILD_VERSION = "2026-08-23.141-sete-abertas";
+const BUILD_VERSION = "2026-08-23.142-cobertura-contada";
 /* v78: versão do MODELO separada da versão do BUILD. Mudança visual não é
    mudança de semântica: só sobe quando peso, fórmula, corte ou trava mudam.
    Toda observação gravada carrega as duas, pra que seis meses depois dê pra
@@ -5357,6 +5358,30 @@ function relatorioTexto(snap, snaps){
     L.push("");
   }catch(eLC){ L.push("LEITURA POR CADÊNCIA: indisponível"); L.push(""); }
 
+  /* v142 — AS LIQUIDAÇÕES NO DIAGNÓSTICO.
+     O diagnóstico só imprimia FALHAS, e `coletarLiquidacoes` sai calada quando
+     não há chave. Resultado: "nenhuma falha nesta rodada" era compatível com
+     "funcionou" E com "a chave nem estava lá" — e o Jorge perguntou, com razão,
+     se a Coinalyze tinha trazido dado. Um diagnóstico que não distingue as duas
+     coisas não é diagnóstico. */
+  {
+    const Lq = S.market && S.market.liquidacoes;
+    const temChaveCz = !!(S.apiKeys && S.apiKeys.coinalyze &&
+                          String(S.apiKeys.coinalyze).trim());
+    if(Lq && Lq.proporcaoVendidos !== null && Lq.proporcaoVendidos !== undefined){
+      const idadeH = Lq.em ? ((Date.now() - Lq.em)/3600000).toFixed(1) + "h atrás" : "sem hora";
+      L.push("LIQUIDAÇÕES (Coinalyze): " + Math.round(Lq.proporcaoVendidos) + "% vendidos" +
+             (Lq.pctProporcao !== null && Lq.pctProporcao !== undefined
+               ? " · percentil " + Math.round(Lq.pctProporcao) : "") +
+             " · " + (Lq.base || 0) + " horas de base · " + idadeH);
+    } else if(!temChaveCz){
+      L.push("LIQUIDAÇÕES (Coinalyze): DESLIGADA — sem chave salva neste navegador");
+    } else {
+      L.push("LIQUIDAÇÕES (Coinalyze): chave salva, mas a coleta não devolveu valor");
+    }
+    L.push("");
+  }
+
   if(snap.falhas && snap.falhas.length){
     L.push("FALHAS NESTA RODADA (" + snap.falhas.length + ")");
     snap.falhas.forEach(function(f){ L.push("  " + f); });
@@ -5471,6 +5496,149 @@ function precoMaisProximoDe(snaps, alvoMs, toleranciaH){
      · só o rodapé do "O que já aconteceu" contava `prox`.
    Duas verdades discordando na mesma tela, e a mais otimista aparecendo no
    lugar mais visível. Agora existe uma função; os três leem dela. */
+/* =====================================================================
+   v142 — CONTAR AS CONFIGURAÇÕES DE COBERTURA
+   =====================================================================
+   Pendência declarada no congelamento do m12, palavra por palavra: "quedas do
+   GDELT mudam a cobertura, e com ela o amortecimento. Vale, mais adiante, um
+   painel que conte quantas leituras têm cada configuração — é diagnóstico,
+   entra a qualquer momento."
+
+   POR QUE ISTO NÃO É COSMÉTICO. O agregador amortece o score na direção de
+   zero pela massa ausente — de propósito. Consequência: o MESMO mercado
+   produz scores diferentes conforme a fonte responde. Duas leituras da série
+   das 777 podem ter saído de instrumentos com configurações distintas, e a
+   série não registra isso em lugar nenhum.
+
+   MEDIDO em 23/08, com 29 leituras sob o m12: QUATRO configurações, e o GDELT
+   é a causa de todas elas — 19 das 29 têm pelo menos uma das duas séries dele
+   fora. As leituras completas ficaram em cobertura 73,3%; as piores, em 66,7%.
+
+   O QUE ESTE PAINEL NÃO FAZ: comparar os scores médios entre configurações e
+   concluir alguma coisa. Com 29 leituras em 5 dias, altamente sobrepostas, a
+   diferença entre as médias não tem poder estatístico nenhum — é o erro da
+   tabela de calibração (v109) esperando para ser repetido. O painel CONTA e
+   MOSTRA; a leitura fica para quando houver janelas independentes que a
+   sustentem, e o texto diz isso na cara.
+
+   Miolo puro: recebe a lista e devolve os grupos. Sem IndexedDB, sem estado
+   global — é o que permite testá-lo com a série real do export. */
+function configuracoesDeCobertura(snaps){
+  const lista = separarPorModelo(snaps || []).atual;
+  const porChave = {};
+  lista.forEach(function(sn){
+    /* a CONFIGURAÇÃO é o conjunto de fontes fora, não a cobertura arredondada:
+       duas ausências diferentes podem dar a mesma porcentagem e não são a
+       mesma coisa. A cobertura entra como faixa observada dentro do grupo. */
+    const fora = (Array.isArray(sn.falhas) ? sn.falhas.slice() : []).sort();
+    const chave = fora.length ? fora.join(" + ") : "(nenhuma)";
+    if(!porChave[chave]) porChave[chave] = { chave: chave, fora: fora, n: 0,
+                                             scores: [], cobMin: null, cobMax: null };
+    const g = porChave[chave];
+    g.n++;
+    if(typeof sn.score === "number" && isFinite(sn.score)) g.scores.push(sn.score);
+    const c = (typeof sn.cobertura === "number") ? sn.cobertura : null;
+    if(c !== null){
+      if(g.cobMin === null || c < g.cobMin) g.cobMin = c;
+      if(g.cobMax === null || c > g.cobMax) g.cobMax = c;
+    }
+  });
+  const grupos = Object.keys(porChave).map(function(k){
+    const g = porChave[k];
+    g.scoreMedio = g.scores.length
+      ? g.scores.reduce(function(a,b){ return a+b; }, 0) / g.scores.length : null;
+    g.pct = lista.length ? (g.n / lista.length) * 100 : 0;
+    return g;
+  }).sort(function(a,b){ return b.n - a.n; });
+
+  /* quantas leituras perderam CADA fonte — a pergunta que aponta o culpado */
+  const porFonte = {};
+  lista.forEach(function(sn){
+    (Array.isArray(sn.falhas) ? sn.falhas : []).forEach(function(f){
+      porFonte[f] = (porFonte[f] || 0) + 1;
+    });
+  });
+
+  const completas = porChave["(nenhuma)"] ? porChave["(nenhuma)"].n : 0;
+  return {
+    total: lista.length,
+    grupos: grupos,
+    porFonte: porFonte,
+    completas: completas,
+    incompletas: lista.length - completas
+  };
+}
+
+/* a linha da tela. Separada do miolo de propósito: o cálculo é testável sem
+   DOM, e a formatação pode mudar sem tocar na conta. */
+function blocoCobertura(cfg){
+  if(!cfg || !cfg.total){
+    return dobra("cobertura", "Cobertura",
+      '<span style="color:var(--text-faint);">sem leituras gravadas sob este modelo</span>',
+      '<div style="font-size:12px;color:var(--text-dim);line-height:1.6;">' +
+      'Este painel conta em quantas configurações de fontes a série está sendo ' +
+      'acumulada. Ele aparece assim que houver leituras gravadas sob o modelo atual.' +
+      '</div>');
+  }
+  const pctCompletas = (cfg.completas / cfg.total) * 100;
+  const corRes = pctCompletas >= 80 ? "var(--teal)"
+               : (pctCompletas >= 50 ? "var(--gold)" : "var(--brick)");
+  const piorFonte = Object.keys(cfg.porFonte)
+    .sort(function(a,b){ return cfg.porFonte[b] - cfg.porFonte[a]; })[0];
+
+  const resumo =
+    '<span style="color:' + corRes + ';font-size:15px;">' +
+      cfg.grupos.length + (cfg.grupos.length === 1 ? " configuração" : " configurações") +
+    '</span>' +
+    '<span style="color:var(--text-faint);"> · ' + cfg.completas + ' de ' + cfg.total +
+      ' leituras completas' +
+      (piorFonte ? ' · ' + esc(piorFonte) + ' fora em ' + cfg.porFonte[piorFonte] : '') +
+    '</span>';
+
+  const linhas = cfg.grupos.map(function(g){
+    const cor = g.fora.length === 0 ? "var(--teal)" : "var(--text-dim)";
+    const faixa = (g.cobMin === null) ? "—"
+      : (Math.abs(g.cobMax - g.cobMin) < 0.0005
+          ? (g.cobMin*100).toFixed(1) + "%"
+          : (g.cobMin*100).toFixed(1) + "–" + (g.cobMax*100).toFixed(1) + "%");
+    return '<tr>' +
+      '<td style="padding:5px 8px;color:' + cor + ';">' +
+        (g.fora.length ? esc(g.chave) : "nenhuma fonte fora") + '</td>' +
+      '<td style="padding:5px 8px;text-align:right;">' + g.n + '</td>' +
+      '<td style="padding:5px 8px;text-align:right;color:var(--text-faint);">' +
+        g.pct.toFixed(0) + '%</td>' +
+      '<td style="padding:5px 8px;text-align:right;color:var(--text-faint);">' + faixa + '</td>' +
+      '<td style="padding:5px 8px;text-align:right;">' +
+        (g.scoreMedio === null ? "—" : (g.scoreMedio>=0?"+":"") + g.scoreMedio.toFixed(2)) +
+      '</td></tr>';
+  }).join("");
+
+  return dobra("cobertura", "Cobertura",
+    resumo,
+    '<table style="width:100%;border-collapse:collapse;font-family:var(--font-mono);font-size:11px;">' +
+    '<thead><tr style="color:var(--text-faint);text-align:left;">' +
+      '<th style="padding:5px 8px;">fontes fora</th>' +
+      '<th style="padding:5px 8px;text-align:right;">leituras</th>' +
+      '<th style="padding:5px 8px;text-align:right;">%</th>' +
+      '<th style="padding:5px 8px;text-align:right;">cobertura</th>' +
+      '<th style="padding:5px 8px;text-align:right;">score médio</th>' +
+    '</tr></thead><tbody>' + linhas + '</tbody></table>' +
+    '<div style="font-size:11.5px;color:var(--text-faint);margin-top:12px;line-height:1.6;">' +
+      'O agregador <strong>amortece o score na direção de zero</strong> pela massa ausente, ' +
+      'de propósito. Consequência: o mesmo mercado produz scores diferentes conforme as ' +
+      'fontes respondem, e a série das 777 pode estar misturando instrumentos com ' +
+      'configurações distintas. Este painel existe para que isso seja <strong>contado</strong>, ' +
+      'não descoberto no fim.' +
+      '<br><br><strong>A coluna do score médio não é evidência de nada.</strong> Leituras de ' +
+      '8 em 8 horas, em poucos dias, são fortemente sobrepostas: a diferença entre as médias ' +
+      'aqui não tem poder estatístico. Foi exatamente esse o erro da tabela de calibração, ' +
+      'medido na v109 — 285 dias que valiam ~9,5 observações independentes. A coluna está ' +
+      'aqui para ser observada ao longo dos meses, não interpretada hoje.' +
+      '<br><br><span style="color:var(--text-faint);">Só leituras do modelo vigente entram. ' +
+      'Score, pesos e o modelo não são afetados por este painel.</span>' +
+    '</div>');
+}
+
 function contagemDaSerie(snaps){
   /* v94.1 — a v94 acertou a UNIDADE (janela independente) e errou a POPULAÇÃO:
      contava leituras de modelo anterior como progresso. Na primeira rodada, o
@@ -11131,6 +11299,7 @@ function renderAll(){
     ["decisão", renderDecision], ["histórico", renderHistory],
     ["memória", renderMemoryPanel], ["case engine", renderCaseEnginePanel],
     ["aviso de backup", renderBackupWarning], ["arquivo", renderArchiveStatus],
+    ["cobertura", renderCobertura],
     ["calibração", renderCalibrationTimestamp]
   ];
   const quebrados = [];
@@ -11457,6 +11626,17 @@ function diasSemColeta(dias){
     if(!dias.includes(d)) faltando.push(d);
   }
   return faltando;
+}
+
+/* assíncrono porque a série mora no IndexedDB. Falha sozinho: se o banco não
+   abrir, a linha some e o resto da tela continua de pé. */
+async function renderCobertura(){
+  const alvo = document.getElementById("coberturaBar");
+  if(!alvo) return;
+  try{
+    const snaps = await lerSnapshots();
+    alvo.innerHTML = blocoCobertura(configuracoesDeCobertura(snaps));
+  }catch(e){ alvo.innerHTML = ""; }
 }
 
 async function renderSerie(){

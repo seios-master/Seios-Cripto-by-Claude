@@ -1196,7 +1196,7 @@ const STORAGE_KEY = "seios_btc_v2";
 // fonte única da versão — usada no rodapé, no histórico e nos exports.
 // Muda toda vez que a fórmula de score/pesos muda, pra nunca misturar
 // decisões de regras diferentes como se fossem comparáveis.
-const BUILD_VERSION = "2026-08-23.130-descrevem-de-verdade";
+const BUILD_VERSION = "2026-08-23.131-liquidacoes-visiveis";
 /* v78: versão do MODELO separada da versão do BUILD. Mudança visual não é
    mudança de semântica: só sobe quando peso, fórmula, corte ou trava mudam.
    Toda observação gravada carrega as duas, pra que seis meses depois dê pra
@@ -4672,29 +4672,37 @@ function registrarObservacao(motorKey, indKey, score, meta){
 
    TUDO ENTRA COMO SENSOR: grava, não vota. Regra do m12. */
 async function coletarLiquidacoes(){
+  const chave = (S.apiKeys && S.apiKeys.coinalyze) ? String(S.apiKeys.coinalyze).trim() : "";
+  if(!chave) return;                       /* sem chave: nem aparece no log */
+  /* v131 — A COLETA ERA SILENCIOSA DEMAIS.
+     A v130 engolia tudo no catch: chave errada, rota fora, Coinalyze recusando
+     — nada aparecia na tela. Jorge ativou a chave e não teve como saber que
+     não funcionou. Contraria o que combinamos na v129: a falha tem que ser
+     visível para poder ser cobrada. Agora tem linha de log como toda fonte. */
+  const line = logStep("consultando liquidações long/short (Coinalyze)");
   try{
-    const chave = (S.apiKeys && S.apiKeys.coinalyze) ? String(S.apiKeys.coinalyze).trim() : "";
-    if(!chave) return;                       /* sem chave: silencioso, não é falha */
     const fim = Math.floor(Date.now()/1000), ini = fim - 7*24*3600;
     const url = "/api/coinalyze?caminho=liquidation-history&symbols=BTCUSDT_PERP.A" +
                 "&interval=1hour&from=" + ini + "&to=" + fim +
                 "&convert_to_usd=true&api_key=" + encodeURIComponent(chave);
     const r = await smartFetch(url);
-    if(!r.ok) throw new Error("Coinalyze " + r.status);
+    if(!r.ok){
+      let det = "";
+      try{ const j = await r.json(); det = " — " + (j.error || ""); }catch(e2){}
+      throw new Error("Coinalyze " + r.status + det);
+    }
     const d = await r.json();
     const hist = (d && d[0] && d[0].history) || [];
-    if(hist.length < 2) throw new Error("sem histórico");
-    /* a última hora ainda está em formação — regra da v110 */
-    hist.pop();
+    if(hist.length < 2) throw new Error("sem histórico utilizável");
+    hist.pop();                            /* hora em formação fora — regra v110 */
     const u = hist[hist.length-1];
     const L = Number(u.l), Sh = Number(u.s);
     if(!Number.isFinite(L) || !Number.isFinite(Sh)) throw new Error("valores inválidos");
     const tot = L + Sh;
 
-    /* PROPORÇÃO, não o valor bruto: em dia calmo o total é de dezenas de
-       milhões e num dia de pânico, bilhões. A proporção é comparável. */
+    /* PROPORÇÃO, não valor bruto: em dia calmo o total é de dezenas de milhões
+       e num dia de pânico, bilhões. Foi a lição do CVD (v124). */
     const prop = tot > 0 ? (Sh/tot)*100 : null;
-    /* série das últimas 7 dias para o percentil, sem olhar à frente */
     const serie = hist.map(function(o){
       const l=Number(o.l), s=Number(o.s), t=l+s;
       return t>0 ? (s/t)*100 : null;
@@ -4706,7 +4714,17 @@ async function coletarLiquidacoes(){
         ? percentilDeApetite(serie.slice(0,-1), prop) : null,
       em: Date.now(), base: serie.length
     };
-  }catch(e){ /* silencioso: sensor não derruba coleta */ }
+    results.ok.push("liquidações");
+    logDone(line, true, (prop === null ? "sem liquidação na hora"
+      : Math.round(prop) + "% vendidos · " +
+        (Math.abs(tot) >= 1e6 ? (tot/1e6).toFixed(1)+"M" : Math.round(tot/1e3)+"k") + " total"));
+  }catch(e){
+    /* não derruba a rodada, mas APARECE — e o painel some em vez de mostrar
+       número velho como se fosse novo */
+    S.market.liquidacoes = null;
+    results.fail.push("liquidações");
+    logDone(line, false, (e && e.message) || "falhou");
+  }
 }
 
 async function coletarApetite(){
@@ -6725,7 +6743,14 @@ function blocoLiquidacoes(){
 function blocoApetite(){
   const A = S.market && S.market.apetite;
   const R = (function(){ try{ return calcularRegime(); }catch(e){ return null; } })();
-  if((!A || A.valor === null || A.valor === undefined) && (!R || R.valor === null)) return "";
+  /* v131 — as liquidações são independentes: se o apetite e o regime faltarem
+     mas as liquidações existirem, o painel ainda tem o que mostrar. Antes,
+     este return matava o bloco inteiro e o painel sumia em silêncio. */
+  const temLiq = !!(S.market && S.market.liquidacoes &&
+                    S.market.liquidacoes.proporcaoVendidos !== null &&
+                    S.market.liquidacoes.proporcaoVendidos !== undefined);
+  if((!A || A.valor === null || A.valor === undefined)
+     && (!R || R.valor === null) && !temLiq) return "";
   /* v127 — o FLUXO deixa de usar a escala comprador/vendedor: ele mede força
      do fluxo de derivativos, não a direção do mercado. */
   const e = estadoDeFluxo(A ? A.valor : null);

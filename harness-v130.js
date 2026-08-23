@@ -152,6 +152,42 @@ t("a chave vai pela rota própria, não direto do navegador", ()=>{
   if(!/\/api\/coinalyze/.test(f)) throw new Error("chamada direta — o CORS bloqueia");
 });
 
+console.log("\nBLOCO D2 — v131: a coleta é VISÍVEL");
+
+t("a coleta tem linha de log, como toda fonte", ()=>{
+  /* v130 engolia tudo no catch: chave errada, rota fora, Coinalyze recusando —
+     nada aparecia. Jorge ativou a chave e não teve como saber que não
+     funcionou. Contraria o que combinamos na v129. */
+  const f = semComentarios(declDe("coletarLiquidacoes"));
+  if(!/logStep\(/.test(f)) throw new Error("a coleta não abre linha de log");
+  if(!/logDone\(/.test(f)) throw new Error("a coleta não fecha linha de log");
+});
+
+t("sucesso entra em results.ok e falha em results.fail", ()=>{
+  const f = semComentarios(declDe("coletarLiquidacoes"));
+  if(!/results\.ok\.push/.test(f)) throw new Error("sucesso não é contado");
+  if(!/results\.fail\.push/.test(f)) throw new Error("falha não é contada");
+});
+
+t("o erro da rota chega ao log, não só o status", ()=>{
+  /* "Coinalyze 401" sem o motivo obrigaria a abrir a rota no navegador */
+  const f = semComentarios(declDe("coletarLiquidacoes"));
+  if(!/j\.error/.test(f)) throw new Error("o detalhe do erro é descartado");
+});
+
+t("ao falhar, o painel SOME em vez de mostrar valor velho", ()=>{
+  /* liquidação de uma hora atrás não descreve a hora atual */
+  const f = semComentarios(declDe("coletarLiquidacoes"));
+  if(!/S\.market\.liquidacoes = null/.test(f))
+    throw new Error("o valor antigo sobrevive à falha");
+});
+
+t("o painel de liquidações NÃO depende do apetite existir", ()=>{
+  const f = semComentarios(declDe("blocoApetite"));
+  if(!/temLiq/.test(f))
+    throw new Error("o painel some se o apetite faltar — são coisas independentes");
+});
+
 console.log("\nBLOCO E — nada que decide mudou");
 
 t("MODEL_VERSION continua m12", ()=>{
